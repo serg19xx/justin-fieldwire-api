@@ -10,10 +10,9 @@
 - `FTP_PASSWORD` = `ваш_ftp_пароль`
 
 ### SSH (для автоматической настройки):
-- `SSH_HOST` = `medicalcontractor.ca`
 - `SSH_USERNAME` = `yjyhtqh8`
-- `SSH_PASSWORD` = `ваш_ssh_пароль`
-- `SSH_PORT` = `22`
+- `SSH_PRIVATE_KEY` = `ваш_приватный_ssh_ключ`
+- `SSH_PORT` = `22` (опционально)
 
 ### Environment:
 - `ENV_FILE` = `весь_содержимое_файла_.env`
