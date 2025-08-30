@@ -76,12 +76,21 @@ jobs:
           **/*.log
           **/env.*
           **/.github/**
-          **/GITHUB_SETUP.md
+          **/DEPLOY_SETUP.md
           **/nginx.conf
           **/phpcs.xml
           **/phpstan.neon
           **/phpunit.xml
-          **/.phpunit.cache
+          **/.phpunit.cache/**
+          **/vendor/**
+          **/logs/**
+          **/node_modules/**
+          **/coverage/**
+          **/.coverage/**
+          **/phpunit.xml.dist
+          **/.env.example
+          **/.env.local
+          **/.env.testing
           
     - name: Execute deployment script via SSH
       uses: appleboy/ssh-action@v1.0.3
