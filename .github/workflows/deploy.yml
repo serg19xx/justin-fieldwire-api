@@ -98,7 +98,7 @@ jobs:
     - name: Trigger webhook deployment
       run: |
         echo "🚀 Triggering webhook deployment..."
-        curl -X POST https://fwapi.medicalcontractor.ca/webhook.php \
+        curl -X POST https://fwapi.medicalcontractor.ca/public/webhook.php \
           -H "Content-Type: application/json" \
           -d '{"ref":"refs/heads/main","repository":{"name":"justin-fieldwire-api"}}' \
           --max-time 60 || echo "⚠️  Webhook call failed"

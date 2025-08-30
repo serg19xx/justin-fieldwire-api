@@ -28,8 +28,8 @@ try {
     // Переходим в корневую папку проекта
     chdir(__DIR__ . '/..');
     
-    // Устанавливаем зависимости
-    exec('composer install --no-dev --optimize-autoloader 2>&1', $output, $returnCode);
+            // Устанавливаем зависимости
+        exec('/usr/local/bin/composer install --no-dev --optimize-autoloader 2>&1', $output, $returnCode);
     
     if ($returnCode !== 0) {
         throw new Exception('Composer install failed: ' . implode("\n", $output));
@@ -44,8 +44,8 @@ try {
     chmod('logs', 0755);
     chmod('public/uploads', 0755);
     
-    // Настраиваем базу данных
-    exec('composer db:setup 2>&1', $output, $returnCode);
+            // Настраиваем базу данных
+        exec('/usr/local/bin/composer db:setup 2>&1', $output, $returnCode);
     
     if ($returnCode !== 0) {
         throw new Exception('Database setup failed: ' . implode("\n", $output));
