@@ -1,0 +1,144 @@
+name: Deploy to Production (FTP Only)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, curl, zip
+        coverage: none
+        
+    - name: Install Composer
+      uses: ramsey/composer-install@v2
+      with:
+        composer-options: '--no-dev --optimize-autoloader'
+        
+    - name: Create production archive
+      run: |
+        tar --exclude='.git' --exclude='node_modules' --exclude='tests' --exclude='*.log' --exclude='.env' --exclude='fieldwire-api-production.tar.gz' -czf fieldwire-api-production.tar.gz .
+        
+    - name: Create .env file from secrets
+      run: |
+        echo "${{ secrets.ENV_FILE }}" > .env
+        
+    - name: Create deployment script
+      run: |
+        cat > deploy-on-server.sh << 'EOF'
+        #!/bin/bash
+        
+        echo "🚀 FieldWire API - Server Deployment"
+        echo "===================================="
+        
+        # Extract project files
+        echo "📦 Extracting project files..."
+        tar -xzf fieldwire-api-production.tar.gz
+        
+        # Set up configuration
+        echo "🔧 Setting up configuration..."
+        cp env.production .env
+        
+        # Install dependencies
+        echo "📦 Installing dependencies..."
+        composer install --no-dev --optimize-autoloader
+        
+        # Create required directories
+        echo "📁 Creating required directories..."
+        mkdir -p logs public/uploads
+        
+        # Set permissions
+        echo "🔒 Setting permissions..."
+        chmod 644 .env
+        chmod 755 logs public/uploads scripts/*.sh
+        
+        # Set up database
+        echo "🗄️ Setting up database..."
+        composer db:setup
+        
+        # Clean up
+        echo "🧹 Cleaning up..."
+        rm -f fieldwire-api-production.tar.gz
+        
+        echo "✅ Deployment completed!"
+        echo ""
+        echo "🌐 Test your API:"
+        echo "   • Health: https://fwapi.medicalcontractor.ca/api/v1/health"
+        echo "   • Tables: https://fwapi.medicalcontractor.ca/api/v1/database/tables"
+        echo "   • Docs: https://fwapi.medicalcontractor.ca/api/docs"
+        EOF
+        
+        chmod +x deploy-on-server.sh
+        
+    - name: Deploy to server via FTP
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+      with:
+        server: ${{ secrets.FTP_SERVER }}
+        username: ${{ secrets.FTP_USERNAME }}
+        password: ${{ secrets.FTP_PASSWORD }}
+        local-dir: ./
+        server-dir: /home/yjyhtqh8/fwapi.medicalcontractor.ca/
+        exclude: |
+          **/.git*
+          **/.git*/**
+          **/node_modules/**
+          **/tests/**
+          **/*.log
+          **/fieldwire-api-production.tar.gz
+          **/env.development
+          **/env.example
+          **/DEPLOYMENT.md
+          **/ENVIRONMENT.md
+          **/QUICK_DEPLOY.md
+          **/PRODUCTION_DEPLOY.md
+          **/DEPLOY_INSTRUCTIONS.txt
+          **/DEPLOY_NEXT_STEPS.txt
+          **/nginx.conf
+          **/phpcs.xml
+          **/phpstan.neon
+          **/phpunit.xml
+          **/ftp-upload.txt
+          **/.github/**
+          
+    - name: Execute deployment script via SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        script: |
+          cd /home/yjyhtqh8/fwapi.medicalcontractor.ca
+          chmod +x deploy-on-server.sh
+          ./deploy-on-server.sh
+          
+    - name: Test deployment
+      run: |
+        echo "🧪 Testing deployment..."
+        sleep 10
+        curl -f https://fwapi.medicalcontractor.ca/api/v1/health || echo "⚠️  API not ready yet"
+        
+    - name: Notify deployment status
+      if: always()
+      run: |
+        if [ "${{ job.status }}" == "success" ]; then
+          echo "✅ Files uploaded successfully!"
+          echo "🌐 Next step: SSH to server and run ./deploy-on-server.sh"
+          echo "📋 Manual steps required:"
+          echo "   • SSH: ssh yjyhtqh8_fieldwire@medicalcontractor.ca"
+          echo "   • Navigate: cd /home/yjyhtqh8/fwapi.medicalcontractor.ca"
+          echo "   • Run: ./deploy-on-server.sh"
+          echo "   • Test: https://fwapi.medicalcontractor.ca/api/v1/health"
+        else
+          echo "❌ Deployment failed!"
+        fi
