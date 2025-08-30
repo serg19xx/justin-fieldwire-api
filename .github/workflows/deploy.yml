@@ -101,11 +101,20 @@ jobs:
         host: 173.209.33.163
         username: ${{ secrets.SSH_USERNAME }}
         password: ${{ secrets.SSH_PASSWORD }}
-        port: 2222
-        timeout: 120s
+        port: 22
+        timeout: 60s
+        debug: true
         script: |
+          echo "Testing SSH connection..."
+          pwd
+          ls -la
+          echo "Navigating to project directory..."
           cd /home/yjyhtqh8/fwapi.medicalcontractor.ca
+          echo "Current directory: $(pwd)"
+          ls -la
+          echo "Making script executable..."
           chmod +x deploy-on-server.sh
+          echo "Running deployment script..."
           ./deploy-on-server.sh
           
     - name: Test deployment
