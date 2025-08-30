@@ -70,7 +70,10 @@ jobs:
         password: ${{ secrets.FTP_PASSWORD }}
         local-dir: ./
         server-dir: /
+        timeout: 600000
+        dangerous-clean-slate: false
         exclude: |
+          **/.git/**
           **/.git*
           **/tests/**
           **/*.log
