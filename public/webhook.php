@@ -23,45 +23,23 @@ if (!isset($data['ref']) || $data['ref'] !== 'refs/heads/main') {
 $log = date('Y-m-d H:i:s') . " - Webhook received for main branch\n";
 file_put_contents(__DIR__ . '/../logs/webhook.log', $log, FILE_APPEND);
 
-    // Выполняем деплой
+        // Выполняем деплой
     try {
         // Переходим в корневую папку проекта
         chdir(__DIR__ . '/..');
         
-        // Проверяем есть ли composer
-        exec('which composer 2>&1', $output, $returnCode);
-        if ($returnCode !== 0) {
-            // Устанавливаем composer если его нет
-            exec('curl -sS https://getcomposer.org/installer | php 2>&1', $output, $returnCode);
-            if ($returnCode === 0) {
-                exec('php composer.phar install --no-dev --optimize-autoloader 2>&1', $output, $returnCode);
-            } else {
-                throw new Exception('Failed to install composer');
-            }
-        } else {
-            // Устанавливаем зависимости
-            exec('composer install --no-dev --optimize-autoloader 2>&1', $output, $returnCode);
-        }
-    
-    if ($returnCode !== 0) {
-        throw new Exception('Composer install failed: ' . implode("\n", $output));
-    }
-    
-    // Создаем папки если их нет
-    if (!is_dir('logs')) mkdir('logs', 0755, true);
-    if (!is_dir('public/uploads')) mkdir('public/uploads', 0755, true);
-    
-    // Настраиваем права доступа
-    chmod('.env', 0644);
-    chmod('logs', 0755);
-    chmod('public/uploads', 0755);
-    
-            // Настраиваем базу данных
-        exec('composer db:setup 2>&1', $output, $returnCode);
-    
-    if ($returnCode !== 0) {
-        throw new Exception('Database setup failed: ' . implode("\n", $output));
-    }
+        // Создаем папки если их нет
+        if (!is_dir('logs')) mkdir('logs', 0755, true);
+        if (!is_dir('public/uploads')) mkdir('public/uploads', 0755, true);
+        
+        // Настраиваем права доступа
+        if (file_exists('.env')) chmod('.env', 0644);
+        chmod('logs', 0755);
+        chmod('public/uploads', 0755);
+        
+        // Логируем успех
+        $log = date('Y-m-d H:i:s') . " - Basic setup completed\n";
+        file_put_contents(__DIR__ . '/../logs/webhook.log', $log, FILE_APPEND);
     
     // Логируем успех
     $log = date('Y-m-d H:i:s') . " - Deployment completed successfully\n";
