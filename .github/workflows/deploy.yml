@@ -19,48 +19,8 @@ jobs:
         php-version: '8.2'
         extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, curl, zip
         
-    - name: Install Composer
-      uses: ramsey/composer-install@v2
-      with:
-        composer-options: '--no-dev --optimize-autoloader'
-        
     - name: Create .env file
       run: echo "${{ secrets.ENV_FILE }}" > .env
-        
-    - name: Create deployment script
-      run: |
-        cat > deploy-on-server.sh << 'EOF'
-        #!/bin/bash
-        
-        echo "🚀 FieldWire API - Automatic Deployment"
-        echo "======================================"
-        
-        # Install dependencies
-        echo "📦 Installing dependencies..."
-        composer install --no-dev --optimize-autoloader
-        
-        # Create required directories
-        echo "📁 Creating directories..."
-        mkdir -p logs public/uploads
-        
-        # Set permissions
-        echo "🔒 Setting permissions..."
-        chmod 644 .env
-        chmod 755 logs public/uploads scripts/*.sh
-        
-        # Set up database
-        echo "🗄️ Setting up database..."
-        composer db:setup
-        
-        echo "✅ Deployment completed!"
-        echo ""
-        echo "🌐 API is ready:"
-        echo "   • Health: https://fwapi.medicalcontractor.ca/api/v1/health"
-        echo "   • Tables: https://fwapi.medicalcontractor.ca/api/v1/database/tables"
-        echo "   • Docs: https://fwapi.medicalcontractor.ca/api/docs"
-        EOF
-        
-        chmod +x deploy-on-server.sh
         
     - name: Deploy main files via FTP
       uses: SamKirkland/FTP-Deploy-Action@v4.3.4
@@ -85,6 +45,7 @@ jobs:
           **/phpstan.neon
           **/phpunit.xml
           **/.phpunit.cache/**
+          **/vendor/**
           **/logs/**
           **/node_modules/**
           **/coverage/**
@@ -94,26 +55,16 @@ jobs:
           **/.env.local
           **/.env.testing
           
-    - name: Trigger webhook deployment
-      run: |
-        echo "🚀 Triggering webhook deployment..."
-        curl -X POST https://fwapi.medicalcontractor.ca/public/webhook.php \
-          -H "Content-Type: application/json" \
-          -d '{"ref":"refs/heads/main","repository":{"name":"justin-fieldwire-api"}}' \
-          --max-time 60 || echo "⚠️  Webhook call failed"
-        
-    - name: Wait for deployment
-      run: |
-        echo "⏳ Waiting for deployment to complete..."
-        sleep 30
-          
     - name: Test deployment
       run: |
         echo "🧪 Testing deployment..."
         sleep 10
-        curl -f https://fwapi.medicalcontractor.ca/api/v1/health || echo "⚠️  API not ready yet"
+        curl -f https://fwapi.medicalcontractor.ca/test.html || echo "⚠️  HTML test failed"
+        curl -f https://fwapi.medicalcontractor.ca/hello.php || echo "⚠️  PHP test failed"
         
     - name: Deployment complete
       run: |
         echo "✅ Deployment completed successfully!"
-        echo "🌐 Your API is live at: https://fwapi.medicalcontractor.ca" 
+        echo "🌐 Test files available at:"
+        echo "   • HTML: https://fwapi.medicalcontractor.ca/test.html"
+        echo "   • PHP: https://fwapi.medicalcontractor.ca/hello.php" 
