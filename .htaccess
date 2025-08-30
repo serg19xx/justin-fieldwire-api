@@ -1,11 +1,23 @@
 RewriteEngine On
 
-# Force PHP 8.2
+# Force PHP 8.2 for LiteSpeed
 <IfModule mod_php.c>
     php_value engine Off
 </IfModule>
 <IfModule mod_php8.c>
     php_flag engine On
+</IfModule>
+
+# LiteSpeed specific PHP 8.2 configuration
+<IfModule Litespeed>
+    # Force PHP 8.2
+    php_value engine On
+    php_flag engine On
+</IfModule>
+
+# Alternative PHP 8.2 forcing methods
+<IfModule mod_suphp.c>
+    suPHP_ConfigPath /home/yjyhtqh8_fieldwire/public_html
 </IfModule>
 
 # PHP 8.2 specific optimizations
