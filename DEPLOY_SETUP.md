@@ -9,9 +9,11 @@
 - `FTP_USERNAME` = `yjyhtqh8_fieldwire`
 - `FTP_PASSWORD` = `ваш_ftp_пароль`
 
-### SSH (для ручного подключения):
-- SSH доступ: `ssh yjyhtqh8@medicalcontractor.ca`
-- Пароль: ваш SSH пароль
+### SSH (для автоматической настройки):
+- `SSH_HOST` = `medicalcontractor.ca`
+- `SSH_USERNAME` = `yjyhtqh8`
+- `SSH_PASSWORD` = `ваш_ssh_пароль`
+- `SSH_PORT` = `22`
 
 ### Environment:
 - `ENV_FILE` = `весь_содержимое_файла_.env`
@@ -20,8 +22,7 @@
 
 1. **Настройте secrets** (см. выше)
 2. **Запушьте в main** или нажмите "Run workflow"
-3. **Дождитесь загрузки файлов** (автоматически)
-4. **Подключитесь по SSH** и запустите скрипт вручную
+3. **Дождитесь завершения** - всё происходит автоматически!
 
 ## ✅ Результат:
 

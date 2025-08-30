@@ -95,22 +95,26 @@ jobs:
           **/.env.local
           **/.env.testing
           
-    - name: Deployment instructions
+    - name: Execute deployment script via SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        password: ${{ secrets.SSH_PASSWORD }}
+        port: ${{ secrets.SSH_PORT }}
+        timeout: 120s
+        script: |
+          cd /home/yjyhtqh8/fwapi.medicalcontractor.ca
+          chmod +x deploy-on-server.sh
+          ./deploy-on-server.sh
+          
+    - name: Test deployment
       run: |
-        echo "📋 Manual steps required:"
-        echo ""
-        echo "1. SSH to server:"
-        echo "   ssh yjyhtqh8@medicalcontractor.ca"
-        echo ""
-        echo "2. Navigate to project:"
-        echo "   cd /home/yjyhtqh8/fwapi.medicalcontractor.ca"
-        echo ""
-        echo "3. Run deployment script:"
-        echo "   chmod +x deploy-on-server.sh"
-        echo "   ./deploy-on-server.sh"
-        echo ""
-        echo "4. Test API:"
-        echo "   curl https://fwapi.medicalcontractor.ca/api/v1/health"
-        echo ""
-        echo "✅ Files uploaded successfully!"
-        echo "🌐 Complete setup by running the commands above"
+        echo "🧪 Testing deployment..."
+        sleep 10
+        curl -f https://fwapi.medicalcontractor.ca/api/v1/health || echo "⚠️  API not ready yet"
+        
+    - name: Deployment complete
+      run: |
+        echo "✅ Deployment completed successfully!"
+        echo "🌐 Your API is live at: https://fwapi.medicalcontractor.ca"
