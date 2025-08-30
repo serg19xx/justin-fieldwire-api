@@ -28,12 +28,9 @@ cat ~/.ssh/github_actions
 - `FTP_USERNAME` = `yjyhtqh8_fieldwire`
 - `FTP_PASSWORD` = `ваш_ftp_пароль`
 
-#### SSH Credentials:
-- `SSH_HOST` = `medicalcontractor.ca`
-- `SSH_USERNAME` = `yjyhtqh8`
-- `SSH_PRIVATE_KEY` = `ваш_приватный_ssh_ключ`
-- `SSH_PASSPHRASE` = `пароль_от_ssh_ключа` (если есть)
-- `SSH_PORT` = `22`
+#### SSH Credentials (для ручного подключения):
+- SSH доступ: `ssh yjyhtqh8@medicalcontractor.ca`
+- Пароль: ваш SSH пароль
 
 #### Environment File:
 - `ENV_FILE` = `весь_содержимое_файла_.env`
@@ -42,7 +39,8 @@ cat ~/.ssh/github_actions
 
 1. **Настройте secrets** (см. выше)
 2. **Запушьте в main ветку** или используйте "Run workflow" в GitHub
-3. **Дождитесь завершения** - всё происходит автоматически!
+3. **Дождитесь загрузки файлов** (автоматически)
+4. **Подключитесь по SSH** и запустите скрипт вручную
 
 ## ✅ Готово!
 

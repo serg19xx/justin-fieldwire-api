@@ -1,4 +1,4 @@
-name: Deploy to Production (FTP Only)
+name: Deploy to Production (FTP + Manual SSH)
 
 on:
   push:
@@ -110,19 +110,22 @@ jobs:
           **/ftp-upload.txt
           **/.github/**
           
-    - name: Execute deployment script via SSH
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.SSH_HOST }}
-        username: ${{ secrets.SSH_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        passphrase: ${{ secrets.SSH_PASSPHRASE }}
-        port: ${{ secrets.SSH_PORT }}
-        timeout: 60s
-        script: |
-          cd /home/yjyhtqh8/fwapi.medicalcontractor.ca
-          chmod +x deploy-on-server.sh
-          ./deploy-on-server.sh
+    - name: Create deployment instructions
+      run: |
+        echo "📋 Manual deployment steps required:"
+        echo ""
+        echo "1. SSH to server:"
+        echo "   ssh yjyhtqh8@medicalcontractor.ca"
+        echo ""
+        echo "2. Navigate to project:"
+        echo "   cd /home/yjyhtqh8/fwapi.medicalcontractor.ca"
+        echo ""
+        echo "3. Run deployment script:"
+        echo "   chmod +x deploy-on-server.sh"
+        echo "   ./deploy-on-server.sh"
+        echo ""
+        echo "4. Test API:"
+        echo "   curl https://fwapi.medicalcontractor.ca/api/v1/health"
           
     - name: Test deployment
       run: |
