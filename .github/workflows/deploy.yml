@@ -101,6 +101,7 @@ jobs:
         host: 173.209.33.163
         username: ${{ secrets.SSH_USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
+        passphrase: ${{ secrets.SSH_PASSPHRASE }}
         port: 22
         timeout: 120s
         debug: true
