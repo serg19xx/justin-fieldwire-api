@@ -1,0 +1,108 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, curl, zip
+        
+    - name: Install Composer
+      uses: ramsey/composer-install@v2
+      with:
+        composer-options: '--no-dev --optimize-autoloader'
+        
+    - name: Create .env file
+      run: echo "${{ secrets.ENV_FILE }}" > .env
+        
+    - name: Create deployment script
+      run: |
+        cat > deploy-on-server.sh << 'EOF'
+        #!/bin/bash
+        
+        echo "🚀 FieldWire API - Automatic Deployment"
+        echo "======================================"
+        
+        # Install dependencies
+        echo "📦 Installing dependencies..."
+        composer install --no-dev --optimize-autoloader
+        
+        # Create required directories
+        echo "📁 Creating directories..."
+        mkdir -p logs public/uploads
+        
+        # Set permissions
+        echo "🔒 Setting permissions..."
+        chmod 644 .env
+        chmod 755 logs public/uploads scripts/*.sh
+        
+        # Set up database
+        echo "🗄️ Setting up database..."
+        composer db:setup
+        
+        echo "✅ Deployment completed!"
+        echo ""
+        echo "🌐 API is ready:"
+        echo "   • Health: https://fwapi.medicalcontractor.ca/api/v1/health"
+        echo "   • Tables: https://fwapi.medicalcontractor.ca/api/v1/database/tables"
+        echo "   • Docs: https://fwapi.medicalcontractor.ca/api/docs"
+        EOF
+        
+        chmod +x deploy-on-server.sh
+        
+    - name: Deploy files via FTP
+      uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+      with:
+        server: ${{ secrets.FTP_SERVER }}
+        username: ${{ secrets.FTP_USERNAME }}
+        password: ${{ secrets.FTP_PASSWORD }}
+        local-dir: ./
+        server-dir: /
+        exclude: |
+          **/.git*
+          **/tests/**
+          **/*.log
+          **/env.*
+          **/.github/**
+          **/GITHUB_SETUP.md
+          **/nginx.conf
+          **/phpcs.xml
+          **/phpstan.neon
+          **/phpunit.xml
+          **/.phpunit.cache
+          
+    - name: Execute deployment script via SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT }}
+        timeout: 120s
+        script: |
+          cd /home/yjyhtqh8/fwapi.medicalcontractor.ca
+          chmod +x deploy-on-server.sh
+          ./deploy-on-server.sh
+          
+    - name: Test deployment
+      run: |
+        echo "🧪 Testing deployment..."
+        sleep 10
+        curl -f https://fwapi.medicalcontractor.ca/api/v1/health || echo "⚠️  API not ready yet"
+        
+    - name: Deployment complete
+      run: |
+        echo "✅ Deployment completed successfully!"
+        echo "🌐 Your API is live at: https://fwapi.medicalcontractor.ca"
