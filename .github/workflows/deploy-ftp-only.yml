@@ -27,7 +27,7 @@ jobs:
         
     - name: Create production archive
       run: |
-        tar --exclude='.git' --exclude='node_modules' --exclude='tests' --exclude='*.log' --exclude='.env' --exclude='fieldwire-api-production.tar.gz' -czf fieldwire-api-production.tar.gz .
+        tar --exclude='.git' --exclude='node_modules' --exclude='tests' --exclude='*.log' --exclude='.env' --exclude='fieldwire-api-production.tar.gz' --exclude='vendor' --exclude='.phpunit.cache' --exclude='logs' --exclude='env.*' --exclude='GITHUB_SETUP.md' --exclude='nginx.conf' --exclude='phpcs.xml' --exclude='phpstan.neon' --exclude='phpunit.xml' --exclude='.github' -czf fieldwire-api-production.tar.gz .
         
     - name: Create .env file from secrets
       run: |
