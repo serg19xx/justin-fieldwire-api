@@ -29,7 +29,7 @@ try {
     chdir(__DIR__ . '/..');
     
             // Устанавливаем зависимости
-        exec('/usr/local/bin/composer install --no-dev --optimize-autoloader 2>&1', $output, $returnCode);
+        exec('php composer.phar install --no-dev --optimize-autoloader 2>&1', $output, $returnCode);
     
     if ($returnCode !== 0) {
         throw new Exception('Composer install failed: ' . implode("\n", $output));
@@ -45,7 +45,7 @@ try {
     chmod('public/uploads', 0755);
     
             // Настраиваем базу данных
-        exec('/usr/local/bin/composer db:setup 2>&1', $output, $returnCode);
+        exec('php composer.phar db:setup 2>&1', $output, $returnCode);
     
     if ($returnCode !== 0) {
         throw new Exception('Database setup failed: ' . implode("\n", $output));
