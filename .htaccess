@@ -1,67 +1,10 @@
 RewriteEngine On
 
-# Force PHP 8.2 for LiteSpeed
-<IfModule mod_php.c>
-    php_value engine Off
-</IfModule>
-<IfModule mod_php8.c>
-    php_flag engine On
-</IfModule>
+# Basic PHP settings
+php_value max_execution_time 30
+php_value memory_limit 256M
 
-# LiteSpeed specific PHP 8.2 configuration
-<IfModule Litespeed>
-    # Force PHP 8.2
-    php_value engine On
-    php_flag engine On
-</IfModule>
-
-# Alternative PHP 8.2 forcing methods
-<IfModule mod_suphp.c>
-    suPHP_ConfigPath /home/yjyhtqh8_fieldwire/public_html
-</IfModule>
-
-# PHP 8.2 specific optimizations
-<IfModule mod_php8.c>
-    # Enable OPcache for better performance
-    php_flag opcache.enable 1
-    php_flag opcache.enable_cli 1
-    php_flag opcache.memory_consumption 128
-    php_flag opcache.interned_strings_buffer 8
-    php_flag opcache.max_accelerated_files 4000
-    php_flag opcache.revalidate_freq 2
-    php_flag opcache.fast_shutdown 1
-    
-    # Set max execution time for API requests
-    php_value max_execution_time 30
-    php_value memory_limit 256M
-    
-    # Enable error reporting for development
-    php_flag display_errors Off
-    php_flag log_errors On
-    php_value error_log logs/php_errors.log
-</IfModule>
-
-# Security headers
-<IfModule mod_headers.c>
-    Header always set X-Content-Type-Options nosniff
-    Header always set X-Frame-Options DENY
-    Header always set X-XSS-Protection "1; mode=block"
-    Header always set Referrer-Policy "strict-origin-when-cross-origin"
-</IfModule>
-
-# Redirect all requests to public/minimal-api.php (no Composer dependencies)
+# Redirect all requests to public/hello.php for testing
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^(.*)$ public/minimal-api.php [QSA,L]
-
-# Prevent access to sensitive files
-<FilesMatch "\.(env|log|sql|md|txt)$">
-    Order allow,deny
-    Deny from all
-</FilesMatch>
-
-# Allow access to public files
-<FilesMatch "^(index\.php|index-php74\.php|minimal-api\.php|swagger-ui\.html|simple-test\.php|check-files\.php)$">
-    Order allow,deny
-    Allow from all
-</FilesMatch>
+RewriteRule ^(.*)$ public/hello.php [QSA,L]
