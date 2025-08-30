@@ -1,31 +1,68 @@
 RewriteEngine On
 
-# Handle CORS preflight requests
-RewriteCond %{REQUEST_METHOD} OPTIONS
-RewriteRule ^(.*)$ $1 [R=200,L]
+# Force PHP 8.2 for LiteSpeed
+<IfModule mod_php.c>
+    php_value engine Off
+</IfModule>
 
-# Redirect all requests to index.php except for existing files
-RewriteCond %{REQUEST_FILENAME} !-f
-RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^(.*)$ index.php [QSA,L]
+# LiteSpeed specific PHP 8.2 configuration
+<IfModule Litespeed>
+    # Force PHP 8.2
+    php_value engine On
+    php_flag engine On
+</IfModule>
+
+# Alternative PHP 8.2 forcing methods
+<IfModule mod_suphp.c>
+    suPHP_ConfigPath /home/yjyhtqh8_fieldwire/public_html
+</IfModule>
+
+# PHP 8.2 specific optimizations
+<IfModule mod_php8.c>
+    # Enable OPcache for better performance
+    php_flag opcache.enable 1
+    php_flag opcache.enable_cli 1
+    php_flag opcache.memory_consumption 128
+    php_flag opcache.interned_strings_buffer 8
+    php_flag opcache.max_accelerated_files 4000
+    php_flag opcache.revalidate_freq 2
+    php_flag opcache.fast_shutdown 1
+    
+    # Set max execution time for API requests
+    php_value max_execution_time 30
+    php_value memory_limit 256M
+    
+    # Enable error reporting for development
+    php_flag display_errors Off
+    php_flag log_errors On
+    php_value error_log ../logs/php_errors.log
+</IfModule>
 
 # Security headers
-Header always set X-Content-Type-Options nosniff
-Header always set X-Frame-Options DENY
-Header always set X-XSS-Protection "1; mode=block"
-Header always set Referrer-Policy "strict-origin-when-cross-origin"
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options nosniff
+    Header always set X-Frame-Options DENY
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# Prevent access to sensitive files
+<FilesMatch "\.(env|log|sql|md|txt|ini)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Allow access to public files
+<FilesMatch "^(index\.php|swagger-ui\.html)$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>
 
 # Cache static assets
 <FilesMatch "\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$">
     ExpiresActive On
     ExpiresDefault "access plus 1 month"
     Header set Cache-Control "public, immutable"
-</FilesMatch>
-
-# Disable access to sensitive files
-<FilesMatch "\.(env|log|sql|md|gitignore|gitattributes)$">
-    Order allow,deny
-    Deny from all
 </FilesMatch>
 
 # PHP settings
