@@ -1,0 +1,35 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Composer
+/vendor/
+composer.lock
+
+# Logs
+/logs/
+*.log
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Cache
+/cache/
+/tmp/
+
+# Build files
+/build/
+/dist/
+
+# Test coverage
+/coverage/
+.phpunit.result.cache

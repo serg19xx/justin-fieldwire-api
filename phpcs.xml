@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<ruleset name="FieldWire API">
+    <description>PHP CodeSniffer rules for FieldWire API</description>
+
+    <!-- Include PSR-12 standard -->
+    <rule ref="PSR12"/>
+
+    <!-- Files to check -->
+    <file>src</file>
+    <file>tests</file>
+
+    <!-- Files to ignore -->
+    <exclude-pattern>vendor/*</exclude-pattern>
+    <exclude-pattern>logs/*</exclude-pattern>
+
+    <!-- Show progress -->
+    <arg value="p"/>
+
+    <!-- Show sniff codes in all reports -->
+    <arg value="s"/>
+
+    <!-- Show colors -->
+    <arg value="n"/>
+
+    <!-- Ignore warnings for now -->
+    <arg value="w"/>
+</ruleset>
