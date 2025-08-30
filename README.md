@@ -312,3 +312,4 @@ git push origin main
 # Загрузка файлов на сервер и настройка
 # См. PRODUCTION_DEPLOY.md для подробных инструкций
 ```
+# Force redeploy
