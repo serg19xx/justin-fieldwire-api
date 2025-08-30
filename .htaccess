@@ -49,10 +49,10 @@ RewriteEngine On
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>
 
-# Redirect all requests to public/index-php74.php (PHP 7.4 compatible)
+# Redirect all requests to public/minimal-api.php (no Composer dependencies)
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^(.*)$ public/index-php74.php [QSA,L]
+RewriteRule ^(.*)$ public/minimal-api.php [QSA,L]
 
 # Prevent access to sensitive files
 <FilesMatch "\.(env|log|sql|md|txt)$">
@@ -61,7 +61,7 @@ RewriteRule ^(.*)$ public/index-php74.php [QSA,L]
 </FilesMatch>
 
 # Allow access to public files
-<FilesMatch "^(index\.php|index-php74\.php|swagger-ui\.html|test-php74\.php)$">
+<FilesMatch "^(index\.php|index-php74\.php|minimal-api\.php|swagger-ui\.html|simple-test\.php|check-files\.php)$">
     Order allow,deny
     Allow from all
 </FilesMatch>
