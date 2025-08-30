@@ -62,7 +62,7 @@ jobs:
         
         chmod +x deploy-on-server.sh
         
-    - name: Deploy files via FTP
+    - name: Deploy main files via FTP
       uses: SamKirkland/FTP-Deploy-Action@v4.3.4
       with:
         server: ${{ secrets.FTP_SERVER }}
