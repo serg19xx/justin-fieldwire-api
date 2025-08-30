@@ -1,5 +1,13 @@
 RewriteEngine On
 
+# Force PHP 8.0 or higher
+<IfModule mod_php.c>
+    php_value engine Off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine On
+</IfModule>
+
 # Redirect all requests to public/index.php
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
