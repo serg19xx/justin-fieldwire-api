@@ -9,10 +9,8 @@
 - `FTP_USERNAME` = `yjyhtqh8_fieldwire`
 - `FTP_PASSWORD` = `ваш_ftp_пароль`
 
-### SSH (для автоматической настройки):
-- `SSH_USERNAME` = `yjyhtqh8`
-- `SSH_PRIVATE_KEY` = `ваш_приватный_ssh_ключ`
-- `SSH_PASSPHRASE` = `пароль_от_ssh_ключа` (если есть)
+### SSH (не требуется):
+- Используется webhook для автоматической настройки
 
 ### Environment:
 - `ENV_FILE` = `весь_содержимое_файла_.env`

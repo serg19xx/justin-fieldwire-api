@@ -95,28 +95,18 @@ jobs:
           **/.env.local
           **/.env.testing
           
-    - name: Execute deployment script via SSH
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: 173.209.33.163
-        username: ${{ secrets.SSH_USERNAME }}
-        key: ${{ secrets.SSH_PRIVATE_KEY }}
-        passphrase: ${{ secrets.SSH_PASSPHRASE }}
-        port: 22
-        timeout: 120s
-        debug: true
-        script: |
-          echo "Testing SSH connection..."
-          pwd
-          ls -la
-          echo "Navigating to project directory..."
-          cd /home/yjyhtqh8/fwapi.medicalcontractor.ca
-          echo "Current directory: $(pwd)"
-          ls -la
-          echo "Making script executable..."
-          chmod +x deploy-on-server.sh
-          echo "Running deployment script..."
-          ./deploy-on-server.sh
+    - name: Trigger webhook deployment
+      run: |
+        echo "🚀 Triggering webhook deployment..."
+        curl -X POST https://fwapi.medicalcontractor.ca/webhook.php \
+          -H "Content-Type: application/json" \
+          -d '{"ref":"refs/heads/main","repository":{"name":"justin-fieldwire-api"}}' \
+          --max-time 60 || echo "⚠️  Webhook call failed"
+        
+    - name: Wait for deployment
+      run: |
+        echo "⏳ Waiting for deployment to complete..."
+        sleep 30
           
     - name: Test deployment
       run: |
