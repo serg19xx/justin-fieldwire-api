@@ -116,7 +116,9 @@ jobs:
         host: ${{ secrets.SSH_HOST }}
         username: ${{ secrets.SSH_USERNAME }}
         key: ${{ secrets.SSH_PRIVATE_KEY }}
+        passphrase: ${{ secrets.SSH_PASSPHRASE }}
         port: ${{ secrets.SSH_PORT }}
+        timeout: 60s
         script: |
           cd /home/yjyhtqh8/fwapi.medicalcontractor.ca
           chmod +x deploy-on-server.sh
