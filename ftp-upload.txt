@@ -1,0 +1,8 @@
+open ftp.medicalcontractor.ca
+user fw-api@medicalcontractor.ca Medeli@AKX10
+binary
+cd /home/yjyhtqh8/fwapi.medicalcontractor.ca
+put fieldwire-api-production.tar.gz
+put deploy-on-server.sh
+put env.production
+bye

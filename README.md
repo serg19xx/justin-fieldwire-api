@@ -270,3 +270,45 @@ composer cs-fix
 ## Лицензия
 
 MIT License
+
+## Деплой на продакшен
+
+### GitHub Actions (рекомендуется) ⭐
+```bash
+# Полная автоматизация - деплой при каждом push в main
+git add .
+git commit -m "Update API"
+git push origin main
+```
+
+**Настройка:**
+1. Добавьте secrets в GitHub (см. `GITHUB_ACTIONS_SETUP.md`)
+2. Каждый push в main автоматически деплоит на продакшен
+3. Проверяйте статус в GitHub → Actions
+
+### Автоматический деплой через SSH
+```bash
+# Полностью автоматический деплой на сервер через SSH
+./scripts/auto-deploy.sh
+```
+
+### Автоматический деплой через FTP
+```bash
+# Автоматическая загрузка через FTP + ручная настройка на сервере
+./scripts/ftp-deploy.sh
+```
+
+### Простой деплой (ручная загрузка)
+```bash
+# Подготовка файлов для ручной загрузки
+./scripts/simple-deploy.sh
+```
+
+### Ручной деплой
+```bash
+# Подготовка к деплою
+./scripts/deploy.sh
+
+# Загрузка файлов на сервер и настройка
+# См. PRODUCTION_DEPLOY.md для подробных инструкций
+```
