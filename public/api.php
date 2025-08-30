@@ -16,6 +16,12 @@ if ($method === 'OPTIONS') {
     exit;
 }
 
+// Database configuration for production
+$host = 'localhost'; // Production uses localhost
+$dbname = 'yjyhtqh8_easyrx';
+$username = 'yjyhtqh8_fieldwire';
+$password = 'FieldWire2025';
+
 // Health check endpoint
 if ($request_uri === '/api/v1/health' && $method === 'GET') {
     $response = [
@@ -36,11 +42,6 @@ if ($request_uri === '/api/v1/health' && $method === 'GET') {
     
     // Try database connection
     try {
-        $host = 'medicalcontractor.ca';
-        $dbname = 'yjyhtqh8_easyrx';
-        $username = 'yjyhtqh8_fieldwire';
-        $password = 'FieldWire2025';
-        
         $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
         $response['database']['status'] = 'connected';
     } catch (PDOException $e) {
@@ -99,11 +100,6 @@ if ($request_uri === '/api/v1/version' && $method === 'GET') {
 // Database tables endpoint
 if ($request_uri === '/api/v1/database/tables' && $method === 'GET') {
     try {
-        $host = 'medicalcontractor.ca';
-        $dbname = 'yjyhtqh8_easyrx';
-        $username = 'yjyhtqh8_fieldwire';
-        $password = 'FieldWire2025';
-        
         $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
         
         $stmt = $pdo->query("SHOW TABLES");
