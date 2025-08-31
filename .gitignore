@@ -1,35 +1,36 @@
-# Environment files
+# Environment files with secrets
 .env
-.env.local
-.env.*.local
-
-# Composer
-/vendor/
-composer.lock
+env.development
+env.production
+env.local
+env.staging
 
 # Logs
-/logs/
+logs/
 *.log
+
+# Dependencies
+vendor/
+node_modules/
 
 # IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
-*~
 
 # OS files
 .DS_Store
 Thumbs.db
 
-# Cache
-/cache/
-/tmp/
+# Temporary files
+*.tmp
+*.temp
+cache/
 
-# Build files
-/build/
-/dist/
+# Uploads
+public/uploads/
 
-# Test coverage
-/coverage/
-.phpunit.result.cache
+# Test files
+tests/Unit/AuthControllerTest.php
+public/frontend-test.html
