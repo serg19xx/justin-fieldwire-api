@@ -2,6 +2,7 @@
     "name": "fieldwire/api",
     "description": "REST API built with FlightPHP",
     "type": "project",
+    "license": "proprietary",
     "require": {
         "php": ">=8.2.0",
         "doctrine/dbal": "^3.6",
