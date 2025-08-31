@@ -56,17 +56,23 @@ class DatabaseController
             $tables = $result->fetchFirstColumn();
             
             Flight::json([
+                'error_code' => 0,
                 'status' => 'success',
-                'tables' => $tables,
-                'count' => count($tables),
-                'database' => $databaseName,
-                'timestamp' => date('c')
+                'message' => 'Database tables retrieved successfully',
+                'data' => [
+                    'tables' => $tables,
+                    'count' => count($tables),
+                    'database' => $databaseName,
+                    'timestamp' => date('c')
+                ]
             ]);
             
         } catch (\Exception $e) {
             Flight::json([
-                'error' => 'database_error',
+                'error_code' => 500,
+                'status' => 'error',
                 'message' => 'Failed to retrieve database tables',
+                'data' => null,
                 'details' => $e->getMessage()
             ], 500);
         }

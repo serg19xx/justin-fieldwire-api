@@ -53,10 +53,13 @@ RewriteEngine On
 </FilesMatch>
 
 # Allow access to public files
-<FilesMatch "^(index\.php|swagger-ui\.html)$">
+<FilesMatch "^(index\.php|swagger-ui\.html|avatar\.php)$">
     Order allow,deny
     Allow from all
 </FilesMatch>
+
+# Avatar routing
+RewriteRule ^avatar/(.+)$ avatar.php [L,QSA]
 
 # Cache static assets
 <FilesMatch "\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$">

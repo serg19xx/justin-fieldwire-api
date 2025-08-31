@@ -20,7 +20,7 @@ if ($method === 'OPTIONS') {
 $host = 'localhost'; // Production uses localhost
 $dbname = 'yjyhtqh8_easyrx';
 $username = 'yjyhtqh8_fieldwire';
-$password = 'FieldWire2025';
+$password = 'Medeli@2025';
 
 // Health check endpoint
 if ($request_uri === '/api/v1/health' && $method === 'GET') {
@@ -193,6 +193,134 @@ if ($request_uri === '/api/swagger/spec' && $method === 'GET') {
     ];
     
     echo json_encode($spec);
+    exit;
+}
+
+// Login endpoint
+if (($request_uri === '/auth/login' || $request_uri === '/api/v1/auth/login') && $method === 'POST') {
+    // Get request body
+    $requestBody = file_get_contents('php://input');
+    $data = json_decode($requestBody, true);
+    
+    // Validate input
+    if (!$data || !isset($data['email']) || !isset($data['password'])) {
+        http_response_code(400);
+        echo json_encode([
+            'error_code' => 400,
+            'status' => 'error',
+            'message' => 'Invalid input data. Email and password are required.',
+            'data' => null,
+            'details' => [
+                'email' => 'Valid email address is required',
+                'password' => 'Password is required'
+            ]
+        ]);
+        exit;
+    }
+    
+    $email = $data['email'];
+    $password = $data['password'];
+    
+    // Validate email format
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        http_response_code(400);
+        echo json_encode([
+            'error_code' => 400,
+            'status' => 'error',
+            'message' => 'Invalid email format.',
+            'data' => null
+        ]);
+        exit;
+    }
+    
+    try {
+        // Connect to database
+        $pdo = new PDO("mysql:host=$host;dbname=$dbname;charset=utf8mb4", $username, $password);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        
+        // Get user by email
+        $stmt = $pdo->prepare('SELECT id, email, password_hash, first_name, last_name, phone, user_type, job_title, status, 
+                                     additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
+                              FROM fw_users 
+                              WHERE email = ? AND status = "active"');
+        $stmt->execute([$email]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$user) {
+            http_response_code(401);
+            echo json_encode([
+                'error_code' => 401,
+                'status' => 'error',
+                'message' => 'Invalid email or password',
+                'data' => null
+            ]);
+            exit;
+        }
+        
+        // Verify password
+        if (!password_verify($data['password'], $user['password_hash'])) {
+            http_response_code(401);
+            echo json_encode([
+                'error_code' => 401,
+                'status' => 'error',
+                'message' => 'Invalid email or password',
+                'data' => null
+            ]);
+            exit;
+        }
+        
+        // Generate simple token (in production, use proper JWT library)
+        $token = base64_encode(json_encode([
+            'user_id' => $user['id'],
+            'email' => $user['email'],
+            'name' => $user['first_name'] . ' ' . $user['last_name'],
+            'user_type' => $user['user_type'],
+            'iat' => time(),
+            'exp' => time() + 3600
+        ]));
+        
+        // Remove password from response
+        unset($user['password_hash']);
+        
+        // Update last login
+        $updateStmt = $pdo->prepare('UPDATE fw_users SET last_login = CURRENT_TIMESTAMP WHERE id = ?');
+        $updateStmt->execute([$user['id']]);
+        
+        echo json_encode([
+            'error_code' => 0,
+            'status' => 'success',
+            'message' => 'Login successful',
+            'data' => [
+                'user' => [
+                    'id' => $user['id'],
+                    'email' => $user['email'],
+                    'first_name' => $user['first_name'],
+                    'last_name' => $user['last_name'],
+                    'name' => $user['first_name'] . ' ' . $user['last_name'],
+                    'phone' => $user['phone'],
+                    'user_type' => $user['user_type'],
+                    'job_title' => $user['job_title'],
+                    'status' => $user['status'],
+                    'additional_info' => $user['additional_info'],
+                    'avatar_url' => $user['avatar_url'],
+                    'two_factor_enabled' => (bool)$user['two_factor_enabled'],
+                    'last_login' => $user['last_login']
+                ],
+                'token' => $token,
+                'expires_at' => date('c', time() + 3600)
+            ]
+        ]);
+        
+    } catch (PDOException $e) {
+        http_response_code(500);
+        echo json_encode([
+            'error_code' => 500,
+            'status' => 'error',
+            'message' => 'Database connection failed',
+            'data' => null,
+            'details' => $e->getMessage()
+        ]);
+    }
     exit;
 }
 

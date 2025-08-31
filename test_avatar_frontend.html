@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avatar Test - Правильное использование</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .avatar-container {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+        }
+        .avatar-image {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 2px solid #007bff;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+        .code-block {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            margin: 10px 0;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        input {
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Тест правильного использования аватаров</h1>
+    
+    <div class="avatar-container">
+        <h2>❌ НЕПРАВИЛЬНО - Не делайте так:</h2>
+        <div class="code-block">&lt;img src="http://localhost:8000/api/v1/profile/avatar" alt="Avatar"&gt;</div>
+        <p class="error">Это вызовет ошибку 400 Bad Request!</p>
+    </div>
+
+    <div class="avatar-container">
+        <h2>✅ ПРАВИЛЬНО - Делайте так:</h2>
+        <div class="code-block">1. Получите URL аватара: GET /api/v1/profile/avatar?user_id=1
+2. Используйте full_url из ответа: &lt;img src="http://localhost:8000/api/v1/avatar?file=filename.png"&gt;</div>
+        
+        <h3>Тест правильного получения аватара:</h3>
+        <input type="text" id="tokenInput" placeholder="Введите JWT токен" style="width: 300px;">
+        <input type="number" id="userIdInput" placeholder="ID пользователя" value="1">
+        <button onclick="getAvatarUrl()">Получить URL аватара</button>
+        
+        <div id="result"></div>
+        
+        <h3>Отображение аватара:</h3>
+        <img id="avatarImg" class="avatar-image" style="display: none;" alt="Avatar">
+        <div id="avatarStatus"></div>
+    </div>
+
+    <div class="avatar-container">
+        <h2>🔧 Код для фронтенда:</h2>
+        <div class="code-block">// Vue.js компонент
+const getAvatarUrl = async (userId) => {
+    const token = localStorage.getItem('token');
+    
+    const response = await fetch(`/api/v1/profile/avatar?user_id=${userId}`, {
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+    
+    const data = await response.json();
+    
+    if (data.error_code === 0) {
+        return data.data.full_url; // ← Используйте full_url
+    }
+};
+
+// Использование
+const avatarUrl = await getAvatarUrl(userId);
+imgElement.src = avatarUrl;</div>
+    </div>
+
+    <script>
+        async function getAvatarUrl() {
+            const token = document.getElementById('tokenInput').value;
+            const userId = document.getElementById('userIdInput').value;
+            const resultDiv = document.getElementById('result');
+            const avatarImg = document.getElementById('avatarImg');
+            const avatarStatus = document.getElementById('avatarStatus');
+            
+            if (!token) {
+                resultDiv.innerHTML = '<p class="error">Введите JWT токен!</p>';
+                return;
+            }
+            
+            try {
+                resultDiv.innerHTML = '<p>Загружаем URL аватара...</p>';
+                
+                const response = await fetch(`http://localhost:8000/api/v1/profile/avatar?user_id=${userId}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.error_code === 0) {
+                    const avatarUrl = data.data.full_url;
+                    
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ URL аватара получен успешно!</p>
+                        <p><strong>Avatar URL:</strong> ${avatarUrl}</p>
+                        <p><strong>Filename:</strong> ${data.data.avatar_url}</p>
+                    `;
+                    
+                    // Отображаем аватар
+                    avatarImg.src = avatarUrl;
+                    avatarImg.style.display = 'block';
+                    avatarImg.onload = () => {
+                        avatarStatus.innerHTML = '<p class="success">✅ Аватар загружен успешно!</p>';
+                    };
+                    avatarImg.onerror = () => {
+                        avatarStatus.innerHTML = '<p class="error">❌ Ошибка загрузки изображения</p>';
+                    };
+                    
+                } else {
+                    resultDiv.innerHTML = `<p class="error">❌ Ошибка: ${data.message}</p>`;
+                }
+                
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ Ошибка запроса: ${error.message}</p>`;
+            }
+        }
+        
+        // Автоматически получаем токен из localStorage если он есть
+        window.onload = function() {
+            const token = localStorage.getItem('token');
+            if (token) {
+                document.getElementById('tokenInput').value = token;
+            }
+        };
+    </script>
+</body>
+</html>
+

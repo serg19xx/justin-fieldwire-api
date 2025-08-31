@@ -4,7 +4,11 @@ RewriteEngine On
 php_value max_execution_time 30
 php_value memory_limit 256M
 
-# Redirect all requests to public/api.php
+# Allow direct access to static files
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^(.*)$ - [L]
+
+# Redirect API requests to public/api.php
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^(.*)$ public/api.php [QSA,L]

@@ -77,16 +77,21 @@ class HealthController
         }
         
         Flight::json([
-            'status' => 'healthy',
-            'timestamp' => date('c'),
-            'uptime' => [
-                'seconds' => $uptime,
-                'formatted' => $uptimeFormatted,
-            ],
-            'memory_usage' => $memoryUsage,
-            'version' => '1.0.0',
-            'database' => [
-                'status' => $databaseStatus,
+            'error_code' => 0,
+            'status' => 'success',
+            'message' => 'API is healthy',
+            'data' => [
+                'health_status' => 'healthy',
+                'timestamp' => date('c'),
+                'uptime' => [
+                    'seconds' => $uptime,
+                    'formatted' => $uptimeFormatted,
+                ],
+                'memory_usage' => $memoryUsage,
+                'version' => '1.0.0',
+                'database' => [
+                    'status' => $databaseStatus,
+                ],
             ],
         ]);
     }
@@ -118,12 +123,17 @@ class HealthController
     public function version(): void
     {
         Flight::json([
-            'api_version' => 'v1',
-            'status' => 'stable',
-            'released' => '2025-08-28',
-            'endpoints' => [
-                'health' => '/api/v1/health',
-                'version' => '/api/v1/version',
+            'error_code' => 0,
+            'status' => 'success',
+            'message' => 'Version information retrieved',
+            'data' => [
+                'api_version' => 'v1',
+                'status' => 'stable',
+                'released' => '2025-08-28',
+                'endpoints' => [
+                    'health' => '/api/v1/health',
+                    'version' => '/api/v1/version',
+                ],
             ],
         ]);
     }

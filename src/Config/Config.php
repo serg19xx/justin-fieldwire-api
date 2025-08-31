@@ -8,23 +8,30 @@ class Config
 
     public function __construct()
     {
-        $this->config = [
-            'app' => [
-                'name' => $_ENV['APP_NAME'] ?? 'FieldWire API',
-                'env' => $_ENV['APP_ENV'] ?? 'production',
-                'debug' => filter_var($_ENV['APP_DEBUG'] ?? false, FILTER_VALIDATE_BOOLEAN),
-                'url' => $_ENV['APP_URL'] ?? 'http://localhost:8000',
-            ],
-            'logging' => [
-                'level' => $_ENV['LOG_LEVEL'] ?? 'info',
-                'channel' => $_ENV['LOG_CHANNEL'] ?? 'file',
-            ],
-            'cors' => [
-                'allowed_origins' => explode(',', $_ENV['CORS_ALLOWED_ORIGINS'] ?? ''),
-                'allowed_methods' => explode(',', $_ENV['CORS_ALLOWED_METHODS'] ?? 'GET,POST,PUT,DELETE,OPTIONS'),
-                'allowed_headers' => explode(',', $_ENV['CORS_ALLOWED_HEADERS'] ?? 'Content-Type,Authorization'),
-            ],
-        ];
+        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Config constructor called' . PHP_EOL, FILE_APPEND);
+        try {
+            $this->config = [
+                'app' => [
+                    'name' => $_ENV['APP_NAME'] ?? 'FieldWire API',
+                    'env' => $_ENV['APP_ENV'] ?? 'production',
+                    'debug' => filter_var($_ENV['APP_DEBUG'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                    'url' => $_ENV['APP_URL'] ?? 'http://localhost:8000',
+                ],
+                'logging' => [
+                    'level' => $_ENV['LOG_LEVEL'] ?? 'info',
+                    'channel' => $_ENV['LOG_CHANNEL'] ?? 'file',
+                ],
+                'cors' => [
+                    'allowed_origins' => explode(',', $_ENV['CORS_ALLOWED_ORIGINS'] ?? ''),
+                    'allowed_methods' => explode(',', $_ENV['CORS_ALLOWED_METHODS'] ?? 'GET,POST,PUT,DELETE,OPTIONS'),
+                    'allowed_headers' => explode(',', $_ENV['CORS_ALLOWED_HEADERS'] ?? 'Content-Type,Authorization'),
+                ],
+            ];
+            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Config constructor completed' . PHP_EOL, FILE_APPEND);
+        } catch (Exception $e) {
+            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - ERROR in Config constructor: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
+            throw $e;
+        }
     }
 
     public function get(string $key, mixed $default = null): mixed
