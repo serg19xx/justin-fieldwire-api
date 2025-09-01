@@ -19,6 +19,9 @@ jobs:
         php-version: '8.2'
         extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, curl, zip
         
+    - name: Create .env file
+      run: echo "${{ secrets.ENV_FILE }}" > .env
+        
     - name: Deploy main files via FTP
       uses: SamKirkland/FTP-Deploy-Action@v4.3.4
       with:
