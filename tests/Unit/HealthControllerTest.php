@@ -12,7 +12,7 @@ class HealthControllerTest extends TestCase
     protected function setUp(): void
     {
         $this->controller = new HealthController();
-    }
+    } ///
 //
     public function testHealthCheckReturnsValidResponse(): void
     {
