@@ -54,17 +54,26 @@ jobs:
           **/.env.example
           **/.env.local
           **/.env.testing
+          **/scripts/**
+          **/docs/**
           
     - name: Test deployment
       run: |
         echo "🧪 Testing deployment..."
-        sleep 10
-        curl -f https://fwapi.medicalcontractor.ca/test.html || echo "⚠️  HTML test failed"
-        curl -f https://fwapi.medicalcontractor.ca/hello.php || echo "⚠️  PHP test failed"
+        sleep 15
+        echo "🔍 Testing API endpoints..."
+        curl -f https://fwapi.medicalcontractor.ca/api/v1/health || echo "⚠️  Health endpoint failed"
+        curl -f https://fwapi.medicalcontractor.ca/api/v1/version || echo "⚠️  Version endpoint failed"
+        curl -f https://fwapi.medicalcontractor.ca/api || echo "⚠️  API info endpoint failed"
+        echo "🔍 Testing new endpoints..."
+        curl -f -X POST https://fwapi.medicalcontractor.ca/api/v1/2fa/toggle -H "Content-Type: application/json" -d '{"user_id":1,"enabled":1}' || echo "⚠️  2FA toggle endpoint failed"
         
     - name: Deployment complete
       run: |
         echo "✅ Deployment completed successfully!"
-        echo "🌐 Test files available at:"
-        echo "   • HTML: https://fwapi.medicalcontractor.ca/test.html"
-        echo "   • PHP: https://fwapi.medicalcontractor.ca/hello.php" 
+        echo "🌐 API endpoints available at:"
+        echo "   • Health: https://fwapi.medicalcontractor.ca/api/v1/health"
+        echo "   • Version: https://fwapi.medicalcontractor.ca/api/v1/version"
+        echo "   • API Info: https://fwapi.medicalcontractor.ca/api"
+        echo "   • 2FA Toggle: https://fwapi.medicalcontractor.ca/api/v1/2fa/toggle"
+        echo "   • Work Status: https://fwapi.medicalcontractor.ca/api/v1/profile/work-status" 
