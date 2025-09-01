@@ -8,8 +8,8 @@ php_value memory_limit 256M
 RewriteCond %{REQUEST_FILENAME} -f
 RewriteRule ^(.*)$ - [L]
 
-# Redirect API requests to public/api.php
+# Redirect API requests to public/index.php
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
-RewriteRule ^(.*)$ public/api.php [QSA,L]
+RewriteRule ^(.*)$ public/index.php [QSA,L]
 
