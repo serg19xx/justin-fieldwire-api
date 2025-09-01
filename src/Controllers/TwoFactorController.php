@@ -413,7 +413,7 @@ class TwoFactorController
     {
         try {
             $connection = Database::getConnection();
-            $sql = 'SELECT * FROM fw_users WHERE email = ? AND status = "active"';
+            $sql = 'SELECT * FROM fw_users WHERE email = ?';
             $result = $connection->executeQuery($sql, [$email]);
             $user = $result->fetchAssociative();
             return $user ?: null;
@@ -430,7 +430,7 @@ class TwoFactorController
     {
         try {
             $connection = Database::getConnection();
-            $sql = 'SELECT * FROM fw_users WHERE id = ? AND status = "active"';
+            $sql = 'SELECT * FROM fw_users WHERE id = ?';
             $result = $connection->executeQuery($sql, [$userId]);
             $user = $result->fetchAssociative();
             return $user ?: null;
@@ -570,5 +570,69 @@ class TwoFactorController
         
         $masked = substr($phone, 0, -4) . '****';
         return $masked;
+    }
+
+    /**
+     * Toggle 2FA status for user
+     */
+    public function toggle2FA(): void
+    {
+        try {
+            $requestBody = Flight::request()->getBody();
+            $data = json_decode($requestBody, true);
+
+            if (!isset($data['enabled']) || !in_array($data['enabled'], [0, 1])) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Invalid input. "enabled" field must be 0 or 1',
+                    'data' => null
+                ], 400);
+                return;
+            }
+
+            $enabled = (bool)$data['enabled'];
+            $userId = $data['user_id'] ?? null;
+
+            if (!$userId) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'User ID is required',
+                    'data' => null
+                ], 400);
+                return;
+            }
+
+            // Update user's 2FA status
+            $this->updateUser2FA($userId, null, $enabled);
+
+            $this->logger->info('2FA status toggled for user', [
+                'user_id' => $userId,
+                'enabled' => $enabled
+            ]);
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => $enabled ? '2FA enabled successfully' : '2FA disabled successfully',
+                'data' => [
+                    'user_id' => $userId,
+                    'two_factor_enabled' => $enabled
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Error toggling 2FA', [
+                'error' => $e->getMessage()
+            ]);
+
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
     }
 }

@@ -20,7 +20,7 @@ file_put_contents(__DIR__ . '/../logs/app.log', date('Y-m-d H:i:s') . ' - Config
 try {
     $app = new App\Bootstrap\Application($config);
     file_put_contents(__DIR__ . '/../logs/app.log', date('Y-m-d H:i:s') . ' - Application created successfully' . PHP_EOL, FILE_APPEND);
-} catch (Exception $e) {
+} catch (\Exception $e) {
     file_put_contents(__DIR__ . '/../logs/app.log', date('Y-m-d H:i:s') . ' - ERROR creating Application: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
     throw $e;
 }

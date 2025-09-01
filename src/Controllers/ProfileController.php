@@ -8,7 +8,14 @@ use App\Services\EmailService;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
+use OpenApi\Annotations as OA;
 
+/**
+ * @OA\Tag(
+ *     name="Profile",
+ *     description="User profile management endpoints"
+ * )
+ */
 class ProfileController
 {
     private Logger $logger;
@@ -23,7 +30,60 @@ class ProfileController
     }
 
     /**
-     * Get current user profile
+     * @OA\Get(
+     *     path="/profile",
+     *     summary="Get user profile",
+     *     description="Retrieve current user profile information",
+     *     tags={"Profile"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="Profile retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Profile retrieved successfully"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="user", type="object",
+     *                     @OA\Property(property="id", type="integer", example=1),
+     *                     @OA\Property(property="email", type="string", example="user@example.com"),
+     *                     @OA\Property(property="first_name", type="string", example="John"),
+     *                     @OA\Property(property="last_name", type="string", example="Doe"),
+     *                     @OA\Property(property="name", type="string", example="John Doe"),
+     *                     @OA\Property(property="phone", type="string", example="+1234567890"),
+     *                     @OA\Property(property="user_type", type="string", example="contractor"),
+     *                     @OA\Property(property="job_title", type="string", example="Field Worker"),
+     *                     @OA\Property(property="status", type="string", example="active"),
+     *                     @OA\Property(property="avatar_url", type="string", example="http://localhost:8000/api/v1/avatar?file=avatar.png"),
+     *                     @OA\Property(property="two_factor_enabled", type="boolean", example=true),
+     *                     @OA\Property(property="last_login", type="string", format="date-time"),
+     *                     @OA\Property(property="created_at", type="string", format="date-time"),
+     *                     @OA\Property(property="updated_at", type="string", format="date-time")
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized - invalid or missing token",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Unauthorized"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Internal server error"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     )
+     * )
      */
     public function getProfile(): void
     {
@@ -53,7 +113,9 @@ class ProfileController
                         'phone' => $user['phone'] ?? null,
                         'user_type' => $user['user_type'] ?? null,
                         'job_title' => $user['job_title'] ?? null,
-                        'status' => $user['status'] ?? 'active',
+                        'status' => (bool)$user['status'],
+                        'status_reason' => $user['status_reason'] ?? null,
+                        'status_details' => $user['status_details'] ?? null,
                         'additional_info' => $user['additional_info'] ?? null,
                         'avatar_url' => $user['avatar_url'] ? 'http://localhost:8000/api/v1/avatar?file=' . basename($user['avatar_url']) : null,
                         'two_factor_enabled' => (bool)($user['two_factor_enabled'] ?? false),
@@ -79,7 +141,64 @@ class ProfileController
     }
 
     /**
-     * Update user profile
+     * @OA\Put(
+     *     path="/profile",
+     *     summary="Update user profile",
+     *     description="Update current user profile information",
+     *     tags={"Profile"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=false,
+     *         description="Profile update data",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="first_name", type="string", example="John", description="User first name"),
+     *             @OA\Property(property="last_name", type="string", example="Doe", description="User last name"),
+     *             @OA\Property(property="phone", type="string", example="+1234567890", description="User phone number"),
+     *             @OA\Property(property="job_title", type="string", example="Field Worker", description="User job title"),
+     *             @OA\Property(property="additional_info", type="string", example="Additional information", description="Additional user information")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Profile updated successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Profile updated successfully"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="user", type="object",
+     *                     @OA\Property(property="id", type="integer", example=1),
+     *                     @OA\Property(property="email", type="string", example="user@example.com"),
+     *                     @OA\Property(property="first_name", type="string", example="John"),
+     *                     @OA\Property(property="last_name", type="string", example="Doe"),
+     *                     @OA\Property(property="phone", type="string", example="+1234567890"),
+     *                     @OA\Property(property="job_title", type="string", example="Field Worker"),
+     *                     @OA\Property(property="updated_at", type="string", format="date-time")
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Bad request - validation error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Validation failed"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized - invalid or missing token",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Unauthorized"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     )
+     * )
      */
     public function updateProfile(): void
     {
@@ -126,7 +245,9 @@ class ProfileController
                         'phone' => $updatedUser['phone'] ?? null,
                         'user_type' => $updatedUser['user_type'] ?? null,
                         'job_title' => $updatedUser['job_title'] ?? null,
-                        'status' => $updatedUser['status'] ?? 'active',
+                        'status' => (bool)$updatedUser['status'],
+                        'status_reason' => $updatedUser['status_reason'] ?? null,
+                        'status_details' => $updatedUser['status_details'] ?? null,
                         'additional_info' => $updatedUser['additional_info'] ?? null,
                         'avatar_url' => $updatedUser['avatar_url'] ? 'http://localhost:8000/api/v1/avatar?file=' . basename($updatedUser['avatar_url']) : null,
                         'two_factor_enabled' => (bool)($updatedUser['two_factor_enabled'] ?? false),
@@ -247,6 +368,142 @@ class ProfileController
                 'error' => $e->getMessage()
             ]);
 
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * @OA\Put(
+     *     path="/profile/work-status",
+     *     summary="Update user work status",
+     *     description="Update current user work status (active/inactive)",
+     *     tags={"Profile"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"isActive"},
+     *             @OA\Property(property="isActive", type="boolean", example=true, description="Whether user is active at work"),
+     *             @OA\Property(property="inactive_reason", type="string", example="vacation", description="Reason for inactivity (optional)"),
+     *             @OA\Property(property="inactive_reason_details", type="string", example="On vacation until next week", description="Additional details about inactivity (optional)")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Work status updated successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Work status updated successfully"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="work_status", type="object",
+     *                     @OA\Property(property="isActive", type="boolean", example=true),
+     *                     @OA\Property(property="inactive_reason", type="string", example=""),
+     *                     @OA\Property(property="inactive_reason_details", type="string", example=""),
+     *                     @OA\Property(property="updated_at", type="string", format="date-time")
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Bad request - invalid data",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid data provided"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized - invalid or missing token",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Unauthorized"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Internal server error"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     )
+     * )
+     */
+    public function updateWorkStatus(): void
+    {
+        // Добавляем простую отладку
+        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - updateWorkStatus() called' . PHP_EOL, FILE_APPEND);
+        
+        try {
+            $user = $this->getCurrentUser();
+            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - getCurrentUser() result: ' . ($user ? 'user found' : 'user not found') . PHP_EOL, FILE_APPEND);
+            
+            if (!$user) {
+                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Returning 401 Unauthorized' . PHP_EOL, FILE_APPEND);
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Unauthorized',
+                    'data' => null
+                ], 401);
+                return;
+            }
+
+            $input = json_decode(Flight::request()->getBody(), true);
+            
+            if (!isset($input['isActive']) || !is_bool($input['isActive'])) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'isActive field is required and must be boolean',
+                    'data' => null
+                ], 400);
+                return;
+            }
+
+            $inactiveReason = $input['inactive_reason'] ?? '';
+            $inactiveReasonDetails = $input['inactive_reason_details'] ?? '';
+
+            // Update work status in database
+            $result = $this->updateUserWorkStatus($user['id'], $input['isActive'], $inactiveReason, $inactiveReasonDetails);
+            
+            if ($result) {
+                Flight::json([
+                    'error_code' => 0,
+                    'status' => 'success',
+                    'message' => 'Work status updated successfully',
+                    'data' => [
+                        'work_status' => [
+                            'isActive' => $input['isActive'],
+                            'inactive_reason' => $inactiveReason,
+                            'inactive_reason_details' => $inactiveReasonDetails,
+                            'updated_at' => date('Y-m-d H:i:s')
+                        ]
+                    ]
+                ]);
+            } else {
+                Flight::json([
+                    'error_code' => 500,
+                    'status' => 'error',
+                    'message' => 'Failed to update work status',
+                    'data' => null
+                ], 500);
+            }
+        } catch (\Exception $e) {
+            $this->logger->error('Error updating work status: ' . $e->getMessage());
             Flight::json([
                 'error_code' => 500,
                 'status' => 'error',
@@ -557,6 +814,7 @@ class ProfileController
         $authorization = $headers['Authorization'] ?? $headers['authorization'] ?? '';
 
         if (empty($authorization) || !str_starts_with($authorization, 'Bearer ')) {
+            $this->logger->warning('No authorization header or invalid format');
             return null;
         }
 
@@ -565,10 +823,31 @@ class ProfileController
         try {
             $payload = $this->decodeJWT($token);
             if (!$payload) {
+                $this->logger->warning('Failed to decode JWT token');
                 return null;
             }
 
-            return $this->getUserById($payload['user_id']);
+            $this->logger->info('JWT payload decoded', [
+                'user_id' => $payload['user_id'] ?? 'not_set',
+                'payload' => $payload
+            ]);
+
+            // Для work status используем метод без фильтра по статусу
+            $user = $this->getUserByIdForWorkStatus($payload['user_id']);
+            
+            if (!$user) {
+                $this->logger->warning('User not found by ID', [
+                    'user_id' => $payload['user_id']
+                ]);
+            } else {
+                $this->logger->info('User found', [
+                    'user_id' => $user['id'],
+                    'email' => $user['email'],
+                    'status' => $user['status']
+                ]);
+            }
+
+            return $user;
 
         } catch (Exception $e) {
             $this->logger->error('Error decoding JWT token', [
@@ -588,7 +867,7 @@ class ProfileController
         }
 
         // At least one field should be provided
-        $allowedFields = ['first_name', 'last_name', 'phone', 'job_title', 'additional_info'];
+        $allowedFields = ['first_name', 'last_name', 'phone', 'job_title', 'status', 'status_reason', 'status_details', 'additional_info'];
         $hasValidField = false;
 
         foreach ($allowedFields as $field) {
@@ -718,7 +997,7 @@ class ProfileController
         $updateFields = [];
         $params = [];
 
-        $allowedFields = ['first_name', 'last_name', 'phone', 'job_title', 'additional_info'];
+        $allowedFields = ['first_name', 'last_name', 'phone', 'job_title', 'status', 'status_reason', 'status_details', 'additional_info'];
         
         foreach ($allowedFields as $field) {
             if (isset($data[$field])) {
@@ -761,7 +1040,7 @@ class ProfileController
         $sql = 'SELECT id, email, first_name, last_name, phone, user_type, job_title, status, 
                        additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
                 FROM fw_users 
-                WHERE id = ? AND status = "active"';
+                WHERE id = ?';
         
         $result = $connection->executeQuery($sql, [$userId]);
         $user = $result->fetchAssociative();
@@ -839,5 +1118,84 @@ class ProfileController
         }
 
         return $payload;
+    }
+
+    /**
+     * Update user work status in database
+     */
+    private function updateUserWorkStatus(int $userId, bool $isActive, string $inactiveReason, string $inactiveReasonDetails): bool
+    {
+        try {
+            $connection = Database::getConnection();
+            
+            if ($isActive) {
+                // If user is active, clear inactive reasons
+                $sql = "UPDATE fw_users SET 
+                        status = TRUE,
+                        status_reason = NULL,
+                        status_details = NULL,
+                        updated_at = NOW() 
+                        WHERE id = ?";
+                $connection->executeStatement($sql, [$userId]);
+            } else {
+                // If user is inactive, set reasons
+                $sql = "UPDATE fw_users SET 
+                        status = FALSE,
+                        status_reason = ?,
+                        status_details = ?,
+                        updated_at = NOW() 
+                        WHERE id = ?";
+                $connection->executeStatement($sql, [$inactiveReason, $inactiveReasonDetails, $userId]);
+            }
+            
+            return true;
+        } catch (\Exception $e) {
+            $this->logger->error('Error updating work status in database: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Get user by ID without status filter (for work status operations)
+     */
+    private function getUserByIdForWorkStatus(int $userId): ?array
+    {
+        try {
+            $connection = Database::getConnection();
+            
+            $sql = 'SELECT id, email, first_name, last_name, phone, user_type, job_title, status, 
+                           status_reason, status_details, additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
+                    FROM fw_users 
+                    WHERE id = ?';
+            
+            $this->logger->info('Executing SQL query', [
+                'sql' => $sql,
+                'user_id' => $userId
+            ]);
+            
+            $result = $connection->executeQuery($sql, [$userId]);
+            $user = $result->fetchAssociative();
+
+            if (!$user) {
+                $this->logger->warning('No user found in database', [
+                    'user_id' => $userId,
+                    'sql' => $sql
+                ]);
+            } else {
+                $this->logger->info('User found in database', [
+                    'user_id' => $user['id'],
+                    'email' => $user['email'],
+                    'status' => $user['status']
+                ]);
+            }
+
+            return $user ?: null;
+        } catch (\Exception $e) {
+            $this->logger->error('Database error in getUserByIdForWorkStatus', [
+                'error' => $e->getMessage(),
+                'user_id' => $userId
+            ]);
+            return null;
+        }
     }
 }

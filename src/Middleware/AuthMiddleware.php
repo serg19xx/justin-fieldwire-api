@@ -109,7 +109,7 @@ class AuthMiddleware
         $sql = 'SELECT id, email, first_name, last_name, phone, user_type, job_title, status, 
                        additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
                 FROM fw_users 
-                WHERE id = ? AND status = "active"';
+                WHERE id = ?';
         
         $result = $connection->executeQuery($sql, [$userId]);
         $user = $result->fetchAssociative();

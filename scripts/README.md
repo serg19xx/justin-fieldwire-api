@@ -6,7 +6,7 @@
 
 ### 🚀 start-server.sh
 Запускает PHP сервер разработки.
-   
+   fatal: not a git repository (or any of the parent directories): .git
 **Использование:**
 ```bash
 ./scripts/start-server.sh [port]

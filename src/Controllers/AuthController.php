@@ -6,7 +6,14 @@ use App\Database\Database;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
+use OpenApi\Annotations as OA;
 
+/**
+ * @OA\Tag(
+ *     name="Authentication",
+ *     description="User authentication and authorization endpoints"
+ * )
+ */
 class AuthController
 {
     private Logger $logger;
@@ -17,7 +24,60 @@ class AuthController
     }
 
     /**
-     * Handle user login
+     * @OA\Post(
+     *     path="/auth/login",
+     *     summary="User login",
+     *     description="Authenticate user with email and password",
+     *     tags={"Authentication"},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         description="Login credentials",
+     *         @OA\JsonContent(
+     *             required={"email","password"},
+     *             @OA\Property(property="email", type="string", format="email", example="user@example.com", description="User email address"),
+     *             @OA\Property(property="password", type="string", example="password123", description="User password")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Login successful",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string", example="Login successful"),
+     *             @OA\Property(property="token", type="string", example="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...", description="JWT authentication token"),
+     *             @OA\Property(property="user", type="object", 
+     *                 @OA\Property(property="id", type="integer", example=1),
+     *                 @OA\Property(property="email", type="string", example="user@example.com"),
+     *                 @OA\Property(property="name", type="string", example="John Doe")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Bad request - validation error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="message", type="string", example="Validation failed"),
+     *             @OA\Property(property="errors", type="array", @OA\Items(type="string"))
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Invalid credentials",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="message", type="string", example="Invalid email or password")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="message", type="string", example="Internal server error")
+     *         )
+     *     )
+     * )
      */
     public function login(): void
     {
@@ -204,7 +264,7 @@ class AuthController
             $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, user_type, job_title, status, 
                            additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
                     FROM fw_users 
-                    WHERE email = ? AND status = "active"';
+                    WHERE email = ?';
             $result = $connection->executeQuery($sql, [$email]);
             $user = $result->fetchAssociative();
 
