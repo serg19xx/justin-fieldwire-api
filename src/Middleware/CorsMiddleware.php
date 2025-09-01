@@ -34,6 +34,7 @@ class CorsMiddleware
         header('Access-Control-Allow-Methods: ' . implode(',', $this->config->get('cors.allowed_methods', [])));
         header('Access-Control-Allow-Headers: ' . implode(',', $this->config->get('cors.allowed_headers', [])));
         header('Access-Control-Allow-Credentials: true');
+        header('Access-Control-Max-Age: 86400'); // 24 hours
 
         // Handle preflight requests
         if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
