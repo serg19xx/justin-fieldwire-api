@@ -54,8 +54,7 @@ jobs:
           **/scripts/**
           **/docs/**
           
-    - name: Create .env file on server
-      run: cp env.production .env
+
       
     - name: Test deployment
       run: |
