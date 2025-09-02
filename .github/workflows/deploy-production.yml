@@ -54,7 +54,7 @@ jobs:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          local-dir: ./tmp_env
+          local-dir: ./tmp_env/
           server-dir: ./
           dangerous-clean-slate: false
           timeout: 600000
