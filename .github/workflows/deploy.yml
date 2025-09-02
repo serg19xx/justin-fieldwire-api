@@ -22,6 +22,9 @@ jobs:
     - name: Create .env file
       run: echo "${{ secrets.ENV_FILE }}" > .env
         
+    - name: Install dependencies
+      run: composer install --no-dev --optimize-autoloader
+        
     - name: Deploy main files via FTP
       uses: SamKirkland/FTP-Deploy-Action@v4.3.4
       with:
