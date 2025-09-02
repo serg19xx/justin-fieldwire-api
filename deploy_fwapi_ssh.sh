@@ -7,7 +7,7 @@
 #   ./deploy_fwapi_ssh.sh                # auto: пробует composer на сервере, если нет — зальёт vendor с локали
 #   ./deploy_fwapi_ssh.sh --with-vendor  # принудительно зальёт vendor/ с локали
 #   ./deploy_fwapi_ssh.sh --no-vendor    # пропустит vendor (ожидается composer на сервере)
-#   ./deploy_fwapi_ssh.sh --update-env   # перезальёт .env из локального файла (.env.production)
+#   ./deploy_fwapi_ssh.sh --update-env   # перезальёт .env из локального файла (env.production)
 #
 # Flags можно комбинировать:
 #   ./deploy_fwapi_ssh.sh --with-vendor --update-env
@@ -16,7 +16,7 @@
 #   - SSH доступ на сервер (логин, хост, порт)
 #   - rsync и curl локально
 #   - composer локально (если vendor будет заливаться с локали)
-#   - .env.production локально (для флага --update-env)
+#   - env.production локально (для флага --update-env)
 #
 # Результат:
 #   - Код синхронизирован в $REMOTE_BASE
@@ -35,7 +35,7 @@ REMOTE_BASE="/home/${SSH_USER}/fwapi.medicalcontractor.ca"
 API_BASE_URL="https://fwapi.medicalcontractor.ca"
 
 # Локальный .env для опциональной заливки (--update-env)
-LOCAL_ENV_FILE="./.env.production"
+LOCAL_ENV_FILE="./env.production"
 
 # Вендор: auto|yes|no
 WITH_VENDOR="auto"
