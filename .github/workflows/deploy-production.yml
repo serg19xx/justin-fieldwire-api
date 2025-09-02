@@ -1,222 +1,70 @@
-name: Deploy to Production (Shared Hosting)
+name: Deploy to Production (Shared Hosting, Fast)
 
 on:
   push:
     branches: [ main, production ]
   workflow_dispatch:
-    inputs:
-      environment:
-        description: 'Environment to deploy to'
-        required: true
-        default: 'production'
-        type: choice
-        options:
-        - production
-        - staging
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Setup PHP
-      uses: shivammathur/setup-php@v2
-      with:
-        php-version: '8.2'
-        extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, zip
-        
-    - name: Install Composer
-      uses: php-actions/composer@v1
-        
-    - name: Clean and install dependencies
-      run: |
-        # Try to change permissions first, then remove vendor and composer.lock
-        sudo chmod -R 777 vendor/ 2>/dev/null || echo "Could not change vendor permissions"
-        sudo rm -rf vendor/ 2>/dev/null || echo "Could not remove vendor with sudo"
-        rm -rf vendor/ 2>/dev/null || echo "Could not remove vendor normally"
-        
-        # Alternative approach: use find to delete files
-        if [ -d "vendor" ]; then
-          echo "Trying alternative removal with find..."
-          find vendor -type f -delete 2>/dev/null || echo "Find delete failed"
-          find vendor -type d -delete 2>/dev/null || echo "Find directory delete failed"
-        fi
-        
-        rm -f composer.lock 2>/dev/null || echo "Could not remove composer.lock"
-        
-        # Verify cleanup
-        echo "Vendor directory removed: $(ls -la | grep vendor || echo 'Vendor not found')"
-        echo "Composer.lock removed: $(ls -la composer.lock 2>/dev/null || echo 'Composer.lock not found')"
-        
-        # Force removal if vendor still exists
-        if [ -d "vendor" ]; then
-          echo "Vendor still exists, trying force removal..."
-          sudo rm -rf vendor/ || echo "Force removal failed"
-        fi
-        
-        # Final verification
-        if [ ! -d "vendor" ]; then
-          echo "✅ Vendor directory successfully removed"
-        else
-          echo "❌ Vendor directory still exists, but continuing..."
-        fi
-        
-        # Install dependencies fresh
-        composer install --optimize-autoloader
-      
-    - name: Setup production environment
-      run: |
-        echo "${{ secrets.ENV_FILE }}" > .env
-        echo "Production environment configured from ENV_FILE secret"
-        
-    - name: Create required directories
-      run: |
-        mkdir -p logs
-        mkdir -p public/uploads/avatars
-        chmod 755 logs
-        chmod 755 public/uploads
-        chmod 755 public/uploads/avatars
-        
-    - name: Run basic checks
-      run: |
-        echo "Running basic checks..."
-        
-        # Check if essential files exist
-        if [ ! -f "src/Bootstrap/Application.php" ]; then
-          echo "❌ Application.php not found"
-          exit 1
-        fi
-        
-        if [ ! -f "public/index.php" ]; then
-          echo "❌ index.php not found"
-          exit 1
-        fi
-        
-        echo "✅ Basic checks passed"
-        
-    - name: Check code structure
-      run: |
-        echo "Checking code structure..."
-        
-        # Count PHP files
-        php_files=$(find src -name "*.php" | wc -l)
-        echo "Found $php_files PHP files in src/"
-        
-        # Check if controllers exist
-        if [ -d "src/Controllers" ]; then
-          controller_count=$(find src/Controllers -name "*.php" | wc -l)
-          echo "Found $controller_count controllers"
-        fi
-        
-        echo "✅ Code structure check passed"
-        
-    - name: Create deployment package
-      run: |
-        zip -r fieldwire-api-production.zip . \
-          -x "*.git*" \
-          -x "tests/*" \
-          -x "scripts/*" \
-          -x "docs/*" \
-          -x "*.md" \
-          -x "nginx.conf" \
-          -x "env.development" \
-          -x "env.example" \
-          -x "logs/*" \
-          -x ".env"
-        echo "Deployment package created: fieldwire-api-production.zip"
-        
-    - name: Verify files to upload
-      run: |
-        echo "Files that will be uploaded:"
-        find . -type f -not -path "./.git/*" -not -path "./tests/*" -not -path "./scripts/*" -not -path "./docs/*" -not -name "*.md" -not -name "nginx.conf" -not -name "env.*" -not -path "./logs/*" -not -name ".env" -not -name "composer.lock" -not -path "./vendor/*" -not -path "./.github/*" | head -20
-        
-        echo ""
-        echo "Total files to upload:"
-        find . -type f -not -path "./.git/*" -not -path "./tests/*" -not -path "./scripts/*" -not -path "./docs/*" -not -name "*.md" -not -name "nginx.conf" -not -name "env.*" -not -path "./logs/*" -not -name ".env" -not -name "composer.lock" -not -path "./vendor/*" -not -path "./.github/*" | wc -l
-        
-    - name: Deploy to production via FTP
-      uses: SamKirkland/FTP-Deploy-Action@v4.3.4
-      with:
-        server: ${{ secrets.FTP_SERVER }}
-        username: ${{ secrets.FTP_USERNAME }}
-        password: ${{ secrets.FTP_PASSWORD }}
-        local-dir: ./
-        server-dir: ./
-        exclude: |
-          **/.git/**
-          **/tests/**
-          **/scripts/**
-          **/docs/**
-          **/*.md
-          **/nginx.conf
-          **/env.development
-          **/env.example
-          **/logs/**
-          **/.env
-          **/composer.lock
-          **/vendor/**
-          **/.github/**
-          **/DEPLOY_*.md
-          **/SHARED_HOSTING_*.md
-          **/GITHUB_ACTIONS_*.md
-          **/vendor/*/test/**
-          **/vendor/*/tests/**
-          **/vendor/*/phpunit.xml*
-        dangerous-clean-slate: false
-        timeout: 600000
-        
-    - name: Deploy .env file separately
-      uses: SamKirkland/FTP-Deploy-Action@v4.3.4
-      with:
-        server: ${{ secrets.FTP_SERVER }}
-        username: ${{ secrets.FTP_USERNAME }}
-        password: ${{ secrets.FTP_PASSWORD }}
-        local-dir: ./
-        server-dir: ./
-        dangerous-clean-slate: false
-        
-    - name: Set proper permissions
-      run: |
-        echo "Setting permissions on server..."
-        # This will be handled by the hosting provider
-        
-    - name: Health check
-      run: |
-        echo "Waiting for deployment to complete..."
-        sleep 30
-        
-        echo "Testing production endpoints..."
-        
-        # Test health endpoint
-        if curl -f -s "https://fieldwire.medicalcontractor.ca/api/v1/health" > /dev/null; then
-          echo "✅ Health check passed"
-        else
-          echo "❌ Health check failed"
-          exit 1
-        fi
-        
-        # Test Swagger UI
-        if curl -f -s "https://fieldwire.medicalcontractor.ca/docs" > /dev/null; then
-          echo "✅ Swagger UI accessible"
-        else
-          echo "❌ Swagger UI not accessible"
-          exit 1
-        fi
-        
-        echo "🎉 Deployment successful!"
-        
-    - name: Notify deployment status
-      if: always()
-      run: |
-        echo "🚀 Deployment to production completed!"
-        echo "🌐 Production URL: https://fieldwire.medicalcontractor.ca"
-        echo "📚 Swagger UI: https://fieldwire.medicalcontractor.ca/docs"
-        echo "🔍 Health Check: https://fieldwire.medicalcontractor.ca/api/v1/health"
-        echo ""
-        echo "📝 Note: Health checks might fail on first deployment"
-        echo "This is normal and will resolve after server restart"
-        echo ""
-        echo "✅ Deployment package uploaded successfully!"
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # 1) Заливаем только исходники (без vendor, tests и т.п.)
+      - name: FTP deploy (code only, skip vendor)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          exclude: |
+            **/.git/**
+            **/.github/**
+            **/node_modules/**
+            **/tests/**
+            **/scripts/**
+            **/docs/**
+            **/*.md
+            **/nginx.conf
+            **/env.development
+            **/env.example
+            **/logs/**
+            **/.env
+            **/composer.lock
+            **/vendor/**
+          dangerous-clean-slate: false
+          timeout: 600000
+
+      # 2) Заливаем .env отдельно и целенаправленно (только этот файл)
+      - name: Create .env temp
+        run: |
+          mkdir -p tmp_env
+          echo "${{ secrets.ENV_FILE }}" > tmp_env/.env
+
+      - name: FTP deploy (.env only)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./tmp_env
+          server-dir: ./
+          dangerous-clean-slate: false
+          timeout: 600000
+
+      # 3) Лёгкая проверка доступности (без «магии»)
+      - name: Health check
+        run: |
+          echo "Wait for upload settle..."
+          sleep 10
+          set -e
+          curl -fsS "https://fieldwire.medicalcontractor.ca/api/v1/health" > /dev/null
+          curl -fsS "https://fieldwire.medicalcontractor.ca/docs" > /dev/null
+          echo "OK"
