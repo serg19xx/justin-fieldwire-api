@@ -48,7 +48,6 @@ jobs:
           **/phpstan.neon
           **/phpunit.xml
           **/.phpunit.cache/**
-          **/vendor/**
           **/logs/**
           **/node_modules/**
           **/coverage/**
