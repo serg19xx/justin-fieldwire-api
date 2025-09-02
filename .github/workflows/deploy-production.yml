@@ -31,19 +31,9 @@ jobs:
     - name: Install Composer
       uses: php-actions/composer@v1
         
-    - name: Clear Composer cache and install production dependencies
-      run: |
-        # Clear Composer cache to avoid conflicts
-        composer clear-cache --no-interaction
-        
-        # Install only production dependencies (this will automatically exclude dev dependencies)
-        composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
-        
-        # Verify installation
-        echo "Verifying Composer installation..."
-        composer show --installed | head -20
-        echo "✅ Composer installation completed"
-        
+    - name: Install dependencies
+      run: composer install --optimize-autoloader
+      
     - name: Setup production environment
       run: |
         echo "${{ secrets.ENV_FILE }}" > .env
