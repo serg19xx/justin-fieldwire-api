@@ -163,6 +163,7 @@ jobs:
           **/SHARED_HOSTING_*.md
           **/GITHUB_ACTIONS_*.md
         dangerous-clean-slate: false
+        timeout: 600000
         
     - name: Deploy .env file separately
       uses: SamKirkland/FTP-Deploy-Action@v4.3.4
