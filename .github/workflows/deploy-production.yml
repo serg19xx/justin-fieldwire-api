@@ -31,8 +31,18 @@ jobs:
     - name: Install Composer
       uses: php-actions/composer@v1
         
-    - name: Install dependencies
-      run: composer install --optimize-autoloader
+    - name: Clean and install dependencies
+      run: |
+        # Remove vendor and composer.lock to avoid permission issues
+        rm -rf vendor/
+        rm -f composer.lock
+        
+        # Verify cleanup
+        echo "Vendor directory removed: $(ls -la | grep vendor || echo 'Vendor not found')"
+        echo "Composer.lock removed: $(ls -la composer.lock 2>/dev/null || echo 'Composer.lock not found')"
+        
+        # Install dependencies fresh
+        composer install --optimize-autoloader
       
     - name: Setup production environment
       run: |
