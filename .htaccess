@@ -1,4 +1,5 @@
 RewriteEngine On
+RewriteRule ^$ docs [R=302,L]
 
 # Basic PHP settings
 php_value max_execution_time 30
