@@ -8,7 +8,14 @@ use App\Services\EmailService;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
+use OpenApi\Annotations as OA;
 
+/**
+ * @OA\Tag(
+ *     name="Two-Factor",
+ *     description="Two-factor authentication management"
+ * )
+ */
 class TwoFactorController
 {
     private Logger $logger;
@@ -26,7 +33,52 @@ class TwoFactorController
     }
 
     /**
-     * Send 2FA verification code
+     * @OA\Post(
+     *     path="/api/v1/2fa/send-code",
+     *     summary="Send 2FA verification code",
+     *     description="Send verification code via SMS or email",
+     *     tags={"Two-Factor"},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         description="2FA code request",
+     *         @OA\JsonContent(
+     *             required={"email", "delivery_method"},
+     *             @OA\Property(property="email", type="string", format="email", example="user@example.com"),
+     *             @OA\Property(property="delivery_method", type="string", enum={"sms", "email"}, example="sms")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Code sent successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Verification code sent successfully"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="delivery_method", type="string", example="sms"),
+     *                 @OA\Property(property="expires_at", type="string", format="date-time")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Bad request - validation error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid input data")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="User not found",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=404),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="User not found")
+     *         )
+     *     )
+     * )
      */
     public function sendCode(): void
     {
@@ -176,7 +228,51 @@ class TwoFactorController
     }
 
     /**
-     * Verify 2FA code
+     * @OA\Post(
+     *     path="/api/v1/2fa/verify-code",
+     *     summary="Verify 2FA code",
+     *     description="Verify the 2FA code sent to user",
+     *     tags={"Two-Factor"},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         description="2FA code verification",
+     *         @OA\JsonContent(
+     *             required={"email", "code"},
+     *             @OA\Property(property="email", type="string", format="email", example="user@example.com"),
+     *             @OA\Property(property="code", type="string", example="123456")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Code verified successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Code verified successfully"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="verified", type="boolean", example=true)
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Bad request - validation error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid input data")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Invalid or expired code",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid or expired code")
+     *         )
+     *     )
+     * )
      */
     public function verifyCode(): void
     {

@@ -8,7 +8,6 @@ class Config
 
     public function __construct()
     {
-        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Config constructor called' . PHP_EOL, FILE_APPEND);
         try {
             $this->config = [
                 'app' => [
@@ -20,6 +19,7 @@ class Config
                 'logging' => [
                     'level' => $_ENV['LOG_LEVEL'] ?? 'info',
                     'channel' => $_ENV['LOG_CHANNEL'] ?? 'file',
+                    'log_file' => $_ENV['LOG_FILE'] ?? 'logs/app.log',
                 ],
                 'cors' => [
                     'allowed_origins' => explode(',', $_ENV['CORS_ALLOWED_ORIGINS'] ?? ''),
@@ -27,9 +27,8 @@ class Config
                     'allowed_headers' => explode(',', $_ENV['CORS_ALLOWED_HEADERS'] ?? 'Content-Type,Authorization'),
                 ],
             ];
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Config constructor completed' . PHP_EOL, FILE_APPEND);
         } catch (Exception $e) {
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - ERROR in Config constructor: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
+            file_put_contents(__DIR__ . '/../../logs/app.log', date('Y-m-d H:i:s') . ' - ERROR in Config constructor: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
             throw $e;
         }
     }

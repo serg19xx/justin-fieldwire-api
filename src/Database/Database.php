@@ -10,7 +10,7 @@ use Monolog\Logger;
 class Database
 {
     private static ?Connection $connection = null;
-    private static Logger $logger;
+    private static ?Logger $logger = null;
 
     public static function setLogger(Logger $logger): void
     {
@@ -52,7 +52,7 @@ class Database
         try {
             $connection = DriverManager::getConnection($config);
             
-            if (isset(self::$logger)) {
+            if (self::$logger !== null) {
                 self::$logger->info('Database connection established', [
                     'host' => $config['host'],
                     'port' => $config['port'],
@@ -62,7 +62,7 @@ class Database
 
             return $connection;
         } catch (Exception $e) {
-            if (isset(self::$logger)) {
+            if (self::$logger !== null) {
                 self::$logger->error('Database connection failed', [
                     'error' => $e->getMessage(),
                     'host' => $config['host'],
@@ -85,7 +85,7 @@ class Database
             $connection->executeQuery('SELECT 1');
             return true;
         } catch (\Exception $e) {
-            if (isset(self::$logger)) {
+            if (self::$logger !== null) {
                 self::$logger->error('Database connection test failed', [
                     'error' => $e->getMessage()
                 ]);
@@ -103,5 +103,13 @@ class Database
             self::$connection->close();
             self::$connection = null;
         }
+    }
+
+    /**
+     * Get logger instance
+     */
+    public static function getLogger(): ?Logger
+    {
+        return self::$logger;
     }
 }

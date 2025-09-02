@@ -1,20 +1,9 @@
 RewriteEngine On
 
-# Force PHP 8.2 for LiteSpeed
+# Force PHP 8.2 for shared hosting
 <IfModule mod_php.c>
-    php_value engine Off
-</IfModule>
-
-# LiteSpeed specific PHP 8.2 configuration
-<IfModule Litespeed>
-    # Force PHP 8.2
     php_value engine On
     php_flag engine On
-</IfModule>
-
-# Alternative PHP 8.2 forcing methods
-<IfModule mod_suphp.c>
-    suPHP_ConfigPath /home/yjyhtqh8_fieldwire/public_html
 </IfModule>
 
 # PHP 8.2 specific optimizations
@@ -29,8 +18,8 @@ RewriteEngine On
     php_flag opcache.fast_shutdown 1
     
     # Set max execution time for API requests
-    php_value max_execution_time 30
-    php_value memory_limit 256M
+    php_value max_execution_time 60
+    php_value memory_limit 512M
     
     # Enable error reporting for development
     php_flag display_errors Off
@@ -46,14 +35,32 @@ RewriteEngine On
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>
 
+# CORS headers for API
+<IfModule mod_headers.c>
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+    Header always set Access-Control-Max-Age "86400"
+</IfModule>
+
+# Handle CORS preflight requests
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^(.*)$ $1 [R=200,L]
+
 # Prevent access to sensitive files
-<FilesMatch "\.(env|log|sql|md|txt|ini)$">
+<FilesMatch "\.(env|log|sql|md|txt|ini|gitignore|gitattributes)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Prevent access to sensitive directories
+<FilesMatch "^(composer\.json|composer\.lock|README\.md|nginx\.conf)$">
     Order allow,deny
     Deny from all
 </FilesMatch>
 
 # Allow access to public files
-<FilesMatch "^(index\.php|swagger-ui\.html|avatar\.php)$">
+<FilesMatch "^(index\.php|swagger-ui\.php|avatar\.php|webhook\.php)$">
     Order allow,deny
     Allow from all
 </FilesMatch>
@@ -71,5 +78,10 @@ RewriteRule ^avatar/(.+)$ avatar.php [L,QSA]
 # PHP settings
 php_value upload_max_filesize 10M
 php_value post_max_size 10M
-php_value max_execution_time 30
-php_value memory_limit 256M
+php_value max_execution_time 60
+php_value memory_limit 512M
+
+# Main routing - all requests go through index.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php [QSA,L]

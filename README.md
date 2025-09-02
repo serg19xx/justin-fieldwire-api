@@ -1,315 +1,161 @@
 # FieldWire API
 
-REST API построенный на базе FlightPHP с современной архитектурой и лучшими практиками.
+REST API для приложения FieldWire, построенный на FlightPHP с поддержкой аутентификации, 2FA и управления пользователями.
 
-## Особенности
+## 🚀 **Быстрый старт**
 
-- 🚀 **FlightPHP** - легкий и быстрый PHP фреймворк
-- 📊 **Логирование** - Monolog для детального логирования
-- 🔒 **CORS поддержка** - настраиваемая политика CORS
-- 🧪 **Тестирование** - PHPUnit для unit тестов
-- 📋 **Код стайл** - PHP CodeSniffer для стандартов кода
-- 🔢 **Версионирование** - поддержка версий API
-
-## Требования
-
-- PHP 8.1 или выше
-- Composer
-- MySQL 5.7 или выше (для продакшена)
-- Веб-сервер (Apache/Nginx) или встроенный PHP сервер
-
-## Установка
-
-1. Клонируйте репозиторий:
+### **Локальная разработка:**
 ```bash
-git clone <repository-url>
+# Клонировать репозиторий
+git clone https://github.com/your-username/fieldwire-api.git
 cd fieldwire-api
-```
 
-2. Установите зависимости:
-```bash
+# Установить зависимости
 composer install
+
+# Настроить окружение
+cp env.development .env
+
+# Запустить сервер
+./scripts/start-server.sh 8000
 ```
 
-3. Скопируйте файл конфигурации:
+### **Доступные endpoints:**
+- **Health Check:** http://localhost:8000/api/v1/health
+- **API Info:** http://localhost:8000/api
+- **Swagger UI:** http://localhost:8000/docs
+- **Swagger JSON:** http://localhost:8000/swagger.json
+
+## 🔧 **Технологии**
+
+- **PHP 8.2+** - основной язык
+- **FlightPHP** - веб-фреймворк
+- **Doctrine DBAL** - работа с базой данных
+- **Monolog** - логирование
+- **Twilio** - SMS сервис
+- **SendGrid** - email сервис
+- **Swagger/OpenAPI** - документация API
+
+## 📚 **Документация**
+
+- [API Endpoints Specification](docs/API_ENDPOINTS_SPECIFICATION.md)
+- [2FA API Guide](docs/2FA_API.md)
+- [Avatar Upload Guide](docs/AVATAR_USAGE_GUIDE.md)
+- [Email Setup](docs/EMAIL_SETUP.md)
+
+## 🚀 **Деплой**
+
+### **Автоматический деплой через GitHub Actions:**
+
+1. **Настройте GitHub Secrets:**
+   - `FTP_SERVER` - ftp.medicalcontractor.ca
+   - `FTP_USERNAME` - yjyhtqh8_fieldwire
+   - `FTP_PASSWORD` - Medeli@2025
+
+2. **Деплой происходит автоматически:**
+   - **Production** - при push в `main` или `production`
+   - **Staging** - при push в `develop` или `staging`
+
+3. **Ручной деплой:**
+   - GitHub → Actions → Deploy to Production → Run workflow
+
+### **Ручной деплой:**
 ```bash
-cp env.example .env
+# Подготовка для продакшна
+./scripts/deploy-shared-hosting.sh
+
+# Создание архива
+zip -r fieldwire-api-production.zip . -x "*.git*" "tests/*" "scripts/*" "docs/*" "*.md" "nginx.conf" "env.development" "env.example" "logs/*" ".env"
+
+# Загрузить на хостинг через cPanel File Manager
 ```
 
-4. Настройте переменные окружения в файле `.env`:
-```env
-# Application Configuration
-APP_NAME="FieldWire API"
-APP_ENV=development
-APP_DEBUG=true
-APP_URL=http://localhost:8000
+## 🌐 **Production URLs**
 
-# Logging
-LOG_LEVEL=debug
-LOG_CHANNEL=file
+- **Production:** https://fieldwire.medicalcontractor.ca
+- **Health Check:** https://fieldwire.medicalcontractor.ca/api/v1/health
+- **Swagger UI:** https://fieldwire.medicalcontractor.ca/docs
+- **API Info:** https://fieldwire.medicalcontractor.ca/api
 
-# CORS Configuration
-CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:8080
-CORS_ALLOWED_METHODS=GET,POST,PUT,DELETE,OPTIONS
-CORS_ALLOWED_HEADERS=Content-Type,Authorization,X-Requested-With
-```
+## 🧪 **Тестирование**
 
-5. Создайте директории для логов:
 ```bash
-mkdir -p logs
-chmod 755 logs
+# Запуск тестов
+composer test
+
+# Проверка кода
+composer cs-check
+
+# Исправление стиля кода
+composer cs-fix
+
+# Анализ кода
+composer analyze
 ```
 
-6. Настройте базу данных в файле `.env`:
-```env
-# Database Configuration
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=fieldwire_api
-DB_USERNAME=your_username
-DB_PASSWORD=your_password
-```
-
-7. Установите базу данных:
-```bash
-composer db:setup
-```
-
-## Запуск
-
-### Разработка
-
-#### Использование скриптов (рекомендуется):
-```bash
-# Запуск сервера
-./scripts/start-server.sh
-
-# Запуск на другом порту
-./scripts/start-server.sh 8080
-
-# Остановка сервера
-./scripts/stop-server.sh
-
-# Перезапуск сервера
-./scripts/restart-server.sh
-```
-
-#### Использование Composer:
-```bash
-# Запуск сервера
-composer server:start
-
-# Остановка сервера
-composer server:stop
-
-# Перезапуск сервера
-composer server:restart
-```
-
-#### Ручной запуск:
-```bash
-php -S localhost:8000 -t public
-```
-
-### Продакшн
-Настройте веб-сервер (Apache/Nginx) для работы с директорией `public/`.
-
-## API Endpoints
-
-### Health Check
-- `GET /api/v1/health` - Check API health status
-- `GET /api/v1/version` - Get API version information
-- `GET /api/health` - Legacy health check (backward compatibility)
-
-### Documentation
-- `GET /api` - API documentation overview
-- `GET /api/docs` - Swagger UI interface
-- `GET /api/swagger/spec` - OpenAPI specification (JSON)
-
-### Examples
-
-#### Health Check
-```bash
-curl http://localhost:8000/api/v1/health
-```
-
-Response:
-```json
-{
-    "status": "healthy",
-    "timestamp": "2025-08-28T21:30:00+00:00",
-    "uptime": {
-        "seconds": 12345,
-        "formatted": "3h 25m 45s"
-    },
-    "memory_usage": {
-        "current": 2097152,
-        "peak": 3145728,
-        "limit": "512M"
-    },
-    "version": "1.0.0"
-}
-```
-
-#### API Version
-```bash
-curl http://localhost:8000/api/v1/version
-```
-
-Response:
-```json
-{
-    "api_version": "v1",
-    "status": "stable",
-    "released": "2025-08-28",
-    "endpoints": {
-        "health": "GET /api/v1/health",
-        "version": "GET /api/v1/version"
-    }
-}
-```
-
-#### API Documentation
-```bash
-curl http://localhost:8000/api
-```
-
-Response:
-```json
-{
-    "name": "FieldWire API",
-    "version": "1.0.0",
-    "description": "REST API built with FlightPHP",
-    "documentation": {
-        "swagger_ui": "/api/docs",
-        "openapi_spec": "/api/swagger/spec"
-    },
-    "versions": {
-        "v1": {
-            "status": "stable",
-            "endpoints": {
-                "health": "GET /api/v1/health",
-                "version": "GET /api/v1/version"
-            }
-        }
-    }
-}
-```
-
-## Версионирование API
-
-API использует версионирование в URL:
-- **v1** - текущая стабильная версия
-- **Legacy** - старые маршруты для обратной совместимости
-
-### Структура версий:
-```
-/api/v1/     - API версии 1
-/api/        - Legacy маршруты
-```
-
-## Примеры запросов
-
-### Проверка здоровья API (v1)
-```bash
-curl -X GET http://localhost:8000/api/v1/health
-```
-
-### Информация о версии API (v1)
-```bash
-curl -X GET http://localhost:8000/api/v1/version
-```
-
-### Проверка здоровья API (legacy)
-```bash
-curl -X GET http://localhost:8000/api/health
-```
-
-### Получение документации API
-```bash
-curl -X GET http://localhost:8000/api
-```
-
-## Структура проекта
+## 📁 **Структура проекта**
 
 ```
 fieldwire-api/
-├── public/                 # Публичная директория
-│   └── index.php          # Точка входа
-├── src/                   # Исходный код
-│   ├── Bootstrap/         # Инициализация приложения
-│   ├── Config/           # Конфигурация
-│   ├── Controllers/      # Контроллеры
-│   ├── Middleware/       # Middleware
-│   └── Routes/           # Маршруты
-├── tests/                # Тесты
-├── logs/                 # Логи
-├── composer.json         # Зависимости
-├── env.example           # Пример конфигурации
-└── README.md            # Документация
+├── .github/workflows/          # GitHub Actions
+├── docs/                       # Документация
+├── public/                     # Публичные файлы
+│   ├── index.php              # Точка входа
+│   ├── .htaccess              # Apache конфигурация
+│   ├── swagger.php            # Swagger JSON
+│   └── swagger-ui.php         # Swagger UI
+├── scripts/                    # Скрипты деплоя
+├── src/                        # Исходный код
+│   ├── Bootstrap/             # Инициализация приложения
+│   ├── Config/                # Конфигурация
+│   ├── Controllers/           # Контроллеры API
+│   ├── Database/              # Работа с БД
+│   ├── Middleware/            # Промежуточное ПО
+│   ├── Routes/                # Маршруты
+│   ├── Services/              # Сервисы
+│   └── Swagger/               # OpenAPI спецификация
+├── tests/                      # Тесты
+├── vendor/                     # Зависимости Composer
+├── .env                       # Переменные окружения
+├── composer.json              # Зависимости
+└── README.md                  # Этот файл
 ```
 
-## Разработка
+## 🔒 **Безопасность**
 
-### Запуск тестов
-```bash
-composer test
-```
+- JWT аутентификация
+- 2FA поддержка
+- CORS настройки
+- Защита от SQL инъекций
+- Валидация входных данных
+- Логирование всех операций
 
-### Проверка кода
-```bash
-composer analyze
-composer cs
-```
+## 📝 **Разработка**
 
-### Исправление стиля кода
-```bash
-composer cs-fix
-```
+### **Добавление новых endpoints:**
+1. Создайте контроллер в `src/Controllers/`
+2. Добавьте OpenAPI аннотации
+3. Зарегистрируйте маршрут в `src/Routes/ApiRoutes.php`
+4. Добавьте тесты в `tests/`
 
-## Лицензия
+### **Обновление Swagger:**
+- Аннотации автоматически генерируют документацию
+- Swagger UI доступен по адресу `/docs`
+- JSON спецификация по адресу `/swagger.json`
 
-MIT License
+## 🚨 **Поддержка**
 
-## Деплой на продакшен
+При возникновении проблем:
 
-### GitHub Actions (рекомендуется) ⭐
-```bash
-# Полная автоматизация - деплой при каждом push в main
-git add .
-git commit -m "Update API"
-git push origin main
-```
+1. Проверьте логи в папке `logs/`
+2. Убедитесь, что `.env` файл настроен
+3. Проверьте права доступа к папкам
+4. Обратитесь в поддержку хостинга
 
-**Настройка:**
-1. Добавьте secrets в GitHub (см. `GITHUB_ACTIONS_SETUP.md`)
-2. Каждый push в main автоматически деплоит на продакшен
-3. Проверяйте статус в GitHub → Actions
+## 📄 **Лицензия**
 
-### Автоматический деплой через SSH
-```bash
-# Полностью автоматический деплой на сервер через SSH
-./scripts/auto-deploy.sh
-```
+Proprietary - все права защищены.
 
-### Автоматический деплой через FTP
-```bash
-# Автоматическая загрузка через FTP + ручная настройка на сервере
-./scripts/ftp-deploy.sh
-```
+---
 
-### Простой деплой (ручная загрузка)
-```bash
-# Подготовка файлов для ручной загрузки
-./scripts/simple-deploy.sh
-```
-
-### Ручной деплой
-```bash
-# Подготовка к деплою
-./scripts/deploy.sh
-
-# Загрузка файлов на сервер и настройка
-# См. PRODUCTION_DEPLOY.md для подробных инструкций
-```
-# Force redeploy
+**FieldWire API** - мощное и надежное решение для управления полевыми работами и коммуникации.

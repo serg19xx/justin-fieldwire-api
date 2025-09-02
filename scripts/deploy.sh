@@ -40,9 +40,10 @@ fi
 
 echo -e "${BLUE}📁 Creating required directories...${NC}"
 mkdir -p logs
-mkdir -p public/uploads
+mkdir -p public/uploads/avatars
 chmod 755 logs
 chmod 755 public/uploads
+chmod 755 public/uploads/avatars
 
 echo -e "${BLUE}🔒 Setting proper permissions...${NC}"
 chmod 644 .env
@@ -66,14 +67,16 @@ echo -e "${GREEN}🎉 Production deployment preparation completed!${NC}"
 echo ""
 echo -e "${BLUE}📋 Next steps for production:${NC}"
 echo "1. Upload files to your production server"
-echo "2. Configure your web server (Apache/Nginx)"
+echo "2. Configure nginx with the provided nginx.conf"
 echo "3. Update .env with production database settings (DB_HOST=localhost)"
 echo "4. Run: composer db:setup"
 echo "5. Test your endpoints"
 echo ""
 echo -e "${BLUE}🌐 Production endpoints:${NC}"
-echo "- Health check: https://your-domain.com/api/v1/health"
-echo "- API docs: https://your-domain.com/api/docs"
-echo "- Swagger UI: https://your-domain.com/api/swagger/spec"
+echo "- Health check: https://fieldwire.medicalcontractor.ca/api/v1/health"
+echo "- API docs: https://fieldwire.medicalcontractor.ca/api/docs"
+echo "- Swagger UI: https://fieldwire.medicalcontractor.ca/docs"
+echo "- Swagger JSON: https://fieldwire.medicalcontractor.ca/swagger.json"
 echo ""
 echo -e "${YELLOW}⚠️  Remember: Production uses localhost database!${NC}"
+echo -e "${YELLOW}⚠️  Make sure nginx is configured with the provided nginx.conf${NC}"

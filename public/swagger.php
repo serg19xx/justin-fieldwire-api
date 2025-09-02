@@ -1,51 +1,10 @@
 <?php
 
-require_once __DIR__ . '/../vendor/autoload.php';
-
-use OpenApi\Generator;
-
-// Set error reporting for development
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+// Simple Swagger endpoint that returns the existing JSON file
+// This ensures Swagger works immediately without complex generation
 
 try {
-    // Debug: Check what directories we're scanning
-    $scanDirs = [
-        __DIR__ . '/../src/Controllers',
-        __DIR__ . '/../src/Swagger'
-    ];
-    
-    error_log('Scanning directories: ' . implode(', ', $scanDirs));
-    
-    // Check if directories exist
-    foreach ($scanDirs as $dir) {
-        if (!is_dir($dir)) {
-            error_log('Directory does not exist: ' . $dir);
-        } else {
-            error_log('Directory exists: ' . $dir);
-            $files = glob($dir . '/*.php');
-            error_log('PHP files in ' . $dir . ': ' . implode(', ', $files));
-        }
-    }
-
-    // Generate OpenAPI specification
-    $openapi = Generator::scan($scanDirs);
-
-    // Debug: Check what was generated
-    if (!$openapi) {
-        throw new Exception('Failed to generate OpenAPI specification - Generator returned null');
-    }
-
-    // Debug: Log the generated object
-    error_log('Generated OpenAPI object class: ' . get_class($openapi));
-    error_log('Generated OpenAPI object properties: ' . print_r(get_object_vars($openapi), true));
-
-    // Ensure OpenAPI version is set
-    if (empty($openapi->openapi)) {
-        $openapi->openapi = '3.0.0';
-    }
-
-    // Output as JSON with proper headers
+    // Set proper headers
     header('Content-Type: application/json');
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
@@ -57,21 +16,32 @@ try {
         exit();
     }
 
-    // Generate JSON with proper formatting
-    $json = $openapi->toJson(JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-    
-    // Debug: Log the generated JSON
-    error_log('Generated OpenAPI JSON: ' . substr($json, 0, 1000) . '...');
-    
-    echo $json;
+    // Check if swagger.json exists
+    $swaggerFile = __DIR__ . '/swagger.json';
+    if (!file_exists($swaggerFile)) {
+        throw new Exception('swagger.json file not found');
+    }
+
+    // Read and return the existing swagger.json
+    $swaggerContent = file_get_contents($swaggerFile);
+    if ($swaggerContent === false) {
+        throw new Exception('Failed to read swagger.json file');
+    }
+
+    // Validate JSON
+    $decoded = json_decode($swaggerContent);
+    if (json_last_error() !== JSON_ERROR_NONE) {
+        throw new Exception('Invalid JSON in swagger.json: ' . json_last_error_msg());
+    }
+
+    echo $swaggerContent;
     
 } catch (Exception $e) {
-    error_log('Swagger generation error: ' . $e->getMessage());
+    error_log('Swagger error: ' . $e->getMessage());
     http_response_code(500);
     header('Content-Type: application/json');
     echo json_encode([
-        'error' => 'Failed to generate OpenAPI specification',
-        'message' => $e->getMessage(),
-        'trace' => $e->getTraceAsString()
+        'error' => 'Swagger failed to load',
+        'message' => $e->getMessage()
     ]);
 }

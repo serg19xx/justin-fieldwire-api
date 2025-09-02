@@ -14,77 +14,50 @@ class ApiRoutes
 
     public function __construct(Logger $logger)
     {
-        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - ApiRoutes constructor called' . PHP_EOL, FILE_APPEND);
         $this->logger = $logger;
-        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - About to call register() method' . PHP_EOL, FILE_APPEND);
-        try {
-            $this->register();
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - register() method completed successfully' . PHP_EOL, FILE_APPEND);
-        } catch (\Exception $e) {
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - ERROR in register() method: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
-            throw $e;
-        }
-        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - ApiRoutes constructor completed' . PHP_EOL, FILE_APPEND);
+        $this->register();
     }
 
     public function register(): void
     {
-        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - register() method called' . PHP_EOL, FILE_APPEND);
-        
         // API v1 routes
-        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - About to call registerV1Routes()' . PHP_EOL, FILE_APPEND);
-        try {
-            $this->registerV1Routes();
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - registerV1Routes() completed' . PHP_EOL, FILE_APPEND);
-        } catch (\Exception $e) {
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - ERROR in registerV1Routes: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
-            throw $e;
-        }
+        $this->registerV1Routes();
         
         // Swagger documentation routes
-        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Registering Swagger routes' . PHP_EOL, FILE_APPEND);
-        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Current directory: ' . __DIR__ . PHP_EOL, FILE_APPEND);
-        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Public directory path: ' . __DIR__ . '/../public/' . PHP_EOL, FILE_APPEND);
-        
         Flight::route('GET /swagger.json', function() {
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Swagger JSON route called' . PHP_EOL, FILE_APPEND);
             try {
-                $filePath = __DIR__ . '/../../public/swagger-simple.php';
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Swagger file path: ' . $filePath . PHP_EOL, FILE_APPEND);
+                $filePath = __DIR__ . '/../../public/swagger.php';
                 if (!file_exists($filePath)) {
                     throw new \Exception('Swagger file not found: ' . $filePath);
                 }
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Swagger file exists, loading...' . PHP_EOL, FILE_APPEND);
                 require_once $filePath;
             } catch (\Exception $e) {
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Swagger JSON error: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
                 Flight::json(['error' => 'Failed to load Swagger specification'], 500);
             }
         });
 
+        // Swagger UI route
         Flight::route('GET /docs', function() {
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Swagger UI /docs route called' . PHP_EOL, FILE_APPEND);
             try {
-                $filePath = __DIR__ . '/../../public/swagger-ui-simple.php';
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Swagger UI file path: ' . $filePath . PHP_EOL, FILE_APPEND);
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Current directory: ' . __DIR__ . PHP_EOL, FILE_APPEND);
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - File exists check: ' . (file_exists($filePath) ? 'YES' : 'NO') . PHP_EOL, FILE_APPEND);
+                $filePath = __DIR__ . '/../../public/swagger-ui.php';
                 if (!file_exists($filePath)) {
                     throw new \Exception('Swagger UI file not found: ' . $filePath);
                 }
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Swagger UI file exists, loading...' . PHP_EOL, FILE_APPEND);
                 require_once $filePath;
             } catch (\Exception $e) {
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Swagger UI error: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
                 Flight::json(['error' => 'Failed to load Swagger UI'], 500);
             }
         });
 
+        Flight::route('GET /api/docs', function() {
+            Flight::json(['message' => 'API docs route works!']);
+        });
 
+        // Test route
+        Flight::route('GET /test', function () {
+            Flight::json(['message' => 'Test route works!']);
+        });
         
-        
-        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Swagger routes registered successfully' . PHP_EOL, FILE_APPEND);
-
         // API documentation
         Flight::route('GET /api', function () {
             Flight::json([
@@ -96,6 +69,8 @@ class ApiRoutes
                     'version' => '1.0.0',
                     'description' => 'REST API built with FlightPHP',
                     'documentation' => [
+                        'swagger_ui' => 'GET /docs',
+                        'swagger_json' => 'GET /swagger.json',
                         'endpoints' => 'GET /api/v1/health',
                         'version' => 'GET /api/v1/version'
                     ],
@@ -153,14 +128,10 @@ class ApiRoutes
 
         // Profile management routes (protected)
         try {
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Creating ProfileController and AuthMiddleware' . PHP_EOL, FILE_APPEND);
-            
             $twilioService = new \App\Services\TwilioService($this->logger);
             $emailService = new \App\Services\EmailService($this->logger);
             $profileController = new \App\Controllers\ProfileController($this->logger, $twilioService, $emailService);
             $authMiddleware = new \App\Middleware\AuthMiddleware($this->logger);
-            
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - ProfileController and AuthMiddleware created successfully' . PHP_EOL, FILE_APPEND);
             
             // Profile routes with auth middleware
             Flight::route('GET /api/v1/profile', function() use ($profileController, $authMiddleware) {
@@ -191,13 +162,8 @@ class ApiRoutes
             
             // Work status management route
             Flight::route('PUT /api/v1/profile/work-status', function() use ($profileController, $authMiddleware) {
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Work status route called' . PHP_EOL, FILE_APPEND);
-                
                 if ($authMiddleware->handle()) {
-                    file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Auth middleware passed, calling updateWorkStatus' . PHP_EOL, FILE_APPEND);
                     $profileController->updateWorkStatus();
-                } else {
-                    file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Auth middleware failed' . PHP_EOL, FILE_APPEND);
                 }
             });
             
@@ -215,7 +181,6 @@ class ApiRoutes
             });
             
         } catch (\Exception $e) {
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - ERROR creating ProfileController: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
             throw $e;
         }
 
@@ -239,7 +204,6 @@ class ApiRoutes
             Flight::route('POST /2fa/toggle', [$twoFactorController, 'toggle2FA']);
             
         } catch (\Exception $e) {
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - ERROR creating 2FA controllers: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
             throw $e;
         }
     }
