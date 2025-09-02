@@ -128,6 +128,15 @@ jobs:
           -x ".env"
         echo "Deployment package created: fieldwire-api-production.zip"
         
+    - name: Verify files to upload
+      run: |
+        echo "Files that will be uploaded:"
+        find . -type f -not -path "./.git/*" -not -path "./tests/*" -not -path "./scripts/*" -not -path "./docs/*" -not -name "*.md" -not -name "nginx.conf" -not -name "env.*" -not -path "./logs/*" -not -name ".env" -not -name "composer.lock" -not -path "./vendor/*" -not -path "./.github/*" | head -20
+        
+        echo ""
+        echo "Total files to upload:"
+        find . -type f -not -path "./.git/*" -not -path "./tests/*" -not -path "./scripts/*" -not -path "./docs/*" -not -name "*.md" -not -name "nginx.conf" -not -name "env.*" -not -path "./logs/*" -not -name ".env" -not -name "composer.lock" -not -path "./vendor/*" -not -path "./.github/*" | wc -l
+        
     - name: Deploy to production via FTP
       uses: SamKirkland/FTP-Deploy-Action@v4.3.4
       with:
@@ -137,16 +146,22 @@ jobs:
         local-dir: ./
         server-dir: ./public_html/
         exclude: |
-          **/.git*
-          **/tests/
-          **/scripts/
-          **/docs/
+          **/.git/**
+          **/tests/**
+          **/scripts/**
+          **/docs/**
           **/*.md
           **/nginx.conf
           **/env.development
           **/env.example
-          **/logs/
+          **/logs/**
           **/.env
+          **/composer.lock
+          **/vendor/**
+          **/.github/**
+          **/DEPLOY_*.md
+          **/SHARED_HOSTING_*.md
+          **/GITHUB_ACTIONS_*.md
         dangerous-clean-slate: false
         
     - name: Deploy .env file separately
