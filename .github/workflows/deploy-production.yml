@@ -144,7 +144,7 @@ jobs:
         username: ${{ secrets.FTP_USERNAME }}
         password: ${{ secrets.FTP_PASSWORD }}
         local-dir: ./
-        server-dir: ./public_html/
+        server-dir: ./
         exclude: |
           **/.git/**
           **/tests/**
@@ -162,6 +162,9 @@ jobs:
           **/DEPLOY_*.md
           **/SHARED_HOSTING_*.md
           **/GITHUB_ACTIONS_*.md
+          **/vendor/*/test/**
+          **/vendor/*/tests/**
+          **/vendor/*/phpunit.xml*
         dangerous-clean-slate: false
         timeout: 600000
         
