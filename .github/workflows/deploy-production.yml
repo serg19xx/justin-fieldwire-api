@@ -31,14 +31,18 @@ jobs:
     - name: Install Composer
       uses: php-actions/composer@v1
         
-    - name: Clear vendor and install production dependencies
+    - name: Clear Composer cache and install production dependencies
       run: |
-        # Remove vendor directory completely to avoid permission issues
-        rm -rf vendor/
-        rm -f composer.lock
+        # Clear Composer cache to avoid conflicts
+        composer clear-cache --no-interaction
         
-        # Install only production dependencies
-        composer install --no-dev --optimize-autoloader --no-interaction
+        # Install only production dependencies (this will automatically exclude dev dependencies)
+        composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist
+        
+        # Verify installation
+        echo "Verifying Composer installation..."
+        composer show --installed | head -20
+        echo "✅ Composer installation completed"
         
     - name: Setup production environment
       run: |
