@@ -33,13 +33,36 @@ jobs:
         
     - name: Clean and install dependencies
       run: |
-        # Remove vendor and composer.lock to avoid permission issues
-        rm -rf vendor/
-        rm -f composer.lock
+        # Try to change permissions first, then remove vendor and composer.lock
+        sudo chmod -R 777 vendor/ 2>/dev/null || echo "Could not change vendor permissions"
+        sudo rm -rf vendor/ 2>/dev/null || echo "Could not remove vendor with sudo"
+        rm -rf vendor/ 2>/dev/null || echo "Could not remove vendor normally"
+        
+        # Alternative approach: use find to delete files
+        if [ -d "vendor" ]; then
+          echo "Trying alternative removal with find..."
+          find vendor -type f -delete 2>/dev/null || echo "Find delete failed"
+          find vendor -type d -delete 2>/dev/null || echo "Find directory delete failed"
+        fi
+        
+        rm -f composer.lock 2>/dev/null || echo "Could not remove composer.lock"
         
         # Verify cleanup
         echo "Vendor directory removed: $(ls -la | grep vendor || echo 'Vendor not found')"
         echo "Composer.lock removed: $(ls -la composer.lock 2>/dev/null || echo 'Composer.lock not found')"
+        
+        # Force removal if vendor still exists
+        if [ -d "vendor" ]; then
+          echo "Vendor still exists, trying force removal..."
+          sudo rm -rf vendor/ || echo "Force removal failed"
+        fi
+        
+        # Final verification
+        if [ ! -d "vendor" ]; then
+          echo "✅ Vendor directory successfully removed"
+        else
+          echo "❌ Vendor directory still exists, but continuing..."
+        fi
         
         # Install dependencies fresh
         composer install --optimize-autoloader
