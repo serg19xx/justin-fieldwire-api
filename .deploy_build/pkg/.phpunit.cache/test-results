@@ -1,0 +1,1 @@
+{"version":2,"defects":[],"times":{"Tests\\Unit\\HealthControllerTest::testHealthCheckReturnsValidResponse":0.0200000000000000004163336342344337026588618755340576171875,"Tests\\Unit\\HealthControllerTest::testHealthCheckContainsRequiredFields":0.001000000000000000020816681711721685132943093776702880859375}}

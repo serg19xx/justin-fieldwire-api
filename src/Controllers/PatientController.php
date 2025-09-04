@@ -6,7 +6,14 @@ use App\Database\Database;
 use Flight;
 use Exception;
 use Monolog\Logger;
+use OpenApi\Annotations as OA;
 
+/**
+ * @OA\Tag(
+ *     name="Patients",
+ *     description="Patient management endpoints"
+ * )
+ */
 class PatientController
 {
     private Logger $logger;
@@ -47,6 +54,76 @@ class PatientController
     /**
      * Получить список пациентов с фильтрацией по стране и провинции
      * GET /api/v1/patients
+     * 
+     * @OA\Get(
+     *     path="/api/v1/patients",
+     *     summary="Get list of patients",
+     *     description="Retrieve a paginated list of patients with optional filtering by country and region",
+     *     tags={"Patients"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="page",
+     *         in="query",
+     *         description="Page number for pagination",
+     *         required=false,
+     *         @OA\Schema(type="integer", minimum=1, default=1)
+     *     ),
+     *     @OA\Parameter(
+     *         name="limit",
+     *         in="query",
+     *         description="Number of items per page",
+     *         required=false,
+     *         @OA\Schema(type="integer", minimum=1, maximum=100, default=10)
+     *     ),
+     *     @OA\Parameter(
+     *         name="country",
+     *         in="query",
+     *         description="Filter by country name",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="region",
+     *         in="query",
+     *         description="Filter by region/province name",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Successful response with patients list",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="patients", type="array", @OA\Items(type="object")),
+     *                 @OA\Property(property="pagination", type="object",
+     *                     @OA\Property(property="current_page", type="integer"),
+     *                     @OA\Property(property="total_pages", type="integer"),
+     *                     @OA\Property(property="total_items", type="integer"),
+     *                     @OA\Property(property="items_per_page", type="integer")
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized - Token required",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="error", type="string", example="Unauthorized - Token required"),
+     *             @OA\Property(property="error_code", type="integer", example=401)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="error", type="string", example="Internal server error"),
+     *             @OA\Property(property="error_code", type="integer", example=500)
+     *         )
+     *     )
+     * )
      */
     public function getPatients()
     {
@@ -117,6 +194,49 @@ class PatientController
     /**
      * Получить пациента по ID, email или имени (substring)
      * GET /api/v1/patients/12345
+     * 
+     * @OA\Get(
+     *     path="/api/v1/patients/{id}",
+     *     summary="Get patient by ID",
+     *     description="Retrieve a specific patient by ID, email, or name substring",
+     *     tags={"Patients"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="id",
+     *         in="path",
+     *         description="Patient ID, email, or name substring",
+     *         required=true,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Successful response with patient data",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="patient", type="object")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Patient not found",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="error", type="string", example="Patient not found"),
+     *             @OA\Property(property="error_code", type="integer", example=404)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized - Token required",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="error", type="string", example="Unauthorized - Token required"),
+     *             @OA\Property(property="error_code", type="integer", example=401)
+     *         )
+     *     )
+     * )
      */
     public function getPatient($id = null)
     {

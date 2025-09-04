@@ -1,0 +1,87 @@
+RewriteEngine On
+
+# Force PHP 8.2 for shared hosting
+<IfModule mod_php.c>
+    php_value engine On
+    php_flag engine On
+</IfModule>
+
+# PHP 8.2 specific optimizations
+<IfModule mod_php8.c>
+    # Enable OPcache for better performance
+    php_flag opcache.enable 1
+    php_flag opcache.enable_cli 1
+    php_flag opcache.memory_consumption 128
+    php_flag opcache.interned_strings_buffer 8
+    php_flag opcache.max_accelerated_files 4000
+    php_flag opcache.revalidate_freq 2
+    php_flag opcache.fast_shutdown 1
+    
+    # Set max execution time for API requests
+    php_value max_execution_time 60
+    php_value memory_limit 512M
+    
+    # Enable error reporting for development
+    php_flag display_errors Off
+    php_flag log_errors On
+    php_value error_log ../logs/php_errors.log
+</IfModule>
+
+# Security headers
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options nosniff
+    Header always set X-Frame-Options DENY
+    Header always set X-XSS-Protection "1; mode=block"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# CORS headers for API
+<IfModule mod_headers.c>
+    Header always set Access-Control-Allow-Origin "*"
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS"
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With"
+    Header always set Access-Control-Max-Age "86400"
+</IfModule>
+
+# Handle CORS preflight requests
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteRule ^(.*)$ $1 [R=200,L]
+
+# Prevent access to sensitive files
+<FilesMatch "\.(env|log|sql|md|txt|ini|gitignore|gitattributes)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Prevent access to sensitive directories
+<FilesMatch "^(composer\.json|composer\.lock|README\.md|nginx\.conf)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Allow access to public files
+<FilesMatch "^(index\.php|swagger-ui\.php|avatar\.php|webhook\.php)$">
+    Order allow,deny
+    Allow from all
+</FilesMatch>
+
+# Avatar routing
+RewriteRule ^avatar/(.+)$ avatar.php [L,QSA]
+
+# Cache static assets
+<FilesMatch "\.(css|js|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$">
+    ExpiresActive On
+    ExpiresDefault "access plus 1 month"
+    Header set Cache-Control "public, immutable"
+</FilesMatch>
+
+# PHP settings
+php_value upload_max_filesize 10M
+php_value post_max_size 10M
+php_value max_execution_time 60
+php_value memory_limit 512M
+
+# Main routing - all requests go through index.php
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php [QSA,L]

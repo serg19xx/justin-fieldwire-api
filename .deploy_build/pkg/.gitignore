@@ -1,0 +1,38 @@
+# Environment files with secrets
+.env
+env.development
+env.production
+env.local
+env.staging
+
+# Logs
+logs/
+*.log
+
+# Dependencies
+vendor/
+node_modules/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+cache/
+
+# Uploads
+public/uploads/
+
+# Test files
+tests/Unit/AuthControllerTest.php
+public/frontend-test.html
+# GitHub Actions
+.github/

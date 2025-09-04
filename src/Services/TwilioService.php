@@ -12,6 +12,18 @@ class TwilioService
     private string $fromNumber = '';
     private Logger $logger;
 
+    /**
+     * Safely write to log file, creating directory if needed
+     */
+    private function safeLog(string $message): void
+    {
+        $logDir = 'logs';
+        if (!is_dir($logDir)) {
+            mkdir($logDir, 0755, true);
+        }
+        file_put_contents($logDir . '/app.log', date('Y-m-d H:i:s') . ' - ' . $message . PHP_EOL, FILE_APPEND);
+    }
+
     public function __construct(Logger $logger)
     {
         $this->logger = $logger;
@@ -28,13 +40,13 @@ class TwilioService
         ]);
         
         // Direct file logging for debugging
-        file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - TwilioService constructor called' . PHP_EOL, FILE_APPEND);
+        $this->safeLog('TwilioService constructor called');
 
         // In development, allow mock mode if Twilio credentials are not set
         if (empty($accountSid) || empty($authToken) || empty($this->fromNumber)) {
             if (($_ENV['APP_ENV'] ?? '') === 'development') {
                 $this->logger->warning('Twilio credentials not set, running in mock mode');
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Twilio credentials not set, running in mock mode' . PHP_EOL, FILE_APPEND);
+                $this->safeLog('Twilio credentials not set, running in mock mode');
                 return;
             } else {
                 throw new \RuntimeException('Twilio configuration is incomplete. Please check TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER environment variables.');
@@ -44,13 +56,13 @@ class TwilioService
         try {
             $this->client = new Client($accountSid, $authToken);
             $this->logger->info('Twilio client initialized successfully');
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Twilio client initialized successfully' . PHP_EOL, FILE_APPEND);
+            $this->safeLog('Twilio client initialized successfully');
         } catch (\Exception $e) {
             $this->logger->error('Failed to initialize Twilio client', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString()
             ]);
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Failed to initialize Twilio client: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
+            $this->safeLog('Failed to initialize Twilio client: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -87,7 +99,7 @@ class TwilioService
                     'code' => $code,
                     'message' => "Your FieldWire verification code is: {$code}. Valid for 10 minutes."
                 ]);
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - MOCK SMS: Verification code would be sent to ' . $formattedPhone . ' with code ' . $code . PHP_EOL, FILE_APPEND);
+                $this->safeLog('MOCK SMS: Verification code would be sent to ' . $formattedPhone . ' with code ' . $code);
                 return true;
             }
             

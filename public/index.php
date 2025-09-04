@@ -1,7 +1,23 @@
 <?php
-// ВКЛЮЧИТЬ ОТЛАДКУ - покажет точную ошибку
-error_reporting(E_ALL);
-ini_set('display_errors', 1);
+// Включить буферизацию вывода для предотвращения вывода warning'ов
+ob_start();
+
+// Настройка отображения ошибок в зависимости от окружения
+$appEnv = $_ENV['APP_ENV'] ?? 'development';
+
+if ($appEnv === 'production') {
+    // В продакшн режиме не показываем ошибки пользователю
+    error_reporting(0);
+    ini_set('display_errors', 0);
+    ini_set('display_startup_errors', 0);
+} else {
+    // В режиме разработки показываем все ошибки
+    error_reporting(E_ALL);
+    ini_set('display_errors', 1);
+    ini_set('display_startup_errors', 1);
+}
+
+// Логирование ошибок всегда включено
 ini_set('log_errors', 1);
 ini_set('error_log', __DIR__ . '/../logs/php_errors.log');
 
@@ -73,6 +89,11 @@ Flight::route('*', function() {
     // This will trigger the 404 handler if route not found
     Flight::notFound();
 });
+
+// Очистить буфер от warning'ов в продакшн режиме
+if ($appEnv === 'production') {
+    ob_clean();
+}
 
 // Start the application
 Flight::start();

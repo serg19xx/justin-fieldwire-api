@@ -1,0 +1,33 @@
+{
+    "name": "fieldwire/api",
+    "description": "REST API built with FlightPHP",
+    "type": "project",
+    "license": "proprietary",
+    "require": {
+        "php": ">=8.2",
+        "doctrine/dbal": "^3.6",
+        "mikecao/flight": "^2.0",
+        "monolog/monolog": "^3.4",
+        "phpmailer/phpmailer": "^6.10",
+        "ramsey/uuid": "^4.7",
+        "sendgrid/sendgrid": "^8.1",
+        "twilio/sdk": "^8.7",
+        "vlucas/phpdotenv": "^5.5",
+        "zircote/swagger-php": "^4.7"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    },
+    "scripts": {
+        "server:start": "./scripts/start-server.sh",
+        "server:stop": "./scripts/stop-server.sh",
+        "server:restart": "./scripts/restart-server.sh",
+        "db:setup": "php scripts/setup-database.php"
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
+    }
+}

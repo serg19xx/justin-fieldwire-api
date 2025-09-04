@@ -62,6 +62,41 @@ use OpenApi\Annotations as OA;
  *     description="Database management and setup"
  * )
  * 
+ * @OA\Tag(
+ *     name="Patients",
+ *     description="Patient management endpoints"
+ * )
+ * 
+ * @OA\Tag(
+ *     name="Drivers",
+ *     description="Driver management endpoints"
+ * )
+ * 
+ * @OA\Tag(
+ *     name="Pharmacies",
+ *     description="Pharmacy management endpoints"
+ * )
+ * 
+ * @OA\Tag(
+ *     name="Pharmacists",
+ *     description="Pharmacist management endpoints"
+ * )
+ * 
+ * @OA\Tag(
+ *     name="Physicians",
+ *     description="Physician management endpoints"
+ * )
+ * 
+ * @OA\Tag(
+ *     name="Medical Clinics",
+ *     description="Medical clinic management endpoints"
+ * )
+ * 
+ * @OA\Tag(
+ *     name="Geography",
+ *     description="Geographic data endpoints"
+ * )
+ * 
  * @OA\PathItem(
  *     path="/",
  *     summary="API Root"

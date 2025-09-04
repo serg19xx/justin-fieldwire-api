@@ -15,6 +15,18 @@ class Application
     private Config $config;
     private Logger $logger;
 
+    /**
+     * Safely write to log file, creating directory if needed
+     */
+    private function safeLog(string $message): void
+    {
+        $logDir = __DIR__ . '/../../logs';
+        if (!is_dir($logDir)) {
+            mkdir($logDir, 0755, true);
+        }
+        file_put_contents($logDir . '/app.log', date('Y-m-d H:i:s') . ' - ' . $message . PHP_EOL, FILE_APPEND);
+    }
+
     public function __construct(Config $config)
     {
         try {
@@ -24,9 +36,9 @@ class Application
             
             $this->initializeFlight();
             
-            file_put_contents(__DIR__ . '/../../logs/app.log', date('Y-m-d H:i:s') . ' - Application constructor completed' . PHP_EOL, FILE_APPEND);
+            $this->safeLog('Application constructor completed');
         } catch (\Exception $e) {
-            file_put_contents(__DIR__ . '/../../logs/app.log', date('Y-m-d H:i:s') . ' - ERROR in Application constructor: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
+            $this->safeLog('ERROR in Application constructor: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -46,7 +58,7 @@ class Application
             // Set logger for database
             \App\Database\Database::setLogger($this->logger);
         } catch (\Exception $e) {
-            file_put_contents(__DIR__ . '/../../logs/app.log', date('Y-m-d H:i:s') . ' - ERROR in initializeLogger: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
+            $this->safeLog('ERROR in initializeLogger: ' . $e->getMessage());
             throw $e;
         }
     }
@@ -63,14 +75,14 @@ class Application
             // Register routes with logger
             try {
                 $apiRoutes = new \App\Routes\ApiRoutes($this->logger);
-                file_put_contents(__DIR__ . '/../../logs/app.log', date('Y-m-d H:i:s') . ' - ApiRoutes created and registered' . PHP_EOL, FILE_APPEND);
+                $this->safeLog('ApiRoutes created and registered');
             } catch (\Exception $e) {
-                file_put_contents(__DIR__ . '/../../logs/app.log', date('Y-m-d H:i:s') . ' - ERROR creating ApiRoutes: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
+                $this->safeLog('ERROR creating ApiRoutes: ' . $e->getMessage());
                 throw $e;
             }
             
         } catch (\Exception $e) {
-            file_put_contents(__DIR__ . '/../../logs/app.log', date('Y-m-d H:i:s') . ' - ERROR in initializeFlight: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
+            $this->safeLog('ERROR in initializeFlight: ' . $e->getMessage());
             throw $e;
         }
     }

@@ -1,0 +1,70 @@
+name: Deploy to Production (Shared Hosting, Fast)
+
+on:
+  push:
+    branches: [ main, production ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # 1) Заливаем только исходники (без vendor, tests и т.п.)
+      - name: FTP deploy (code only, skip vendor)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          exclude: |
+            **/.git/**
+            **/.github/**
+            **/node_modules/**
+            **/tests/**
+            **/scripts/**
+            **/docs/**
+            **/*.md
+            **/nginx.conf
+            **/env.development
+            **/env.example
+            **/logs/**
+            **/.env
+            **/composer.lock
+            **/vendor/**
+          dangerous-clean-slate: false
+          timeout: 600000
+
+      # 2) Заливаем .env отдельно и целенаправленно (только этот файл)
+      - name: Create .env temp
+        run: |
+          mkdir -p tmp_env
+          echo "${{ secrets.ENV_FILE }}" > tmp_env/.env
+
+      - name: FTP deploy (.env only)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.4
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./tmp_env/
+          server-dir: ./
+          dangerous-clean-slate: false
+          timeout: 600000
+
+      # 3) Лёгкая проверка доступности (без «магии»)
+      - name: Health check
+        run: |
+          echo "Wait for upload settle..."
+          sleep 10
+          set -e
+          curl -fsS "https://fieldwire.medicalcontractor.ca/api/v1/health" > /dev/null
+          curl -fsS "https://fieldwire.medicalcontractor.ca/docs" > /dev/null
+          echo "OK"

@@ -1,0 +1,13 @@
+parameters:
+    level: 8
+    paths:
+        - src
+        - tests
+    excludePaths:
+        - vendor
+        - logs
+    ignoreErrors:
+        - identifier: missingType.iterableValue
+        - identifier: missingType.generics
+        - '#Access to an undefined property flight\\\\util\\\\Collection#'
+        - '#Access to an undefined property flight\\util\\Collection#'
