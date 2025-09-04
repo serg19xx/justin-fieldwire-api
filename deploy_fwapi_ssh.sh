@@ -59,11 +59,11 @@ PKG_DIR="${BUILD_DIR}/pkg"
 
 rm -rf "${BUILD_DIR}"; mkdir -p "${PKG_DIR}"
 
-# 1) Подготовим пакет (без мусора и без .env)
+# 1) Подготовим пакет (без мусора)
 rsync -a \
   --exclude ".git" --exclude ".github" --exclude "node_modules" \
   --exclude "tests" --exclude "docs" --exclude "*.md" --exclude "logs" \
-  --exclude ".deploy_build" --exclude ".env" \
+  --exclude ".deploy_build" \
   ./ "${PKG_DIR}/"
 
 # 2) Корневой .htaccess (если есть public/index.php — ведём в public/, иначе на корневой index.php)
@@ -99,11 +99,10 @@ RewriteRule ^ index.php [QSA,L]
 HTPUB
 fi
 
-# 4) .env (по желанию)
-if [[ "${UPLOAD_ENV}" == "yes" ]]; then
-  [[ -f "${LOCAL_ENV_FILE}" ]] || { echo "No ${LOCAL_ENV_FILE}"; exit 2; }
-  cp "${LOCAL_ENV_FILE}" "${PKG_DIR}/.env"
-fi
+# 4) .env (всегда создаём из env.production)
+[[ -f "${LOCAL_ENV_FILE}" ]] || { echo "No ${LOCAL_ENV_FILE}"; exit 2; }
+cp "${LOCAL_ENV_FILE}" "${PKG_DIR}/.env"
+echo "==> Created .env from ${LOCAL_ENV_FILE}"
 
 # 5) Не шлём vendor в основном rsync
 rm -rf "${PKG_DIR}/vendor"
