@@ -81,22 +81,26 @@ class AuthMiddleware
     }
 
     /**
-     * Decode JWT token
+     * Decode simple base64 token
      */
     private function decodeJWT(string $token): ?array
     {
-        $parts = explode('.', $token);
-        if (count($parts) !== 3) {
+        try {
+            // Декодируем простой base64 токен
+            $decoded = base64_decode($token);
+            if ($decoded === false) {
+                return null;
+            }
+            
+            $payload = json_decode($decoded, true);
+            if (!$payload || !isset($payload['exp']) || $payload['exp'] < time()) {
+                return null;
+            }
+            
+            return $payload;
+        } catch (\Exception $e) {
             return null;
         }
-
-        $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $parts[1])), true);
-        
-        if (!$payload || !isset($payload['exp']) || $payload['exp'] < time()) {
-            return null;
-        }
-
-        return $payload;
     }
 
     /**
@@ -104,16 +108,25 @@ class AuthMiddleware
      */
     private function getUserById(int $userId): ?array
     {
-        $connection = Database::getConnection();
-        
-        $sql = 'SELECT id, email, first_name, last_name, phone, user_type, job_title, status, 
-                       additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
-                FROM fw_users 
-                WHERE id = ?';
-        
-        $result = $connection->executeQuery($sql, [$userId]);
-        $user = $result->fetchAssociative();
+        try {
+            $database = new Database();
+            $connection = $database->getConnection();
+            
+            $sql = 'SELECT id, email, first_name, last_name, phone, user_type, job_title, status, 
+                           additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
+                    FROM fw_users 
+                    WHERE id = ?';
+            
+            $result = $connection->executeQuery($sql, [$userId]);
+            $user = $result->fetchAssociative();
 
-        return $user ?: null;
+            return $user ?: null;
+        } catch (\Exception $e) {
+            $this->logger->error('Error getting user by ID', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
     }
 }

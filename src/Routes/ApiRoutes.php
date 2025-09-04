@@ -5,6 +5,7 @@ namespace App\Routes;
 use App\Controllers\HealthController;
 use App\Controllers\DatabaseController;
 use App\Controllers\AuthController;
+use App\Controllers\GeographyController;
 use Flight;
 use Monolog\Logger;
 
@@ -20,6 +21,19 @@ class ApiRoutes
 
     public function register(): void
     {
+        // Add CORS headers for all API routes
+        Flight::before('start', function() {
+            header('Access-Control-Allow-Origin: *');
+            header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+            header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+            header('Access-Control-Allow-Credentials: true');
+            
+            if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+                http_response_code(200);
+                exit();
+            }
+        });
+
         // API v1 routes
         $this->registerV1Routes();
         
@@ -206,5 +220,250 @@ class ApiRoutes
         } catch (\Exception $e) {
             throw $e;
         }
+
+        // Patient routes v1 (protected)
+        Flight::route('GET /api/v1/patients', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $patientController = new \App\Controllers\PatientController($this->logger);
+                $patientController->getPatients();
+            }
+        });
+        
+        Flight::route('GET /api/v1/patients/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $patientController = new \App\Controllers\PatientController($this->logger);
+                $patientController->getPatient($id);
+            }
+        });
+        
+        Flight::route('GET /api/v1/patients/search', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $patientController = new \App\Controllers\PatientController($this->logger);
+                $patientController->getPatient();
+            }
+        });
+        
+        Flight::route('POST /api/v1/patients', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $patientController = new \App\Controllers\PatientController($this->logger);
+                $patientController->createPatient();
+            }
+        });
+        
+        Flight::route('PUT /api/v1/patients/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $patientController = new \App\Controllers\PatientController($this->logger);
+                $patientController->updatePatient($id);
+            }
+        });
+        
+        Flight::route('DELETE /api/v1/patients/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $patientController = new \App\Controllers\PatientController($this->logger);
+                $patientController->deletePatient($id);
+            }
+        });
+
+        // Driver routes v1 (protected)
+        Flight::route('GET /api/v1/drivers', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $driverController = new \App\Controllers\DriverController($this->logger);
+                $driverController->getDrivers();
+            }
+        });
+        
+        Flight::route('GET /api/v1/drivers/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $driverController = new \App\Controllers\DriverController($this->logger);
+                $driverController->getDriver($id);
+            }
+        });
+        
+        Flight::route('POST /api/v1/drivers', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $driverController = new \App\Controllers\DriverController($this->logger);
+                $driverController->createDriver();
+            }
+        });
+        
+        Flight::route('PUT /api/v1/drivers/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $driverController = new \App\Controllers\DriverController($this->logger);
+                $driverController->updateDriver($id);
+            }
+        });
+        
+        Flight::route('DELETE /api/v1/drivers/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $driverController = new \App\Controllers\DriverController($this->logger);
+                $driverController->deleteDriver($id);
+            }
+        });
+
+        // Pharmacy routes v1 (protected)
+        Flight::route('GET /api/v1/pharmacies', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $pharmacyController = new \App\Controllers\PharmacyController($this->logger);
+                $pharmacyController->getPharmacies();
+            }
+        });
+        
+        Flight::route('GET /api/v1/pharmacies/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $pharmacyController = new \App\Controllers\PharmacyController($this->logger);
+                $pharmacyController->getPharmacy($id);
+            }
+        });
+        
+        Flight::route('POST /api/v1/pharmacies', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $pharmacyController = new \App\Controllers\PharmacyController($this->logger);
+                $pharmacyController->createPharmacy();
+            }
+        });
+        
+        Flight::route('PUT /api/v1/pharmacies/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $pharmacyController = new \App\Controllers\PharmacyController($this->logger);
+                $pharmacyController->updatePharmacy($id);
+            }
+        });
+        
+        Flight::route('DELETE /api/v1/pharmacies/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $pharmacyController = new \App\Controllers\PharmacyController($this->logger);
+                $pharmacyController->deletePharmacy($id);
+            }
+        });
+
+        // Pharmacist routes v1 (protected)
+        Flight::route('GET /api/v1/pharmacists', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $pharmacistController = new \App\Controllers\PharmacistController($this->logger);
+                $pharmacistController->getPharmacists();
+            }
+        });
+        
+        Flight::route('GET /api/v1/pharmacists/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $pharmacistController = new \App\Controllers\PharmacistController($this->logger);
+                $pharmacistController->getPharmacist($id);
+            }
+        });
+        
+        Flight::route('POST /api/v1/pharmacists', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $pharmacistController = new \App\Controllers\PharmacistController($this->logger);
+                $pharmacistController->createPharmacist();
+            }
+        });
+        
+        Flight::route('PUT /api/v1/pharmacists/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $pharmacistController = new \App\Controllers\PharmacistController($this->logger);
+                $pharmacistController->updatePharmacist($id);
+            }
+        });
+        
+        Flight::route('DELETE /api/v1/pharmacists/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $pharmacistController = new \App\Controllers\PharmacistController($this->logger);
+                $pharmacistController->deletePharmacist($id);
+            }
+        });
+
+        // Physician routes v1 (protected)
+        Flight::route('GET /api/v1/physicians', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $physicianController = new \App\Controllers\PhysicianController($this->logger);
+                $physicianController->getPhysicians();
+            }
+        });
+        
+        Flight::route('GET /api/v1/physicians/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $physicianController = new \App\Controllers\PhysicianController($this->logger);
+                $physicianController->getPhysician($id);
+            }
+        });
+        
+        Flight::route('POST /api/v1/physicians', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $physicianController = new \App\Controllers\PhysicianController($this->logger);
+                $physicianController->createPhysician();
+            }
+        });
+        
+        Flight::route('PUT /api/v1/physicians/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $physicianController = new \App\Controllers\PhysicianController($this->logger);
+                $physicianController->updatePhysician($id);
+            }
+        });
+        
+        Flight::route('DELETE /api/v1/physicians/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $physicianController = new \App\Controllers\PhysicianController($this->logger);
+                $physicianController->deletePhysician($id);
+            }
+        });
+
+        // Medical Clinic routes v1 (protected)
+        Flight::route('GET /api/v1/medical-clinics', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $medicalClinicController = new \App\Controllers\MedicalClinicController($this->logger);
+                $medicalClinicController->getMedicalClinics();
+            }
+        });
+        
+        Flight::route('GET /api/v1/medical-clinics/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $medicalClinicController = new \App\Controllers\MedicalClinicController($this->logger);
+                $medicalClinicController->getMedicalClinic($id);
+            }
+        });
+        
+        Flight::route('POST /api/v1/medical-clinics', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $medicalClinicController = new \App\Controllers\MedicalClinicController($this->logger);
+                $medicalClinicController->createMedicalClinic();
+            }
+        });
+        
+        Flight::route('PUT /api/v1/medical-clinics/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $medicalClinicController = new \App\Controllers\MedicalClinicController($this->logger);
+                $medicalClinicController->updateMedicalClinic($id);
+            }
+        });
+        
+        Flight::route('DELETE /api/v1/medical-clinics/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $medicalClinicController = new \App\Controllers\MedicalClinicController($this->logger);
+                $medicalClinicController->deleteMedicalClinic($id);
+            }
+        });
+
+        // Geography routes v1 (protected)
+        Flight::route('GET /api/v1/geography/countries-regions', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $geographyController = new \App\Controllers\GeographyController($this->logger);
+                $geographyController->getCountriesAndRegions();
+            }
+        });
+        
+        Flight::route('GET /api/v1/geography/countries', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $geographyController = new \App\Controllers\GeographyController($this->logger);
+                $geographyController->getCountries();
+            }
+        });
+        
+        Flight::route('GET /api/v1/geography/countries/@countryCode/regions', function($countryCode) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $geographyController = new \App\Controllers\GeographyController($this->logger);
+                $geographyController->getRegionsByCountry($countryCode);
+            }
+        });
     }
 }

@@ -16,23 +16,10 @@ class CorsMiddleware
 
     public function handle(): void
     {
-        // Skip CORS handling if not running in web context
-        if (!isset($_SERVER['REQUEST_METHOD'])) {
-            return;
-        }
-
-        $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-        $allowedOrigins = $this->config->get('cors.allowed_origins', []);
-
-        // Allow all origins in development
-        if ($this->config->get('app.env') === 'development' || empty($allowedOrigins)) {
-            header('Access-Control-Allow-Origin: *');
-        } elseif (in_array($origin, $allowedOrigins)) {
-            header("Access-Control-Allow-Origin: {$origin}");
-        }
-
-        header('Access-Control-Allow-Methods: ' . implode(',', $this->config->get('cors.allowed_methods', [])));
-        header('Access-Control-Allow-Headers: ' . implode(',', $this->config->get('cors.allowed_headers', [])));
+        // Always set CORS headers for development
+        header('Access-Control-Allow-Origin: *');
+        header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+        header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
         header('Access-Control-Allow-Credentials: true');
         header('Access-Control-Max-Age: 86400'); // 24 hours
 

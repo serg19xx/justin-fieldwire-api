@@ -17,10 +17,20 @@ use OpenApi\Annotations as OA;
 class AuthController
 {
     private Logger $logger;
+    private Database $database;
 
     public function __construct(Logger $logger)
     {
         $this->logger = $logger;
+        
+        try {
+            $this->database = new Database();
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to initialize AuthController database', [
+                'error' => $e->getMessage()
+            ]);
+            throw $e;
+        }
     }
 
     /**
@@ -82,18 +92,18 @@ class AuthController
     public function login(): void
     {
         try {
+            error_log('=== LOGIN METHOD START ===');
+            
             // Get request body
             $requestBody = Flight::request()->getBody();
             $data = json_decode($requestBody, true);
             
-            // Log incoming request data (simplified)
-            error_log('Login attempt - Request body: ' . $requestBody);
-            error_log('Login attempt - Parsed data: ' . print_r($data, true));
-            error_log('Login attempt - Email: ' . ($data['email'] ?? 'NOT_SET'));
-            error_log('Login attempt - Password: ' . (isset($data['password']) ? 'SET' : 'NOT_SET'));
+            error_log('Request body: ' . $requestBody);
+            error_log('Parsed data: ' . print_r($data, true));
 
             // Validate input
             if (!$this->validateLoginData($data)) {
+                error_log('Validation failed');
                 Flight::json([
                     'error_code' => 400,
                     'status' => 'error',
@@ -107,11 +117,15 @@ class AuthController
                 return;
             }
 
+            error_log('Validation passed');
+            
             $email = $data['email'];
             $password = $data['password'];
 
             // Authenticate user
+            error_log('Calling authenticateUser');
             $user = $this->authenticateUser($email, $password);
+            error_log('authenticateUser returned: ' . print_r($user, true));
 
             if (!$user) {
                 $this->logger->warning('Failed login attempt', [
@@ -199,25 +213,15 @@ class AuthController
                     ],
                     'requires_2fa' => false,
                     'token' => $token,
-                    'expires_at' => date('c', time() + 3600) // 1 hour from now
+                    'expires_at' => date('c', time() + 86400) // 24 hours from now
                 ]
             ]);
 
-        } catch (Exception $e) {
-            error_log('Database error during login: ' . $e->getMessage());
-            error_log('Stack trace: ' . $e->getTraceAsString());
-
-            Flight::json([
-                'error_code' => 500,
-                'status' => 'error',
-                'message' => 'Internal server error',
-                'data' => null,
-                'details' => $e->getMessage()
-            ], 500);
         } catch (\Exception $e) {
-            error_log('Unexpected error during login: ' . $e->getMessage());
+            error_log('=== LOGIN METHOD ERROR ===');
+            error_log('Error: ' . $e->getMessage());
             error_log('Stack trace: ' . $e->getTraceAsString());
-
+            
             Flight::json([
                 'error_code' => 500,
                 'status' => 'error',
@@ -229,23 +233,16 @@ class AuthController
     }
 
     /**
-     * Validate login data
+     * Validate login input data
      */
-    private function validateLoginData(?array $data): bool
+    private function validateLoginData(array $data): bool
     {
-        if (!$data || !is_array($data)) {
+        if (empty($data['email']) || empty($data['password'])) {
             return false;
         }
 
-        if (!isset($data['email']) || !isset($data['password'])) {
-            return false;
-        }
-
+        // Basic email validation
         if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
-            return false;
-        }
-
-        if (empty($data['password'])) {
             return false;
         }
 
@@ -253,69 +250,65 @@ class AuthController
     }
 
     /**
-     * Authenticate user against database
+     * Authenticate user with database
      */
     private function authenticateUser(string $email, string $password): ?array
     {
         try {
-            $connection = Database::getConnection();
-
-            // Get user by email
-            $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, user_type, job_title, status, 
-                           additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
-                    FROM fw_users 
-                    WHERE email = ?';
+            error_log('=== AUTHENTICATE USER START ===');
+            
+            $connection = $this->database->getConnection();
+            error_log('Database connection OK');
+            
+            // Правильный SQL
+            $sql = "SELECT * FROM fw_users WHERE email = ? LIMIT 1";
+            error_log('SQL: ' . $sql);
+            error_log('Email: ' . $email);
+            
+            // Правильный способ выполнения запроса в Doctrine DBAL
             $result = $connection->executeQuery($sql, [$email]);
+            error_log('Query executed OK');
+            
             $user = $result->fetchAssociative();
+            error_log('User data: ' . print_r($user, true));
 
             if (!$user) {
+                error_log('User not found');
                 return null;
             }
 
-            // Verify password
-            if (!password_verify($password, $user['password_hash'])) {
-                return null;
+            error_log('User found, checking password');
+            
+            // ИСПРАВЛЯЕМ: используем правильное название колонки password_hash
+            if (password_verify($password, $user['password_hash'])) {
+                error_log('Password verified OK');
+                return $user;
             }
 
-            // Remove password from response
-            unset($user['password_hash']);
+            error_log('Password verification failed');
+            return null;
 
-            return $user;
-
-        } catch (Exception $e) {
-            $this->logger->error('Database error during authentication', [
-                'error' => $e->getMessage(),
-                'email' => $email
-            ]);
+        } catch (\Exception $e) {
+            error_log('=== AUTHENTICATE USER ERROR ===');
+            error_log('Error: ' . $e->getMessage());
+            error_log('Stack trace: ' . $e->getTraceAsString());
             throw $e;
         }
     }
 
-
-
     /**
-     * Generate JWT token (simplified implementation)
+     * Generate JWT token for user
      */
     private function generateToken(array $user): string
     {
-        $header = json_encode(['typ' => 'JWT', 'alg' => 'HS256']);
-        $payload = json_encode([
+        // For now, return a simple token
+        // In production, you should use proper JWT library
+        $payload = [
             'user_id' => $user['id'],
             'email' => $user['email'],
-            'name' => ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''),
-            'user_type' => $user['user_type'] ?? 'user',
-            'iat' => time(),
-            'exp' => time() + 3600 // 1 hour
-        ]);
-
-        $base64Header = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
-        $base64Payload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($payload));
-
-        // In production, use a proper secret key from environment
-        $secret = $_ENV['JWT_SECRET'] ?? 'your-secret-key-change-in-production';
-        $signature = hash_hmac('sha256', $base64Header . "." . $base64Payload, $secret, true);
-        $base64Signature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
-
-        return $base64Header . "." . $base64Payload . "." . $base64Signature;
+            'exp' => time() + 86400
+        ];
+        
+        return base64_encode(json_encode($payload));
     }
 }

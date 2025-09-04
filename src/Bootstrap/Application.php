@@ -57,7 +57,7 @@ class Application
             // Initialize Flight framework
             Flight::init();
             
-            // Register middleware
+            // Register CORS middleware BEFORE routes
             Flight::before('start', [new CorsMiddleware($this->config), 'handle']);
             
             // Register routes with logger
@@ -68,6 +68,7 @@ class Application
                 file_put_contents(__DIR__ . '/../../logs/app.log', date('Y-m-d H:i:s') . ' - ERROR creating ApiRoutes: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
                 throw $e;
             }
+            
         } catch (\Exception $e) {
             file_put_contents(__DIR__ . '/../../logs/app.log', date('Y-m-d H:i:s') . ' - ERROR in initializeFlight: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
             throw $e;

@@ -34,3 +34,5 @@ public/uploads/
 # Test files
 tests/Unit/AuthControllerTest.php
 public/frontend-test.html
+# GitHub Actions
+.github/

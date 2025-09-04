@@ -30,6 +30,24 @@ class ProfileController
     }
 
     /**
+     * Проверить аутентификацию пользователя
+     */
+    private function checkAuth(): bool
+    {
+        $currentUser = Flight::get('current_user');
+        if (!$currentUser) {
+            Flight::json([
+                'error_code' => 401,
+                'status' => 'error',
+                'message' => 'Unauthorized - Token required',
+                'data' => null
+            ], 401);
+            return false;
+        }
+        return true;
+    }
+
+    /**
      * @OA\Get(
      *     path="/profile",
      *     summary="Get user profile",
@@ -87,17 +105,13 @@ class ProfileController
      */
     public function getProfile(): void
     {
+        // Проверка токена
+        if (!$this->checkAuth()) {
+            return;
+        }
+
         try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                Flight::json([
-                    'error_code' => 401,
-                    'status' => 'error',
-                    'message' => 'Unauthorized',
-                    'data' => null
-                ], 401);
-                return;
-            }
+            $user = Flight::get('current_user');
 
             Flight::json([
                 'error_code' => 0,
@@ -202,17 +216,13 @@ class ProfileController
      */
     public function updateProfile(): void
     {
+        // Проверка токена
+        if (!$this->checkAuth()) {
+            return;
+        }
+
         try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                Flight::json([
-                    'error_code' => 401,
-                    'status' => 'error',
-                    'message' => 'Unauthorized',
-                    'data' => null
-                ], 401);
-                return;
-            }
+            $user = Flight::get('current_user');
 
             $requestBody = Flight::request()->getBody();
             $data = json_decode($requestBody, true);
@@ -275,20 +285,15 @@ class ProfileController
      */
     public function uploadAvatar(): void
     {
+        // Проверка токена
+        if (!$this->checkAuth()) {
+            return;
+        }
+
         try {
             $this->logger->info('Avatar upload request started');
             
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                $this->logger->warning('Unauthorized avatar upload attempt');
-                Flight::json([
-                    'error_code' => 401,
-                    'status' => 'error',
-                    'message' => 'Unauthorized',
-                    'data' => null
-                ], 401);
-                return;
-            }
+            $user = Flight::get('current_user');
 
             $this->logger->info('User authenticated for avatar upload', [
                 'user_id' => $user['id'],
@@ -447,20 +452,13 @@ class ProfileController
         // Добавляем простую отладку
         file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - updateWorkStatus() called' . PHP_EOL, FILE_APPEND);
         
+        // Проверка токена
+        if (!$this->checkAuth()) {
+            return;
+        }
+
         try {
-            $user = $this->getCurrentUser();
-            file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - getCurrentUser() result: ' . ($user ? 'user found' : 'user not found') . PHP_EOL, FILE_APPEND);
-            
-            if (!$user) {
-                file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - Returning 401 Unauthorized' . PHP_EOL, FILE_APPEND);
-                Flight::json([
-                    'error_code' => 401,
-                    'status' => 'error',
-                    'message' => 'Unauthorized',
-                    'data' => null
-                ], 401);
-                return;
-            }
+            $user = Flight::get('current_user');
 
             $input = json_decode(Flight::request()->getBody(), true);
             
@@ -518,17 +516,13 @@ class ProfileController
      */
     public function enable2FA(): void
     {
+        // Проверка токена
+        if (!$this->checkAuth()) {
+            return;
+        }
+
         try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                Flight::json([
-                    'error_code' => 401,
-                    'status' => 'error',
-                    'message' => 'Unauthorized',
-                    'data' => null
-                ], 401);
-                return;
-            }
+            $user = Flight::get('current_user');
 
             $requestBody = Flight::request()->getBody();
             $data = json_decode($requestBody, true);
@@ -604,17 +598,13 @@ class ProfileController
      */
     public function disable2FA(): void
     {
+        // Проверка токена
+        if (!$this->checkAuth()) {
+            return;
+        }
+
         try {
-            $user = $this->getCurrentUser();
-            if (!$user) {
-                Flight::json([
-                    'error_code' => 401,
-                    'status' => 'error',
-                    'message' => 'Unauthorized',
-                    'data' => null
-                ], 401);
-                return;
-            }
+            $user = Flight::get('current_user');
 
             $requestBody = Flight::request()->getBody();
             $data = json_decode($requestBody, true);

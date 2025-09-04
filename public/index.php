@@ -1,22 +1,46 @@
 <?php
+// ВКЛЮЧИТЬ ОТЛАДКУ - покажет точную ошибку
+error_reporting(E_ALL);
+ini_set('display_errors', 1);
+ini_set('log_errors', 1);
+ini_set('error_log', __DIR__ . '/../logs/php_errors.log');
 
-// Define application start time
+// CORS заголовки
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+header('Access-Control-Allow-Credentials: true');
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+
 define('APP_START_TIME', time());
 
-// Load Composer autoloader
+// Загрузка автозагрузчика
 require_once __DIR__ . '/../vendor/autoload.php';
 
-// Load environment variables
-$dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
-$dotenv->load();
+// Загрузка .env
+try {
+    $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
+    $dotenv->load();
+} catch (\Exception $e) {
+    error_log('ENV ERROR: ' . $e->getMessage());
+}
 
-// Initialize application
+// Инициализация приложения
 try {
     $config = new App\Config\Config();
     $app = new App\Bootstrap\Application($config);
 } catch (\Exception $e) {
-    file_put_contents(__DIR__ . '/../logs/app.log', date('Y-m-d H:i:s') . ' - ERROR creating Application: ' . $e->getMessage() . PHP_EOL, FILE_APPEND);
-    throw $e;
+    error_log('APP ERROR: ' . $e->getMessage());
+    error_log('STACK: ' . $e->getTraceAsString());
+    
+    header('Content-Type: application/json');
+    http_response_code(500);
+    echo json_encode(['error' => $e->getMessage()]);
+    exit();
 }
 
 // Handle all routes through FlightPHP
@@ -26,6 +50,11 @@ Flight::route('*', function() {
     
     // Remove query string
     $uri = strtok($uri, '?');
+    
+    // НЕ блокировать API маршруты!
+    if (str_starts_with($uri, '/api/')) {
+        return; // Пропускаем API запросы
+    }
     
     // Handle specific routes
     if ($uri === '/docs') {
