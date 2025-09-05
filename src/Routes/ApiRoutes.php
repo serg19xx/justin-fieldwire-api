@@ -6,6 +6,8 @@ use App\Controllers\HealthController;
 use App\Controllers\DatabaseController;
 use App\Controllers\AuthController;
 use App\Controllers\GeographyController;
+use App\Controllers\WorkerController;
+use App\Controllers\RegistrationController;
 use Flight;
 use Monolog\Logger;
 
@@ -136,6 +138,8 @@ class ApiRoutes
 
         // Authentication routes
         Flight::route('POST /api/v1/auth/login', [new AuthController($this->logger), 'login']);
+        Flight::route('GET /api/v1/auth/validate-invitation-token', [new AuthController($this->logger), 'validateInvitationToken']);
+        Flight::route('POST /api/v1/auth/change-password', [new AuthController($this->logger), 'changePassword']);
         
         // Legacy auth route for backward compatibility
         Flight::route('POST /auth/login', [new AuthController($this->logger), 'login']);
@@ -464,6 +468,39 @@ class ApiRoutes
                 $geographyController = new \App\Controllers\GeographyController($this->logger);
                 $geographyController->getRegionsByCountry($countryCode);
             }
+        });
+
+        // Worker management routes v1 (protected)
+        Flight::route('GET /api/v1/workers', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $workerController = new \App\Controllers\WorkerController($this->logger);
+                $workerController->getWorkers();
+            }
+        });
+        
+        Flight::route('POST /api/v1/workers/invite', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $workerController = new \App\Controllers\WorkerController($this->logger);
+                $workerController->sendInvitation();
+            }
+        });
+        
+        Flight::route('GET /api/v1/workers/email-providers', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $workerController = new \App\Controllers\WorkerController($this->logger);
+                $workerController->getEmailProviders();
+            }
+        });
+
+        // Registration routes v1 (public - no auth required)
+        Flight::route('GET /api/v1/registration/validate/@token', function($token) {
+            $registrationController = new \App\Controllers\RegistrationController($this->logger);
+            $registrationController->validateToken($token);
+        });
+        
+        Flight::route('POST /api/v1/registration/complete', function() {
+            $registrationController = new \App\Controllers\RegistrationController($this->logger);
+            $registrationController->completeRegistration();
         });
     }
 }

@@ -1,0 +1,187 @@
+<?php
+
+require_once __DIR__ . '/../vendor/autoload.php';
+
+// Создаем базовую OpenAPI спецификацию
+$swagger = [
+    'openapi' => '3.0.0',
+    'info' => [
+        'title' => 'FieldWire API',
+        'version' => '1.0.0',
+        'description' => 'REST API for FieldWire application - Construction project management system',
+        'contact' => [
+            'email' => 'support@fieldwire.com',
+            'name' => 'FieldWire Support'
+        ]
+    ],
+    'servers' => [
+        [
+            'url' => 'http://localhost:8000',
+            'description' => 'Development server'
+        ],
+        [
+            'url' => 'https://fieldwire.medicalcontractor.ca',
+            'description' => 'Production server'
+        ]
+    ],
+    'security' => [
+        ['bearerAuth' => []]
+    ],
+    'components' => [
+        'securitySchemes' => [
+            'bearerAuth' => [
+                'type' => 'http',
+                'scheme' => 'bearer',
+                'bearerFormat' => 'JWT',
+                'description' => 'JWT Authorization header using the Bearer scheme. Example: \'Authorization: Bearer {token}\''
+            ]
+        ]
+    ],
+    'tags' => [
+        [
+            'name' => 'Health',
+            'description' => 'API health and status endpoints'
+        ],
+        [
+            'name' => 'Authentication',
+            'description' => 'User authentication and authorization endpoints'
+        ],
+        [
+            'name' => 'Workers',
+            'description' => 'Worker management and invitation system endpoints'
+        ],
+        [
+            'name' => 'Profile',
+            'description' => 'User profile management endpoints'
+        ]
+    ],
+    'paths' => [
+        '/api/v1/workers' => [
+            'get' => [
+                'summary' => 'Get all workers',
+                'description' => 'Retrieve a paginated list of all workers including active and invited users',
+                'tags' => ['Workers'],
+                'security' => [['bearerAuth' => []]],
+                'parameters' => [
+                    [
+                        'name' => 'page',
+                        'in' => 'query',
+                        'description' => 'Page number for pagination',
+                        'required' => false,
+                        'schema' => ['type' => 'integer', 'minimum' => 1, 'default' => 1]
+                    ],
+                    [
+                        'name' => 'limit',
+                        'in' => 'query',
+                        'description' => 'Number of items per page',
+                        'required' => false,
+                        'schema' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'default' => 20]
+                    ],
+                    [
+                        'name' => 'status',
+                        'in' => 'query',
+                        'description' => 'Filter by invitation status: invited, registered',
+                        'required' => false,
+                        'schema' => ['type' => 'string', 'enum' => ['invited', 'registered']]
+                    ],
+                    [
+                        'name' => 'search',
+                        'in' => 'query',
+                        'description' => 'Search by name or email',
+                        'required' => false,
+                        'schema' => ['type' => 'string']
+                    ]
+                ],
+                'responses' => [
+                    '200' => [
+                        'description' => 'Workers retrieved successfully',
+                        'content' => [
+                            'application/json' => [
+                                'schema' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'error_code' => ['type' => 'integer', 'example' => 0],
+                                        'status' => ['type' => 'string', 'example' => 'success'],
+                                        'message' => ['type' => 'string', 'example' => 'Workers retrieved successfully'],
+                                        'data' => [
+                                            'type' => 'object',
+                                            'properties' => [
+                                                'workers' => [
+                                                    'type' => 'array',
+                                                    'items' => [
+                                                        'type' => 'object',
+                                                        'properties' => [
+                                                            'id' => ['type' => 'integer', 'example' => 1],
+                                                            'email' => ['type' => 'string', 'example' => 'worker@example.com'],
+                                                            'password_hash' => ['type' => 'string', 'example' => '$2y$10$...'],
+                                                            'first_name' => ['type' => 'string', 'example' => 'John'],
+                                                            'last_name' => ['type' => 'string', 'example' => 'Doe'],
+                                                            'phone' => ['type' => 'string', 'example' => '+1234567890'],
+                                                            'user_type' => ['type' => 'string', 'example' => 'Employee'],
+                                                            'job_title' => ['type' => 'string', 'example' => 'Developer'],
+                                                            'status' => ['type' => 'integer', 'example' => 1],
+                                                            'status_reason' => ['type' => 'string', 'nullable' => true],
+                                                            'status_details' => ['type' => 'string', 'nullable' => true],
+                                                            'additional_info' => ['type' => 'string', 'nullable' => true],
+                                                            'avatar_url' => ['type' => 'string', 'nullable' => true],
+                                                            'two_factor_enabled' => ['type' => 'boolean', 'example' => false],
+                                                            'two_factor_secret' => ['type' => 'string', 'nullable' => true],
+                                                            'last_login' => ['type' => 'string', 'format' => 'date-time'],
+                                                            'created_at' => ['type' => 'string', 'format' => 'date-time'],
+                                                            'updated_at' => ['type' => 'string', 'format' => 'date-time'],
+                                                            'invitation_status' => ['type' => 'string', 'example' => 'registered'],
+                                                            'invitation_token' => ['type' => 'string', 'nullable' => true],
+                                                            'invitation_sent_at' => ['type' => 'string', 'format' => 'date-time', 'nullable' => true],
+                                                            'invitation_expires_at' => ['type' => 'string', 'format' => 'date-time', 'nullable' => true],
+                                                            'invited_by' => ['type' => 'integer', 'nullable' => true],
+                                                            'registration_completed_at' => ['type' => 'string', 'format' => 'date-time', 'nullable' => true],
+                                                            'invitation_attempts' => ['type' => 'integer', 'example' => 0],
+                                                            'last_reminder_sent_at' => ['type' => 'string', 'format' => 'date-time', 'nullable' => true]
+                                                        ]
+                                                    ]
+                                                ],
+                                                'pagination' => [
+                                                    'type' => 'object',
+                                                    'properties' => [
+                                                        'current_page' => ['type' => 'integer', 'example' => 1],
+                                                        'per_page' => ['type' => 'integer', 'example' => 20],
+                                                        'total' => ['type' => 'integer', 'example' => 100],
+                                                        'last_page' => ['type' => 'integer', 'example' => 5]
+                                                    ]
+                                                ]
+                                            ]
+                                        ]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ],
+                    '401' => [
+                        'description' => 'Unauthorized - Invalid or missing token',
+                        'content' => [
+                            'application/json' => [
+                                'schema' => [
+                                    'type' => 'object',
+                                    'properties' => [
+                                        'error_code' => ['type' => 'integer', 'example' => 401],
+                                        'status' => ['type' => 'string', 'example' => 'error'],
+                                        'message' => ['type' => 'string', 'example' => 'Unauthorized'],
+                                        'data' => ['type' => 'null']
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ]
+];
+
+// Сохраняем в файл с красивым форматированием
+$json = json_encode($swagger, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+file_put_contents(__DIR__ . '/../public/swagger.json', $json);
+
+echo "Swagger documentation generated successfully!\n";
+echo "File saved to: public/swagger.json\n";
+echo "Access documentation at: http://localhost:8000/docs\n";

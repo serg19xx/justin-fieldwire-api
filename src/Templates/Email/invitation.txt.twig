@@ -1,0 +1,41 @@
+WELCOME TO FIELDWIRE
+====================
+
+Hello {{ firstName }} {{ lastName }},
+
+You've been invited to join our team as a {{ jobTitle }}.
+
+{% if attemptNumber > 1 %}
+REMINDER #{{ attemptNumber - 1 }}
+This is a friendly reminder about your invitation to join FieldWire.
+{% endif %}
+
+YOUR LOGIN CREDENTIALS
+======================
+Email: {{ email }}
+Temporary Password: {{ tempPassword }}
+
+LOGIN TO YOUR ACCOUNT
+=====================
+{{ loginUrl }}
+
+NEXT STEPS
+==========
+1. Click the login link above
+2. Use your temporary password to sign in
+3. Set your own secure password
+4. Start exploring the platform
+
+IMPORTANT NOTICE
+================
+This invitation expires in {{ expiryHours }} hours ({{ expiryDate }}).
+
+If you have any questions, please contact our support team.
+
+Best regards,
+The FieldWire Team
+
+Visit Platform: {{ appUrl }}
+Contact Support: support@fieldwire.com
+
+This invitation was sent to {{ email }}. If you didn't expect this invitation, please ignore this email.
