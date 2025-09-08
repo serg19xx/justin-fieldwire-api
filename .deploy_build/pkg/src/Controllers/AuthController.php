@@ -35,30 +35,34 @@ class AuthController
 
     /**
      * @OA\Post(
-     *     path="/auth/login",
+     *     path="/api/v1/auth/login",
      *     summary="User login",
-     *     description="Authenticate user with email and password",
+     *     description="Authenticate user with email and password (including temporary passwords for invited users)",
      *     tags={"Authentication"},
      *     @OA\RequestBody(
      *         required=true,
      *         description="Login credentials",
      *         @OA\JsonContent(
-     *             required={"email","password"},
+     *             required={"email", "password"},
      *             @OA\Property(property="email", type="string", format="email", example="user@example.com", description="User email address"),
-     *             @OA\Property(property="password", type="string", example="password123", description="User password")
+     *             @OA\Property(property="password", type="string", example="password123", description="User password (regular or temporary)")
      *         )
      *     ),
      *     @OA\Response(
      *         response=200,
      *         description="Login successful",
      *         @OA\JsonContent(
-     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
      *             @OA\Property(property="message", type="string", example="Login successful"),
-     *             @OA\Property(property="token", type="string", example="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...", description="JWT authentication token"),
-     *             @OA\Property(property="user", type="object", 
-     *                 @OA\Property(property="id", type="integer", example=1),
-     *                 @OA\Property(property="email", type="string", example="user@example.com"),
-     *                 @OA\Property(property="name", type="string", example="John Doe")
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="token", type="string", example="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...", description="JWT authentication token"),
+     *                 @OA\Property(property="user", type="object", 
+     *                     @OA\Property(property="id", type="integer", example=1),
+     *                     @OA\Property(property="email", type="string", example="user@example.com"),
+     *                     @OA\Property(property="first_name", type="string", example="John"),
+     *                     @OA\Property(property="last_name", type="string", example="Doe")
+     *                 )
      *             )
      *         )
      *     ),
@@ -66,25 +70,30 @@ class AuthController
      *         response=400,
      *         description="Bad request - validation error",
      *         @OA\JsonContent(
-     *             @OA\Property(property="success", type="boolean", example=false),
-     *             @OA\Property(property="message", type="string", example="Validation failed"),
-     *             @OA\Property(property="errors", type="array", @OA\Items(type="string"))
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Email and password are required"),
+     *             @OA\Property(property="data", type="null")
      *         )
      *     ),
      *     @OA\Response(
      *         response=401,
      *         description="Invalid credentials",
      *         @OA\JsonContent(
-     *             @OA\Property(property="success", type="boolean", example=false),
-     *             @OA\Property(property="message", type="string", example="Invalid email or password")
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid email or password"),
+     *             @OA\Property(property="data", type="null")
      *         )
      *     ),
      *     @OA\Response(
      *         response=500,
      *         description="Internal server error",
      *         @OA\JsonContent(
-     *             @OA\Property(property="success", type="boolean", example=false),
-     *             @OA\Property(property="message", type="string", example="Internal server error")
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Internal server error"),
+     *             @OA\Property(property="data", type="null")
      *         )
      *     )
      * )
@@ -120,9 +129,10 @@ class AuthController
             error_log('Validation passed');
             
             $email = $data['email'];
+            
             $password = $data['password'];
-
-            // Authenticate user
+            
+            // Regular password authentication (including temporary passwords)
             error_log('Calling authenticateUser');
             $user = $this->authenticateUser($email, $password);
             error_log('authenticateUser returned: ' . print_r($user, true));
@@ -237,15 +247,16 @@ class AuthController
      */
     private function validateLoginData(array $data): bool
     {
+        // Regular login requires email and password
         if (empty($data['email']) || empty($data['password'])) {
             return false;
         }
-
+        
         // Basic email validation
         if (!filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
             return false;
         }
-
+        
         return true;
     }
 
@@ -297,6 +308,196 @@ class AuthController
     }
 
     /**
+     * Authenticate user with invitation code
+     */
+    private function checkInvitationToken(string $invitationToken): bool
+    {
+        try {
+            error_log('=== VALIDATE INVITATION TOKEN START ===');
+            
+            $connection = $this->database->getConnection();
+            error_log('Database connection OK');
+            
+            // Check if token exists
+            $sql = "SELECT invitation_expires_at FROM fw_users WHERE invitation_token = ? AND invitation_status = 'invited' LIMIT 1";
+            error_log('SQL: ' . $sql);
+            error_log('Invitation token: ' . $invitationToken);
+            
+            $result = $connection->executeQuery($sql, [$invitationToken]);
+            error_log('Query executed OK');
+            
+            $row = $result->fetchAssociative();
+            error_log('Token data: ' . print_r($row, true));
+
+            if (!$row) {
+                error_log('Token does not exist');
+                return false;
+            }
+
+            // Check if invitation is expired
+            $expiresAt = $row['invitation_expires_at'];
+            if ($expiresAt && strtotime($expiresAt) < time()) {
+                error_log('Token expired');
+                return false;
+            }
+
+            error_log('Token is valid');
+            return true;
+
+        } catch (\Exception $e) {
+            error_log('=== VALIDATE INVITATION TOKEN ERROR ===');
+            error_log('Error: ' . $e->getMessage());
+            error_log('Stack trace: ' . $e->getTraceAsString());
+            return false;
+        }
+    }
+
+    /**
+     * @OA\Post(
+     *     path="/api/v1/auth/change-password",
+     *     summary="Change password for invited user",
+     *     description="Change password for users with 'invited' status. Updates password and changes status to 'registered'.",
+     *     tags={"Authentication"},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         description="New password",
+     *         @OA\JsonContent(
+     *             required={"new_password"},
+     *             @OA\Property(property="new_password", type="string", example="newpassword123", description="New password (minimum 8 characters)")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Password changed successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Password changed successfully"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Bad request - validation error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="New password is required"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Internal server error"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     )
+     * )
+     */
+    public function changePassword(): void
+    {
+        try {
+            $data = json_decode(Flight::request()->getBody(), true);
+            
+            if (!$data || !isset($data['new_password'])) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'New password is required',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            $newPassword = $data['new_password'];
+            
+            // Validate password strength
+            if (strlen($newPassword) < 8) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Password must be at least 8 characters long',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            $connection = $this->database->getConnection();
+            
+            // Find user by invitation status (only invited users can change password this way)
+            $sql = "SELECT id, email FROM fw_users WHERE invitation_status = 'invited' LIMIT 1";
+            $result = $connection->executeQuery($sql);
+            $user = $result->fetchAssociative();
+            
+            if (!$user) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'No invited user found',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            // Start transaction
+            $connection->beginTransaction();
+            
+            try {
+                // Hash new password
+                $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
+                
+                // Update user: set new password, change status to registered, clear invitation fields
+                $updateSql = "UPDATE fw_users SET 
+                                password_hash = ?,
+                                invitation_status = 'registered',
+                                invitation_token = NULL,
+                                invitation_sent_at = NULL,
+                                invitation_expires_at = NULL,
+                                invited_by = NULL,
+                                last_login = NOW()
+                              WHERE id = ?";
+                
+                $connection->executeStatement($updateSql, [$hashedPassword, $user['id']]);
+                
+                // Commit transaction
+                $connection->commit();
+                
+                $this->logger->info('Password changed for invited user', [
+                    'user_id' => $user['id'],
+                    'email' => $user['email'],
+                    'ip' => Flight::request()->ip
+                ]);
+                
+                Flight::json([
+                    'error_code' => 0,
+                    'status' => 'success',
+                    'message' => 'Password changed successfully',
+                    'data' => null
+                ]);
+                
+            } catch (\Exception $e) {
+                // Rollback transaction on error
+                $connection->rollBack();
+                throw $e;
+            }
+            
+        } catch (\Exception $e) {
+            error_log('Change password error: ' . $e->getMessage());
+            
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
      * Generate JWT token for user
      */
     private function generateToken(array $user): string
@@ -311,4 +512,121 @@ class AuthController
         
         return base64_encode(json_encode($payload));
     }
+
+    /**
+     * @OA\Get(
+     *     path="/api/v1/auth/validate-invitation-token",
+     *     summary="Validate invitation token",
+     *     description="Check if invitation token is valid and not expired. Returns only validation status without user data.",
+     *     tags={"Authentication"},
+     *     @OA\Parameter(
+     *         name="token",
+     *         in="query",
+     *         required=true,
+     *         description="Invitation token from email",
+     *         @OA\Schema(type="string", example="abc123def456")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Token is valid",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Token is valid"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Invalid or expired token",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid invitation token"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Internal server error"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     )
+     * )
+     */
+    public function validateInvitationToken(): void
+    {
+        try {
+            $token = Flight::request()->query['token'] ?? '';
+            
+            if (empty($token)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Invitation token is required',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            $connection = $this->database->getConnection();
+            
+            // Check if token exists and is valid
+            $sql = "SELECT invitation_expires_at 
+                    FROM fw_users 
+                    WHERE invitation_token = ? AND invitation_status = 'invited' 
+                    LIMIT 1";
+            
+            $result = $connection->executeQuery($sql, [$token]);
+            $user = $result->fetchAssociative();
+            
+            if (!$user) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Invalid invitation token',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            // Check if token is expired
+            $expiresAt = $user['invitation_expires_at'];
+            if ($expiresAt && strtotime($expiresAt) < time()) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Invitation token has expired',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            // Token is valid
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Token is valid',
+                'data' => null
+            ]);
+            
+        } catch (\Exception $e) {
+            $this->logger->error('Token validation failed', [
+                'error' => $e->getMessage(),
+                'token' => $token ?? 'not provided'
+            ]);
+            
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
 }

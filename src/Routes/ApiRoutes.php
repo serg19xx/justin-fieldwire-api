@@ -8,6 +8,7 @@ use App\Controllers\AuthController;
 use App\Controllers\GeographyController;
 use App\Controllers\WorkerController;
 use App\Controllers\RegistrationController;
+use App\Controllers\ProjectController;
 use Flight;
 use Monolog\Logger;
 
@@ -501,6 +502,42 @@ class ApiRoutes
         Flight::route('POST /api/v1/registration/complete', function() {
             $registrationController = new \App\Controllers\RegistrationController($this->logger);
             $registrationController->completeRegistration();
+        });
+
+        // Projects routes
+        Flight::route('GET /api/v1/projects', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $projectController = new \App\Controllers\ProjectController($this->logger);
+                $projectController->getProjects();
+            }
+        });
+
+        Flight::route('GET /api/v1/projects/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $projectController = new \App\Controllers\ProjectController($this->logger);
+                $projectController->getProject((int)$id);
+            }
+        });
+
+        Flight::route('POST /api/v1/projects', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $projectController = new \App\Controllers\ProjectController($this->logger);
+                $projectController->createProject();
+            }
+        });
+
+        Flight::route('PUT /api/v1/projects/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $projectController = new \App\Controllers\ProjectController($this->logger);
+                $projectController->updateProject((int)$id);
+            }
+        });
+
+        Flight::route('DELETE /api/v1/projects/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $projectController = new \App\Controllers\ProjectController($this->logger);
+                $projectController->deleteProject((int)$id);
+            }
         });
     }
 }

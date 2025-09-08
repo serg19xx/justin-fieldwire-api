@@ -5,7 +5,7 @@ USE yjyhtqh8_easyrx;
 
 -- Добавляем поля для системы приглашений
 ALTER TABLE fw_users 
-ADD COLUMN invitation_status ENUM('active', 'invited', 'registered') DEFAULT 'active' COMMENT 'Статус пользователя: active - действующий, invited - приглашен, registered - зарегистрирован по приглашению',
+ADD COLUMN invitation_status ENUM('invited', 'registered') DEFAULT 'registered' COMMENT 'Статус пользователя: invited - приглашен, registered - зарегистрирован',
 ADD COLUMN invitation_token VARCHAR(255) NULL COMMENT 'Токен приглашения для регистрации',
 ADD COLUMN invitation_sent_at TIMESTAMP NULL COMMENT 'Дата отправки приглашения',
 ADD COLUMN invitation_expires_at TIMESTAMP NULL COMMENT 'Дата истечения приглашения',
@@ -24,8 +24,8 @@ ADD INDEX idx_invited_by (invited_by);
 -- ADD CONSTRAINT fk_fw_users_invited_by 
 -- FOREIGN KEY (invited_by) REFERENCES fw_users(id) ON DELETE SET NULL;
 
--- Обновляем существующих пользователей - они все активные
-UPDATE fw_users SET invitation_status = 'active' WHERE invitation_status IS NULL;
+-- Обновляем существующих пользователей - они все зарегистрированные
+UPDATE fw_users SET invitation_status = 'registered' WHERE invitation_status IS NULL;
 
 -- Показываем результат
 SELECT 'Invitation fields added successfully!' as result;
