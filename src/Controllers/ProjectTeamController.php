@@ -115,12 +115,19 @@ class ProjectTeamController
 
             $connection = $this->database->getConnection();
 
-            // Get total count
-            $countSql = "SELECT COUNT(*) as total FROM fw_prj_team_members WHERE project_id = ?";
+            // Get total count (exclude System Administrator and Project Manager)
+            $countSql = "
+                SELECT COUNT(*) as total 
+                FROM fw_prj_team_members tm
+                JOIN fw_users u ON tm.user_id = u.id
+                WHERE tm.project_id = ? 
+                  AND u.archived_at IS NULL 
+                  AND u.user_type NOT IN ('System Administrator', 'Project Manager')
+            ";
             $countResult = $connection->executeQuery($countSql, [$projectId]);
             $total = $countResult->fetchOne();
 
-            // Get team members with user data
+            // Get team members with user data (exclude System Administrator and Project Manager)
             $sql = "
                 SELECT 
                     tm.id,
@@ -136,7 +143,9 @@ class ProjectTeamController
                     u.status
                 FROM fw_prj_team_members tm
                 JOIN fw_users u ON tm.user_id = u.id
-                WHERE tm.project_id = ? AND u.archived_at IS NULL
+                WHERE tm.project_id = ? 
+                  AND u.archived_at IS NULL 
+                  AND u.user_type NOT IN ('System Administrator', 'Project Manager')
                 ORDER BY tm.assigned_at DESC
                 LIMIT " . (int)$limit . " OFFSET " . (int)$offset . "
             ";
@@ -170,6 +179,129 @@ class ProjectTeamController
             ]);
 
             return $this->errorResponse('Failed to get team members');
+        }
+    }
+
+    /**
+     * @OA\Get(
+     *     path="/api/v1/projects/{project_id}/team/available-users",
+     *     tags={"Project Team"},
+     *     summary="Get available users for team",
+     *     description="Get list of users that can be added to project team (excludes System Administrators and Project Managers)",
+     *     @OA\Parameter(
+     *         name="project_id",
+     *         in="path",
+     *         required=true,
+     *         description="Project ID",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="search",
+     *         in="query",
+     *         required=false,
+     *         description="Search term for user name or email",
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Available users retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Available users retrieved successfully"),
+     *             @OA\Property(
+     *                 property="data",
+     *                 type="object",
+     *                 @OA\Property(
+     *                     property="users",
+     *                     type="array",
+     *                     @OA\Items(
+     *                         @OA\Property(property="id", type="integer", example=45),
+     *                         @OA\Property(property="name", type="string", example="John Smith"),
+     *                         @OA\Property(property="email", type="string", example="architect1@example.com"),
+     *                         @OA\Property(property="user_type", type="string", example="Architect"),
+     *                         @OA\Property(property="job_title", type="string", example="Senior Architect"),
+     *                         @OA\Property(property="status", type="integer", example=1)
+     *                     )
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized"
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Project not found"
+     *     )
+     * )
+     */
+    public function getAvailableUsers($projectId)
+    {
+        try {
+            if (!$this->checkAuth()) {
+                return $this->errorResponse('Unauthorized', 401);
+            }
+
+            if (!$this->checkProjectExists($projectId)) {
+                return $this->errorResponse('Project not found', 404);
+            }
+
+            $search = $_GET['search'] ?? '';
+            $connection = $this->database->getConnection();
+
+            // Get users that can be added to team (exclude System Administrator and Project Manager)
+            $sql = "
+                SELECT 
+                    u.id,
+                    u.first_name,
+                    u.last_name,
+                    u.email,
+                    u.user_type,
+                    u.job_title,
+                    u.status
+                FROM fw_users u
+                WHERE u.archived_at IS NULL 
+                  AND u.user_type NOT IN ('System Administrator', 'Project Manager')
+                  AND u.id NOT IN (
+                      SELECT tm.user_id 
+                      FROM fw_prj_team_members tm 
+                      WHERE tm.project_id = ?
+                  )
+            ";
+
+            $params = [$projectId];
+
+            if (!empty($search)) {
+                $sql .= " AND (u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ?)";
+                $searchTerm = '%' . $search . '%';
+                $params = array_merge($params, [$searchTerm, $searchTerm, $searchTerm]);
+            }
+
+            $sql .= " ORDER BY u.first_name, u.last_name";
+
+            $result = $connection->executeQuery($sql, $params);
+            $users = $result->fetchAllAssociative();
+
+            $formattedUsers = array_map([$this, 'formatAvailableUser'], $users);
+
+            return [
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Available users retrieved successfully',
+                'data' => [
+                    'users' => $formattedUsers
+                ]
+            ];
+
+        } catch (Exception $e) {
+            $this->logger->error('Error getting available users', [
+                'project_id' => $projectId,
+                'error' => $e->getMessage()
+            ]);
+
+            return $this->errorResponse('Failed to get available users');
         }
     }
 
@@ -248,11 +380,17 @@ class ProjectTeamController
 
             $connection = $this->database->getConnection();
 
-            // Check if user exists and is not archived
-            $userSql = "SELECT id FROM fw_users WHERE id = ? AND archived_at IS NULL";
+            // Check if user exists, is not archived, and is not System Administrator or Project Manager
+            $userSql = "SELECT id, user_type FROM fw_users WHERE id = ? AND archived_at IS NULL";
             $userResult = $connection->executeQuery($userSql, [$input['user_id']]);
-            if (!$userResult->fetchOne()) {
+            $user = $userResult->fetchAssociative();
+            
+            if (!$user) {
                 return $this->errorResponse('User not found', 404);
+            }
+            
+            if (in_array($user['user_type'], ['System Administrator', 'Project Manager'])) {
+                return $this->errorResponse('Cannot add System Administrator or Project Manager to team', 400);
             }
 
             // Check if user is already in team
