@@ -152,6 +152,22 @@ class AuthController
                 return;
             }
 
+            // Проверяем, не архивирован ли пользователь
+            if (isset($user['error']) && $user['error'] === 'archived') {
+                $this->logger->warning('Login attempt for archived user', [
+                    'email' => $email,
+                    'ip' => Flight::request()->ip
+                ]);
+
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'User account has been deleted',
+                    'data' => null
+                ], 401);
+                return;
+            }
+
             // Check if 2FA is enabled for this user
             $twoFactorEnabled = (bool)($user['two_factor_enabled'] ?? false);
 
@@ -272,7 +288,7 @@ class AuthController
             error_log('Database connection OK');
             
             // Правильный SQL
-            $sql = "SELECT * FROM fw_users WHERE email = ? LIMIT 1";
+            $sql = "SELECT id, email, password_hash, first_name, last_name, phone, user_type, job_title, status, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_users WHERE email = ? LIMIT 1";
             error_log('SQL: ' . $sql);
             error_log('Email: ' . $email);
             
@@ -286,6 +302,12 @@ class AuthController
             if (!$user) {
                 error_log('User not found');
                 return null;
+            }
+
+            // Проверяем, не архивирован ли пользователь
+            if ($user['archived_at'] !== null) {
+                error_log('User is archived');
+                return ['error' => 'archived'];
             }
 
             error_log('User found, checking password');

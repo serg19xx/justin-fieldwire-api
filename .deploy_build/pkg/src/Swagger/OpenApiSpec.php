@@ -45,6 +45,10 @@ use OpenApi\Annotations as OA;
  *     @OA\Tag(
  *         name="Profile",
  *         description="User profile management endpoints"
+ *     ),
+ *     @OA\Tag(
+ *         name="Projects",
+ *         description="Project management endpoints"
  *     )
  * )
  */

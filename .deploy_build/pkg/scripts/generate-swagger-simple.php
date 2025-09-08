@@ -51,6 +51,10 @@ $swagger = [
             'description' => 'Worker management and invitation system endpoints'
         ],
         [
+            'name' => 'Projects',
+            'description' => 'Project management endpoints'
+        ],
+        [
             'name' => 'Profile',
             'description' => 'User profile management endpoints'
         ]

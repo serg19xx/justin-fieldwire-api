@@ -509,7 +509,7 @@ class TwoFactorController
     {
         try {
             $connection = Database::getConnection();
-            $sql = 'SELECT * FROM fw_users WHERE email = ?';
+            $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, user_type, job_title, status, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_users WHERE email = ?';
             $result = $connection->executeQuery($sql, [$email]);
             $user = $result->fetchAssociative();
             return $user ?: null;
@@ -526,7 +526,7 @@ class TwoFactorController
     {
         try {
             $connection = Database::getConnection();
-            $sql = 'SELECT * FROM fw_users WHERE id = ?';
+            $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, user_type, job_title, status, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_users WHERE id = ?';
             $result = $connection->executeQuery($sql, [$userId]);
             $user = $result->fetchAssociative();
             return $user ?: null;

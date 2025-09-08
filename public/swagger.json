@@ -2123,6 +2123,431 @@
                 ]
             }
         },
+        "/api/v1/projects/{project_id}/team": {
+            "get": {
+                "tags": [
+                    "Project Team"
+                ],
+                "summary": "Get project team members",
+                "description": "Retrieve all team members for a specific project",
+                "operationId": "8ba9af62f11b6d5e44b565b3f04c4ed1",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "page",
+                        "in": "query",
+                        "description": "Page number for pagination",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 1
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Number of items per page",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 50
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Team members retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Team members retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "team_members": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "project_id": {
+                                                                "type": "integer",
+                                                                "example": 9
+                                                            },
+                                                            "user_id": {
+                                                                "type": "integer",
+                                                                "example": 47
+                                                            },
+                                                            "role": {
+                                                                "type": "string",
+                                                                "example": "lead"
+                                                            },
+                                                            "added_at": {
+                                                                "type": "string",
+                                                                "format": "date-time",
+                                                                "example": "2025-01-15T10:00:00Z"
+                                                            },
+                                                            "added_by": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "name": {
+                                                                "type": "string",
+                                                                "example": "Mike Davis"
+                                                            },
+                                                            "email": {
+                                                                "type": "string",
+                                                                "example": "mike@example.com"
+                                                            },
+                                                            "user_type": {
+                                                                "type": "string",
+                                                                "example": "Project Manager"
+                                                            },
+                                                            "job_title": {
+                                                                "type": "string",
+                                                                "example": "Senior PM"
+                                                            },
+                                                            "status": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "pagination": {
+                                                    "properties": {
+                                                        "current_page": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "per_page": {
+                                                            "type": "integer",
+                                                            "example": 50
+                                                        },
+                                                        "total": {
+                                                            "type": "integer",
+                                                            "example": 5
+                                                        },
+                                                        "last_page": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Project not found"
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Project Team"
+                ],
+                "summary": "Add team member to project",
+                "description": "Add a new team member to the project",
+                "operationId": "ec77e56d2f351816853197374fd5b1fe",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "user_id": {
+                                        "type": "integer",
+                                        "example": 47
+                                    },
+                                    "role": {
+                                        "type": "string",
+                                        "example": "member"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Team member added successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Team member added successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "project_id": {
+                                                    "type": "integer",
+                                                    "example": 9
+                                                },
+                                                "user_id": {
+                                                    "type": "integer",
+                                                    "example": 47
+                                                },
+                                                "role": {
+                                                    "type": "string",
+                                                    "example": "member"
+                                                },
+                                                "added_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-01-15T10:00:00Z"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input data"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Project or user not found"
+                    },
+                    "409": {
+                        "description": "User already in team"
+                    }
+                }
+            }
+        },
+        "/api/v1/projects/{project_id}/team/{team_member_id}": {
+            "put": {
+                "tags": [
+                    "Project Team"
+                ],
+                "summary": "Update team member role",
+                "description": "Update the role of a team member in the project",
+                "operationId": "a638a36298b90423809bb17a98f306a2",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "team_member_id",
+                        "in": "path",
+                        "description": "Team member ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "role": {
+                                        "type": "string",
+                                        "example": "lead"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Team member updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Team member updated successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "project_id": {
+                                                    "type": "integer",
+                                                    "example": 9
+                                                },
+                                                "user_id": {
+                                                    "type": "integer",
+                                                    "example": 47
+                                                },
+                                                "role": {
+                                                    "type": "string",
+                                                    "example": "lead"
+                                                },
+                                                "added_at": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-01-15T10:00:00Z"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid input data"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Team member not found"
+                    }
+                }
+            },
+            "delete": {
+                "tags": [
+                    "Project Team"
+                ],
+                "summary": "Remove team member from project",
+                "description": "Remove a team member from the project",
+                "operationId": "11c76203d204e382c9893df14a95a78a",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "team_member_id",
+                        "in": "path",
+                        "description": "Team member ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Team member removed successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Team member removed successfully"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Team member not found"
+                    }
+                }
+            }
+        },
         "/api/v1/registration/validate/{token}": {
             "get": {
                 "tags": [
@@ -2364,6 +2789,967 @@
                         }
                     }
                 }
+            }
+        },
+        "/api/v1/projects/{project_id}/tasks": {
+            "get": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "Get project tasks",
+                "description": "Retrieve a paginated list of tasks for a specific project",
+                "operationId": "da12bdc8185001886c398bd326dfdf7e",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Filter by task status",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "planned",
+                                "in_progress",
+                                "done",
+                                "blocked",
+                                "delayed"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "milestone",
+                        "in": "query",
+                        "description": "Filter by milestone flag",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Search by task name",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tasks retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Tasks retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "tasks": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "project_id": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "wbs_path": {
+                                                                "type": "string",
+                                                                "example": "1.1.1"
+                                                            },
+                                                            "name": {
+                                                                "type": "string",
+                                                                "example": "Design Phase"
+                                                            },
+                                                            "start_planned": {
+                                                                "type": "string",
+                                                                "format": "date",
+                                                                "example": "2025-01-01"
+                                                            },
+                                                            "end_planned": {
+                                                                "type": "string",
+                                                                "format": "date",
+                                                                "example": "2025-01-15"
+                                                            },
+                                                            "milestone": {
+                                                                "type": "boolean",
+                                                                "example": false
+                                                            },
+                                                            "status": {
+                                                                "type": "string",
+                                                                "example": "planned"
+                                                            },
+                                                            "progress_pct": {
+                                                                "type": "integer",
+                                                                "example": 0
+                                                            },
+                                                            "notes": {
+                                                                "type": "string",
+                                                                "example": "Initial design phase"
+                                                            },
+                                                            "task_lead_id": {
+                                                                "type": "integer",
+                                                                "example": 47
+                                                            },
+                                                            "team_members": {
+                                                                "type": "array",
+                                                                "items": {
+                                                                    "type": "integer"
+                                                                },
+                                                                "example": [
+                                                                    23,
+                                                                    45,
+                                                                    67
+                                                                ]
+                                                            },
+                                                            "resources": {
+                                                                "type": "array",
+                                                                "items": {
+                                                                    "type": "string"
+                                                                }
+                                                            },
+                                                            "dependencies": {
+                                                                "type": "array",
+                                                                "items": {
+                                                                    "properties": {
+                                                                        "predecessor_id": {
+                                                                            "type": "integer",
+                                                                            "example": 4
+                                                                        },
+                                                                        "type": {
+                                                                            "type": "string",
+                                                                            "example": "FS"
+                                                                        },
+                                                                        "lag_days": {
+                                                                            "type": "integer",
+                                                                            "example": 1
+                                                                        }
+                                                                    },
+                                                                    "type": "object"
+                                                                }
+                                                            },
+                                                            "baseline_start": {
+                                                                "type": "string",
+                                                                "format": "date",
+                                                                "nullable": true
+                                                            },
+                                                            "baseline_end": {
+                                                                "type": "string",
+                                                                "format": "date",
+                                                                "nullable": true
+                                                            },
+                                                            "actual_start": {
+                                                                "type": "string",
+                                                                "format": "date",
+                                                                "nullable": true
+                                                            },
+                                                            "actual_end": {
+                                                                "type": "string",
+                                                                "format": "date",
+                                                                "nullable": true
+                                                            },
+                                                            "slack_days": {
+                                                                "type": "integer",
+                                                                "nullable": true
+                                                            },
+                                                            "created_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            },
+                                                            "updated_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing token",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "Create new task",
+                "description": "Create a new task for a project",
+                "operationId": "d3804f0b2a7babdabc060376acc947a6",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name",
+                                    "start_planned",
+                                    "task_lead_id"
+                                ],
+                                "properties": {
+                                    "wbs_path": {
+                                        "description": "Work Breakdown Structure path",
+                                        "type": "string",
+                                        "example": "1.1.1"
+                                    },
+                                    "name": {
+                                        "description": "Task name (required)",
+                                        "type": "string",
+                                        "example": "Foundation Work"
+                                    },
+                                    "start_planned": {
+                                        "description": "Planned start date (required)",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-09-10"
+                                    },
+                                    "end_planned": {
+                                        "description": "Planned end date",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-09-12"
+                                    },
+                                    "milestone": {
+                                        "description": "Is this a milestone task",
+                                        "type": "boolean",
+                                        "example": false
+                                    },
+                                    "status": {
+                                        "description": "Task status",
+                                        "type": "string",
+                                        "enum": [
+                                            "planned",
+                                            "in_progress",
+                                            "done",
+                                            "blocked",
+                                            "delayed"
+                                        ],
+                                        "example": "planned"
+                                    },
+                                    "progress_pct": {
+                                        "description": "Progress percentage",
+                                        "type": "integer",
+                                        "maximum": 100,
+                                        "minimum": 0,
+                                        "example": 0
+                                    },
+                                    "notes": {
+                                        "description": "Task notes",
+                                        "type": "string",
+                                        "example": "Foundation work description"
+                                    },
+                                    "task_lead_id": {
+                                        "description": "ID of the user who leads this task (required)",
+                                        "type": "integer",
+                                        "example": 47
+                                    },
+                                    "team_members": {
+                                        "description": "Array of user IDs who are team members/executors",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "integer"
+                                        },
+                                        "example": [
+                                            23,
+                                            45,
+                                            67
+                                        ]
+                                    },
+                                    "resources": {
+                                        "description": "Array of resource names",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "example": [
+                                            "excavator_1",
+                                            "concrete_mixer"
+                                        ]
+                                    },
+                                    "dependencies": {
+                                        "description": "Array of dependency objects",
+                                        "type": "array",
+                                        "items": {
+                                            "properties": {
+                                                "predecessor_id": {
+                                                    "description": "ID of the predecessor task",
+                                                    "type": "integer",
+                                                    "example": 4
+                                                },
+                                                "type": {
+                                                    "description": "Dependency type (FS=Finish to Start, SS=Start to Start, FF=Finish to Finish, SF=Start to Finish)",
+                                                    "type": "string",
+                                                    "example": "FS"
+                                                },
+                                                "lag_days": {
+                                                    "description": "Lag days between tasks",
+                                                    "type": "integer",
+                                                    "example": 1
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "example": [
+                                            {
+                                                "predecessor_id": 4,
+                                                "type": "FS",
+                                                "lag_days": 1
+                                            }
+                                        ]
+                                    },
+                                    "baseline_start": {
+                                        "description": "Baseline start date",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-09-08"
+                                    },
+                                    "baseline_end": {
+                                        "description": "Baseline end date",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-09-10"
+                                    },
+                                    "actual_start": {
+                                        "description": "Actual start date",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": null
+                                    },
+                                    "actual_end": {
+                                        "description": "Actual end date",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": null
+                                    },
+                                    "slack_days": {
+                                        "description": "Slack days",
+                                        "type": "integer",
+                                        "example": 2
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Task created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task created successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "task": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "project_id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "name": {
+                                                            "type": "string",
+                                                            "example": "Design Phase"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Validation error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Field 'name' is required"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/projects/{project_id}/tasks/{task_id}": {
+            "get": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "Get task by ID",
+                "description": "Retrieve a specific task by its ID",
+                "operationId": "3f15baca8069766b3d1e2fd1ea3eae6d",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "task_id",
+                        "in": "path",
+                        "description": "Task ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Task retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "task": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "project_id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "name": {
+                                                            "type": "string",
+                                                            "example": "Design Phase"
+                                                        },
+                                                        "status": {
+                                                            "type": "string",
+                                                            "example": "planned"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Task not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task not found"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "Update task",
+                "description": "Update an existing task",
+                "operationId": "1b8ceb81ba1952e5c315c6a92f66698e",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "task_id",
+                        "in": "path",
+                        "description": "Task ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "wbs_path": {
+                                        "description": "Work Breakdown Structure path",
+                                        "type": "string",
+                                        "example": "1.1.2"
+                                    },
+                                    "name": {
+                                        "description": "Task name",
+                                        "type": "string",
+                                        "example": "Updated Foundation Work"
+                                    },
+                                    "start_planned": {
+                                        "description": "Planned start date",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-09-11"
+                                    },
+                                    "end_planned": {
+                                        "description": "Planned end date",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-09-13"
+                                    },
+                                    "milestone": {
+                                        "description": "Is this a milestone task",
+                                        "type": "boolean",
+                                        "example": false
+                                    },
+                                    "status": {
+                                        "description": "Task status",
+                                        "type": "string",
+                                        "enum": [
+                                            "planned",
+                                            "in_progress",
+                                            "done",
+                                            "blocked",
+                                            "delayed"
+                                        ],
+                                        "example": "in_progress"
+                                    },
+                                    "progress_pct": {
+                                        "description": "Progress percentage",
+                                        "type": "integer",
+                                        "maximum": 100,
+                                        "minimum": 0,
+                                        "example": 50
+                                    },
+                                    "notes": {
+                                        "description": "Task notes",
+                                        "type": "string",
+                                        "example": "Updated foundation work description"
+                                    },
+                                    "task_lead_id": {
+                                        "description": "ID of the user who leads this task",
+                                        "type": "integer",
+                                        "example": 47
+                                    },
+                                    "team_members": {
+                                        "description": "Array of user IDs who are team members/executors",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "integer"
+                                        },
+                                        "example": [
+                                            23,
+                                            45,
+                                            67,
+                                            89
+                                        ]
+                                    },
+                                    "resources": {
+                                        "description": "Array of resource names",
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "example": [
+                                            "excavator_1",
+                                            "concrete_mixer",
+                                            "crane"
+                                        ]
+                                    },
+                                    "dependencies": {
+                                        "description": "Array of dependency objects",
+                                        "type": "array",
+                                        "items": {
+                                            "properties": {
+                                                "predecessor_id": {
+                                                    "description": "ID of the predecessor task",
+                                                    "type": "integer",
+                                                    "example": 4
+                                                },
+                                                "type": {
+                                                    "description": "Dependency type (FS=Finish to Start, SS=Start to Start, FF=Finish to Finish, SF=Start to Finish)",
+                                                    "type": "string",
+                                                    "example": "FS"
+                                                },
+                                                "lag_days": {
+                                                    "description": "Lag days between tasks",
+                                                    "type": "integer",
+                                                    "example": 1
+                                                }
+                                            },
+                                            "type": "object"
+                                        },
+                                        "example": [
+                                            {
+                                                "predecessor_id": 4,
+                                                "type": "FS",
+                                                "lag_days": 1
+                                            },
+                                            {
+                                                "predecessor_id": 5,
+                                                "type": "SS",
+                                                "lag_days": 0
+                                            }
+                                        ]
+                                    },
+                                    "baseline_start": {
+                                        "description": "Baseline start date",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-09-09"
+                                    },
+                                    "baseline_end": {
+                                        "description": "Baseline end date",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-09-11"
+                                    },
+                                    "actual_start": {
+                                        "description": "Actual start date",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-09-10"
+                                    },
+                                    "actual_end": {
+                                        "description": "Actual end date",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": null
+                                    },
+                                    "slack_days": {
+                                        "description": "Slack days",
+                                        "type": "integer",
+                                        "example": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Task updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task updated successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "task": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "name": {
+                                                            "type": "string",
+                                                            "example": "Updated Design Phase"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Task not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task not found"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "Delete task",
+                "description": "Delete a task by ID",
+                "operationId": "df193fc771441f62dbf95ec0b5643906",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "task_id",
+                        "in": "path",
+                        "description": "Task ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Task deleted successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task deleted successfully"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Task not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task not found"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/2fa/send-code": {
@@ -3098,6 +4484,14 @@
         {
             "name": "Projects",
             "description": "Project management endpoints"
+        },
+        {
+            "name": "Tasks",
+            "description": "Project tasks management endpoints"
+        },
+        {
+            "name": "Project Team",
+            "description": "Project team management endpoints"
         },
         {
             "name": "Database",

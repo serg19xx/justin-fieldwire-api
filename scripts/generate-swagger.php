@@ -4,8 +4,10 @@ require_once __DIR__ . '/../vendor/autoload.php';
 
 use OpenApi\Generator;
 
-// Принудительно загружаем ProjectController для генерации документации
+// Принудительно загружаем контроллеры для генерации документации
 require_once __DIR__ . '/../src/Controllers/ProjectController.php';
+require_once __DIR__ . '/../src/Controllers/TaskController.php';
+require_once __DIR__ . '/../src/Controllers/ProjectTeamController.php';
 
 // Настройка для генерации документации
 $openapi = Generator::scan([
