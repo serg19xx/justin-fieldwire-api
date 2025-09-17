@@ -3,6 +3,8 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\EventLoggingService;
+use App\Services\UserAuditService;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
@@ -18,6 +20,8 @@ class RegistrationController
 {
     private Logger $logger;
     private Database $database;
+    private EventLoggingService $eventLoggingService;
+    private UserAuditService $userAuditService;
 
     public function __construct(Logger $logger)
     {
@@ -25,8 +29,10 @@ class RegistrationController
         
         try {
             $this->database = new Database();
+            $this->eventLoggingService = new EventLoggingService($logger);
+            $this->userAuditService = new UserAuditService($logger);
         } catch (\Exception $e) {
-            $this->logger->error('Failed to initialize RegistrationController database', [
+            $this->logger->error('Failed to initialize RegistrationController', [
                 'error' => $e->getMessage()
             ]);
             throw $e;
@@ -206,10 +212,18 @@ class RegistrationController
     public function completeRegistration(): void
     {
         try {
-            $data = Flight::request()->data;
+            // Получаем данные из JSON body
+            $requestBody = Flight::request()->getBody();
+            $data = json_decode($requestBody, true);
+
+            $this->logger->info('Registration complete request', [
+                'request_body' => $requestBody,
+                'parsed_data' => $data,
+                'ip' => Flight::request()->ip
+            ]);
 
             // Валидация обязательных полей
-            if (empty($data->token) || empty($data->password)) {
+            if (empty($data['token']) || empty($data['password'])) {
                 Flight::json([
                     'error_code' => 400,
                     'status' => 'error',
@@ -219,9 +233,9 @@ class RegistrationController
                 return;
             }
 
-            $token = $data->token;
-            $password = $data->password;
-            $phone = $data->phone ?? null;
+            $token = $data['token'];
+            $password = $data['password'];
+            $phone = $data['phone'] ?? null;
 
             // Валидация пароля
             if (strlen($password) < 8) {
@@ -286,6 +300,52 @@ class RegistrationController
                 $user['id']
             ]);
 
+            // Логируем регистрацию в аудит
+            $this->userAuditService->logUserAction(
+                userId: $user['id'],
+                actionType: 'profile_update',
+
+                
+                ipAddress: Flight::request()->ip,
+                userAgent: $_SERVER['HTTP_USER_AGENT'] ?? null,
+                success: true,
+                metadata: [
+                    'registration_completed' => true,
+                    'user_type' => $user['user_type'],
+                    'job_title' => $user['job_title'],
+                    'phone_provided' => !empty($phone),
+                    'changed_fields' => ['password_hash', 'phone', 'invitation_status', 'status']
+                ]
+            );
+
+            // Логируем событие для N8N workflow
+            // Действия определяются в fw_event_rules: ["create_daily_report"]
+            $this->eventLoggingService->logEvent(
+                entityType: 'user',
+                entityId: $user['id'],
+                eventType: 'USER_REGISTRATION_COMPLETED',
+                beforeData: [
+                    'invitation_status' => 'invited',
+                    'password_hash' => null,
+                    'phone' => null
+                ],
+                afterData: [
+                    'invitation_status' => 'registered',
+                    'password_hash' => '[HASHED]',
+                    'phone' => $phone,
+                    'registration_completed_at' => date('c'),
+                    'status' => 1
+                ],
+                changedFields: ['invitation_status', 'password_hash', 'phone', 'registration_completed_at', 'status'],
+                options: [
+                    'actor_type' => 'user',
+                    'actor_id' => $user['id'],
+                    'ip' => Flight::request()->ip,
+                    'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                    'comment' => 'User completed registration via invitation token'
+                ]
+            );
+
             // Генерируем JWT токен
             $jwtToken = $this->generateToken([
                 'user_id' => $user['id'],
@@ -295,7 +355,9 @@ class RegistrationController
 
             $this->logger->info('Registration completed', [
                 'user_id' => $user['id'],
-                'email' => $user['email']
+                'email' => $user['email'],
+                'user_type' => $user['user_type'],
+                'ip' => Flight::request()->ip
             ]);
 
             Flight::json([
@@ -317,7 +379,28 @@ class RegistrationController
             ]);
 
         } catch (Exception $e) {
-            $this->logger->error('Error completing registration: ' . $e->getMessage());
+            $this->logger->error('Error completing registration: ' . $e->getMessage(), [
+                'error' => $e->getMessage(),
+                'token' => $token ?? 'not provided',
+                'ip' => Flight::request()->ip
+            ]);
+
+            // Логируем неудачную попытку регистрации в аудит
+            if (isset($user) && $user) {
+                $this->userAuditService->logUserAction(
+                    userId: $user['id'],
+                    actionType: 'profile_update',
+                    ipAddress: Flight::request()->ip,
+                    userAgent: $_SERVER['HTTP_USER_AGENT'] ?? null,
+                    success: false,
+                    errorMessage: $e->getMessage(),
+                    metadata: [
+                        'registration_failed' => true,
+                        'error' => $e->getMessage()
+                    ]
+                );
+            }
+
             Flight::json([
                 'error_code' => 500,
                 'status' => 'error',

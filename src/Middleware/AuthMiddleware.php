@@ -109,13 +109,12 @@ class AuthMiddleware
     private function getUserById(int $userId): ?array
     {
         try {
-            $database = new Database();
-            $connection = $database->getConnection();
+            $connection = Database::getConnection();
             
             $sql = 'SELECT id, email, first_name, last_name, phone, user_type, job_title, status, 
                            additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
                     FROM fw_users 
-                    WHERE id = ?';
+                    WHERE id = ? AND archived_at IS NULL';
             
             $result = $connection->executeQuery($sql, [$userId]);
             $user = $result->fetchAssociative();

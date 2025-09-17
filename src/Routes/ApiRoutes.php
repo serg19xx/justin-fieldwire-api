@@ -11,8 +11,11 @@ use App\Controllers\RegistrationController;
 use App\Controllers\ProjectController;
 use App\Controllers\TaskController;
 use App\Controllers\ProjectTeamController;
+use App\Controllers\EventLogController;
+use App\Controllers\N8nIntegrationController;
 use Flight;
 use Monolog\Logger;
+use OpenApi\Annotations as OA;
 
 class ApiRoutes
 {
@@ -101,12 +104,25 @@ class ApiRoutes
                                 'version' => 'GET /api/v1/version',
                                 'database_tables' => 'GET /api/v1/database/tables',
                                 'auth_login' => 'POST /api/v1/auth/login',
+                                'auth_logout' => 'POST /api/v1/auth/logout',
+                                'auth_check_session' => 'POST /api/v1/auth/check-session',
+                                'auth_validate_invitation' => 'GET /api/v1/auth/validate-invitation-token',
+                                'auth_change_password' => 'POST /api/v1/auth/change-password',
                                 'profile_get' => 'GET /api/v1/profile',
                                 'profile_update' => 'PUT /api/v1/profile',
                                 'profile_avatar' => 'POST /api/v1/profile/avatar',
                                 'profile_2fa_enable' => 'POST /api/v1/profile/2fa/enable',
                                 'profile_2fa_disable' => 'POST /api/v1/profile/2fa/disable',
-                                '2fa_toggle' => 'POST /api/v1/2fa/toggle'
+                                '2fa_toggle' => 'POST /api/v1/2fa/toggle',
+                                'event_rules' => 'GET /api/v1/event-rules',
+                                'event_logs_get' => 'GET /api/v1/event-logs',
+                                'event_logs_get_by_id' => 'GET /api/v1/event-logs/{id}',
+                                'event_logs_create' => 'POST /api/v1/event-logs',
+                                'event_logs_outbox_pending' => 'GET /api/v1/event-logs/outbox/pending',
+                                'event_logs_outbox_update_status' => 'PUT /api/v1/event-logs/outbox/{id}/status',
+                                'n8n_webhook_manual_trigger' => 'POST /api/v1/n8n/webhook/manual-trigger',
+                                'n8n_scheduled_data_collection' => 'GET /api/v1/n8n/scheduled/data-collection',
+                                'n8n_workflow_status' => 'GET /api/v1/n8n/workflow/status'
                             ]
                         ]
                     ]
@@ -141,6 +157,17 @@ class ApiRoutes
 
         // Authentication routes
         Flight::route('POST /api/v1/auth/login', [new AuthController($this->logger), 'login']);
+        
+        // Logout route with auth middleware
+        $authMiddleware = new \App\Middleware\AuthMiddleware($this->logger);
+        Flight::route('POST /api/v1/auth/logout', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $authController = new AuthController($this->logger);
+                $authController->logout();
+            }
+        });
+        
+        Flight::route('POST /api/v1/auth/check-session', [new AuthController($this->logger), 'checkSession']);
         Flight::route('GET /api/v1/auth/validate-invitation-token', [new AuthController($this->logger), 'validateInvitationToken']);
         Flight::route('POST /api/v1/auth/change-password', [new AuthController($this->logger), 'changePassword']);
         
@@ -606,5 +633,29 @@ class ApiRoutes
                 Flight::json($teamController->removeTeamMember((int)$project_id, (int)$team_member_id));
             }
         });
+
+        // Event logs routes
+        $eventLogController = new EventLogController($this->logger);
+        
+        // Event rules routes
+        Flight::route('GET /api/v1/event-rules', [$eventLogController, 'getEventRules']);
+        
+        Flight::route('GET /api/v1/event-logs', [$eventLogController, 'getEventLogs']);
+        Flight::route('GET /api/v1/event-logs/@id', [$eventLogController, 'getEventLog']);
+        Flight::route('POST /api/v1/event-logs', [$eventLogController, 'createEventLog']);
+        Flight::route('GET /api/v1/event-logs/outbox/pending', [$eventLogController, 'getPendingOutboxEvents']);
+        Flight::route('PUT /api/v1/event-logs/outbox/@id/status', [$eventLogController, 'updateOutboxEventStatus']);
+
+        // N8N Integration routes
+        $n8nController = new N8nIntegrationController($this->logger);
+        
+        // Manual trigger webhook (for button clicks, time range changes)
+        Flight::route('POST /api/v1/n8n/webhook/manual-trigger', [$n8nController, 'manualTriggerWebhook']);
+        
+        // Scheduled data collection (for automated reports)
+        Flight::route('GET /api/v1/n8n/scheduled/data-collection', [$n8nController, 'scheduledDataCollection']);
+        
+        // Workflow status tracking
+        Flight::route('GET /api/v1/n8n/workflow/status', [$n8nController, 'getWorkflowStatus']);
     }
 }

@@ -9,6 +9,8 @@ use App\Controllers\GeographyController;
 use App\Controllers\WorkerController;
 use App\Controllers\RegistrationController;
 use App\Controllers\ProjectController;
+use App\Controllers\TaskController;
+use App\Controllers\ProjectTeamController;
 use Flight;
 use Monolog\Logger;
 
@@ -537,6 +539,71 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $projectController = new \App\Controllers\ProjectController($this->logger);
                 $projectController->deleteProject((int)$id);
+            }
+        });
+
+        // Tasks routes
+        Flight::route('GET /api/v1/projects/@project_id/tasks', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getTasks((int)$project_id);
+            }
+        });
+
+        Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getTask((int)$project_id, (int)$task_id);
+            }
+        });
+
+        Flight::route('POST /api/v1/projects/@project_id/tasks', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->createTask((int)$project_id);
+            }
+        });
+
+        Flight::route('PUT /api/v1/projects/@project_id/tasks/@task_id', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->updateTask((int)$project_id, (int)$task_id);
+            }
+        });
+
+        Flight::route('DELETE /api/v1/projects/@project_id/tasks/@task_id', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->deleteTask((int)$project_id, (int)$task_id);
+            }
+        });
+
+        // Project team routes
+        Flight::route('GET /api/v1/projects/@project_id/team', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $teamController = new \App\Controllers\ProjectTeamController($this->logger);
+                Flight::json($teamController->getTeamMembers((int)$project_id));
+            }
+        });
+
+        Flight::route('POST /api/v1/projects/@project_id/team', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $teamController = new \App\Controllers\ProjectTeamController($this->logger);
+                Flight::json($teamController->addTeamMember((int)$project_id));
+            }
+        });
+
+        Flight::route('PUT /api/v1/projects/@project_id/team/@team_member_id', function($project_id, $team_member_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $teamController = new \App\Controllers\ProjectTeamController($this->logger);
+                Flight::json($teamController->updateTeamMember((int)$project_id, (int)$team_member_id));
+            }
+        });
+
+        Flight::route('DELETE /api/v1/projects/@project_id/team/@team_member_id', function($project_id, $team_member_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $teamController = new \App\Controllers\ProjectTeamController($this->logger);
+                Flight::json($teamController->removeTeamMember((int)$project_id, (int)$team_member_id));
             }
         });
     }

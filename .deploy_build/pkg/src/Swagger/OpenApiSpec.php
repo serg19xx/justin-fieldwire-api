@@ -49,6 +49,14 @@ use OpenApi\Annotations as OA;
  *     @OA\Tag(
  *         name="Projects",
  *         description="Project management endpoints"
+ *     ),
+ *     @OA\Tag(
+ *         name="Tasks",
+ *         description="Project tasks management endpoints"
+ *     ),
+ *     @OA\Tag(
+ *         name="Project Team",
+ *         description="Project team management endpoints"
  *     )
  * )
  */

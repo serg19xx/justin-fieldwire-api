@@ -1,0 +1,300 @@
+{
+  "name": "Scheduled Report - Daily Summary",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * *"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Daily Cron Trigger",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8080/api/v1/n8n/scheduled/data-collection",
+        "method": "GET",
+        "qs": {
+          "report_type": "daily_summary",
+          "date_from": "={{ $now.minus({days: 1}).toFormat('yyyy-MM-dd') }}",
+          "date_to": "={{ $now.minus({days: 1}).toFormat('yyyy-MM-dd') }}",
+          "manager_level": "team",
+          "format": "json"
+        },
+        "options": {}
+      },
+      "id": "get-daily-report",
+      "name": "Get Daily Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Process and format the daily report data\nconst reportData = $input.first().json.data;\nconst summary = reportData.summary;\nconst details = reportData.details;\n\n// Calculate additional metrics\nconst totalEvents = summary.total_events;\nconst criticalEvents = details.filter(event => event.severity === 'critical').reduce((sum, event) => sum + event.count, 0);\nconst importantEvents = details.filter(event => event.severity === 'important').reduce((sum, event) => sum + event.count, 0);\n\n// Format report text\nlet reportText = `📊 Daily Summary Report\\n`;\nreportText += `📅 Date: ${reportData.date_range.from}\\n`;\nreportText += `👥 Manager Level: ${reportData.manager_level}\\n`;\nreportText += `📈 Total Events: ${totalEvents}\\n`;\nreportText += `🚨 Critical Events: ${criticalEvents}\\n`;\nreportText += `⚠️ Important Events: ${importantEvents}\\n\\n`;\n\nif (details.length > 0) {\n  reportText += `📋 Event Breakdown:\\n`;\n  details.forEach(event => {\n    const emoji = event.severity === 'critical' ? '🚨' : '⚠️';\n    reportText += `${emoji} ${event.event_type}: ${event.count}\\n`;\n  });\n} else {\n  reportText += `✅ No events recorded for this period.\\n`;\n}\n\nreportText += `\\n🕐 Generated at: ${reportData.generated_at}`;\n\n// Determine if report should be sent (only if there are events)\nconst shouldSendReport = totalEvents > 0;\n\nreturn {\n  reportText: reportText,\n  reportData: reportData,\n  shouldSendReport: shouldSendReport,\n  metrics: {\n    totalEvents,\n    criticalEvents,\n    importantEvents\n  }\n};"
+      },
+      "id": "format-report",
+      "name": "Format Report",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-1",
+              "leftValue": "={{ $json.shouldSendReport }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-if-send",
+      "name": "Check If Send Report",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#daily-reports",
+        "text": "={{ $json.reportText }}",
+        "otherOptions": {}
+      },
+      "id": "slack-report",
+      "name": "Slack Daily Report",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "toEmail": "managers@company.com",
+        "subject": "Daily Summary Report - {{ $now.minus({days: 1}).toFormat('yyyy-MM-dd') }}",
+        "text": "={{ $json.reportText }}",
+        "options": {}
+      },
+      "id": "email-report",
+      "name": "Email Daily Report",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8080/api/v1/n8n/scheduled/data-collection",
+        "method": "GET",
+        "qs": {
+          "report_type": "task_status",
+          "date_from": "={{ $now.minus({days: 1}).toFormat('yyyy-MM-dd') }}",
+          "date_to": "={{ $now.minus({days: 1}).toFormat('yyyy-MM-dd') }}",
+          "manager_level": "department"
+        },
+        "options": {}
+      },
+      "id": "get-task-status",
+      "name": "Get Task Status Report",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Format task status report for department managers\nconst taskData = $input.first().json.data;\nconst summary = taskData.summary;\nconst details = taskData.details;\n\nlet taskReportText = `📋 Task Status Report for Department Managers\\n`;\ntaskReportText += `📅 Date: ${taskData.date_range.from}\\n`;\ntaskReportText += `👥 Manager Level: ${taskData.manager_level}\\n`;\ntaskReportText += `📊 Total Task Events: ${summary.total_task_events}\\n\\n`;\n\nif (details.length > 0) {\n  taskReportText += `📝 Task Activity Details:\\n`;\n  details.slice(0, 10).forEach(task => { // Limit to first 10 tasks\n    taskReportText += `• Task #${task.entity_id}: ${task.event_type}\\n`;\n    if (task.after_data && task.after_data.status) {\n      taskReportText += `  Status: ${task.after_data.status}\\n`;\n    }\n    taskReportText += `  Time: ${task.occurred_at}\\n\\n`;\n  });\n  \n  if (details.length > 10) {\n    taskReportText += `... and ${details.length - 10} more tasks\\n`;\n  }\n} else {\n  taskReportText += `✅ No task activity recorded for this period.\\n`;\n}\n\nreturn {\n  taskReportText: taskReportText,\n  taskData: taskData\n};"
+      },
+      "id": "format-task-report",
+      "name": "Format Task Report",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1560, 200]
+    },
+    {
+      "parameters": {
+        "toEmail": "department-managers@company.com",
+        "subject": "Daily Task Status Report - {{ $now.minus({days: 1}).toFormat('yyyy-MM-dd') }}",
+        "text": "={{ $json.taskReportText }}",
+        "options": {}
+      },
+      "id": "email-task-report",
+      "name": "Email Task Report",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1780, 200]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log completion of scheduled report\nconst reportData = $('Format Report').first().json;\nconst taskData = $('Format Task Report').first().json;\n\nreturn {\n  message: 'Daily scheduled reports completed successfully',\n  timestamp: new Date().toISOString(),\n  reports_sent: {\n    daily_summary: true,\n    task_status: true\n  },\n  metrics: reportData.metrics,\n  task_events: taskData.taskData.summary.total_task_events\n};"
+      },
+      "id": "log-completion",
+      "name": "Log Completion",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log that no report was sent due to no events\nreturn {\n  message: 'No daily report sent - no events recorded',\n  timestamp: new Date().toISOString(),\n  date: $now.minus({days: 1}).toFormat('yyyy-MM-dd'),\n  reason: 'No events to report'\n};"
+      },
+      "id": "log-no-report",
+      "name": "Log No Report",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1120, 500]
+    }
+  ],
+  "connections": {
+    "Daily Cron Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Daily Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Format Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Report": {
+      "main": [
+        [
+          {
+            "node": "Check If Send Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Send Report": {
+      "main": [
+        [
+          {
+            "node": "Slack Daily Report",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Daily Report",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Task Status Report",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log No Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Log Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Daily Report": {
+      "main": [
+        [
+          {
+            "node": "Log Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Task Status Report": {
+      "main": [
+        [
+          {
+            "node": "Format Task Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Task Report": {
+      "main": [
+        [
+          {
+            "node": "Email Task Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Task Report": {
+      "main": [
+        [
+          {
+            "node": "Log Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-09-10T17:30:00.000Z",
+      "updatedAt": "2025-09-10T17:30:00.000Z",
+      "id": "scheduled-report",
+      "name": "Scheduled Report"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2025-09-10T17:30:00.000Z",
+  "versionId": "1"
+}

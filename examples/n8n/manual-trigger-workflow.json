@@ -1,0 +1,228 @@
+{
+  "name": "Manual Trigger - Task Status Change",
+  "nodes": [
+    {
+      "parameters": {
+        "path": "task-status-change",
+        "httpMethod": "POST",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "webhookId": "task-status-webhook"
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8080/api/v1/n8n/webhook/manual-trigger",
+        "method": "POST",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "trigger_type": "button_click",
+          "entity_type": "task",
+          "entity_id": "={{ $json.task_id }}",
+          "action": "status_change",
+          "before_data": "={{ $json.before_data }}",
+          "after_data": "={{ $json.after_data }}",
+          "changed_fields": ["status", "updated_at"],
+          "user_id": "={{ $json.user_id }}",
+          "workflow_id": "task-status-workflow",
+          "correlation_id": "={{ $json.correlation_id || $now.toISO() }}"
+        },
+        "options": {}
+      },
+      "id": "api-call",
+      "name": "Call API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Check API response\nconst response = $input.first().json;\n\nif (response.error_code !== 0) {\n  throw new Error(`API Error: ${response.message}`);\n}\n\n// Add additional data for notifications\nreturn {\n  ...response.data,\n  original_data: $('Webhook Trigger').first().json,\n  processed_at: new Date().toISOString()\n};"
+      },
+      "id": "process-response",
+      "name": "Process Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "condition-1",
+              "leftValue": "={{ $json.event_type }}",
+              "rightValue": "STATUS_CHANGED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-event-type",
+      "name": "Check Event Type",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#task-notifications",
+        "text": "📋 Task Status Update\n\n🎯 Task ID: {{ $json.entity_id }}\n📊 Status: {{ $json.after_data.status }}\n👤 User: {{ $json.original_data.user_name || 'Unknown' }}\n⏰ Time: {{ $json.timestamp }}\n🔗 Correlation ID: {{ $json.correlation_id }}",
+        "otherOptions": {}
+      },
+      "id": "slack-notification",
+      "name": "Slack Notification",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "toEmail": "managers@company.com",
+        "subject": "Task Status Change - Task #{{ $json.entity_id }}",
+        "text": "Task Status Change Notification\n\nTask ID: {{ $json.entity_id }}\nNew Status: {{ $json.after_data.status }}\nPrevious Status: {{ $json.before_data.status }}\nChanged by: {{ $json.original_data.user_name || 'Unknown' }}\nTime: {{ $json.timestamp }}\nCorrelation ID: {{ $json.correlation_id }}\n\nThis is an automated notification from the task management system.",
+        "options": {}
+      },
+      "id": "email-notification",
+      "name": "Email Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2,
+      "position": [1120, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  success: true,\n  message: 'Task status change processed successfully',\n  event_log_id: $json.event_log_id,\n  correlation_id: $json.correlation_id,\n  timestamp: $json.timestamp\n}, null, 2) }}"
+      },
+      "id": "webhook-response",
+      "name": "Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({\n  success: false,\n  message: 'Event type not supported for notifications',\n  event_type: $json.event_type,\n  correlation_id: $json.correlation_id\n}, null, 2) }}"
+      },
+      "id": "no-notification-response",
+      "name": "No Notification Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 500]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Call API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call API": {
+      "main": [
+        [
+          {
+            "node": "Process Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Response": {
+      "main": [
+        [
+          {
+            "node": "Check Event Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Event Type": {
+      "main": [
+        [
+          {
+            "node": "Slack Notification",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Email Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "No Notification Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack Notification": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Notification": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-09-10T17:30:00.000Z",
+      "updatedAt": "2025-09-10T17:30:00.000Z",
+      "id": "manual-trigger",
+      "name": "Manual Trigger"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-09-10T17:30:00.000Z",
+  "versionId": "1"
+}
