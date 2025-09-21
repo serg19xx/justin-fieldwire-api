@@ -605,6 +605,13 @@ class ApiRoutes
             }
         });
 
+        Flight::route('GET /api/v1/projects/@project_id/tasks/check-bounds', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->checkTaskBounds((int)$project_id);
+            }
+        });
+
         // Project team routes
         Flight::route('GET /api/v1/projects/@project_id/team', function($project_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {

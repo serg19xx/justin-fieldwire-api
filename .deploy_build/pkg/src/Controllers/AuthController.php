@@ -3,6 +3,8 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\UserAuditService;
+use App\Services\EventLoggingService;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
@@ -17,16 +19,18 @@ use OpenApi\Annotations as OA;
 class AuthController
 {
     private Logger $logger;
-    private Database $database;
+    private UserAuditService $userAuditService;
+    private EventLoggingService $eventLoggingService;
 
     public function __construct(Logger $logger)
     {
         $this->logger = $logger;
         
         try {
-            $this->database = new Database();
+            $this->userAuditService = new UserAuditService($logger);
+            $this->eventLoggingService = new EventLoggingService($logger);
         } catch (\Exception $e) {
-            $this->logger->error('Failed to initialize AuthController database', [
+            $this->logger->error('Failed to initialize AuthController', [
                 'error' => $e->getMessage()
             ]);
             throw $e;
@@ -138,6 +142,9 @@ class AuthController
             error_log('authenticateUser returned: ' . print_r($user, true));
 
             if (!$user) {
+                // Логируем неудачную попытку входа
+                $this->userAuditService->logLogin(null, false, 'Invalid credentials');
+
                 $this->logger->warning('Failed login attempt', [
                     'email' => $email,
                     'ip' => Flight::request()->ip
@@ -154,6 +161,9 @@ class AuthController
 
             // Проверяем, не архивирован ли пользователь
             if (isset($user['error']) && $user['error'] === 'archived') {
+                // Логируем попытку входа архивированного пользователя
+                $this->userAuditService->logLogin(null, false, 'User account archived');
+
                 $this->logger->warning('Login attempt for archived user', [
                     'email' => $email,
                     'ip' => Flight::request()->ip
@@ -210,6 +220,9 @@ class AuthController
 
             // If 2FA is not enabled, proceed with normal login
             $token = $this->generateToken($user);
+
+            // Логируем успешный вход в аудит
+            $this->userAuditService->logLogin($user['id'], true);
 
             $this->logger->info('Successful login (no 2FA)', [
                 'user_id' => $user['id'],
@@ -284,7 +297,7 @@ class AuthController
         try {
             error_log('=== AUTHENTICATE USER START ===');
             
-            $connection = $this->database->getConnection();
+            $connection = Database::getConnection();
             error_log('Database connection OK');
             
             // Правильный SQL
@@ -337,7 +350,7 @@ class AuthController
         try {
             error_log('=== VALIDATE INVITATION TOKEN START ===');
             
-            $connection = $this->database->getConnection();
+            $connection = Database::getConnection();
             error_log('Database connection OK');
             
             // Check if token exists
@@ -448,7 +461,7 @@ class AuthController
                 return;
             }
             
-            $connection = $this->database->getConnection();
+            $connection = Database::getConnection();
             
             // Find user by invitation status (only invited users can change password this way)
             $sql = "SELECT id, email FROM fw_users WHERE invitation_status = 'invited' LIMIT 1";
@@ -595,7 +608,7 @@ class AuthController
                 return;
             }
             
-            $connection = $this->database->getConnection();
+            $connection = Database::getConnection();
             
             // Check if token exists and is valid
             $sql = "SELECT invitation_expires_at 
@@ -648,6 +661,274 @@ class AuthController
                 'message' => 'Internal server error',
                 'data' => null
             ], 500);
+        }
+    }
+
+    /**
+     * @OA\Post(
+     *     path="/api/v1/auth/logout",
+     *     summary="User logout",
+     *     description="Logout user and invalidate session",
+     *     tags={"Authentication"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="Logout successful",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Logout successful"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Unauthorized"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     )
+     * )
+     */
+    public function logout(): void
+    {
+        try {
+            // Get user from Flight context (set by middleware)
+            $user = Flight::get('current_user');
+            
+            if (!$user) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'User not authenticated',
+                    'data' => null
+                ], 401);
+                return;
+            }
+
+            // Calculate session duration
+            $sessionDuration = $this->calculateSessionDuration($user['id']);
+
+            // Log logout in audit
+            $this->userAuditService->logLogout($user['id'], $sessionDuration);
+
+            $this->logger->info('User logout', [
+                'user_id' => $user['id'],
+                'email' => $user['email'],
+                'ip' => Flight::request()->ip,
+                'session_duration' => $sessionDuration
+            ]);
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Logout successful',
+                'data' => null
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Logout error', [
+                'error' => $e->getMessage(),
+                'ip' => Flight::request()->ip
+            ]);
+
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * @OA\Post(
+     *     path="/api/v1/auth/check-session",
+     *     summary="Check session validity",
+     *     description="Check if user session is still valid and update last activity",
+     *     tags={"Authentication"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="Session is valid",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Session is valid"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="user", type="object"),
+     *                 @OA\Property(property="session_valid", type="boolean", example=true),
+     *                 @OA\Property(property="last_activity", type="string", example="2024-01-15T10:30:00Z")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Session expired or invalid",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Session expired"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     )
+     * )
+     */
+    public function checkSession(): void
+    {
+        try {
+            $user = $this->getUserFromToken();
+            
+            if (!$user) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Session expired or invalid',
+                    'data' => null
+                ], 401);
+                return;
+            }
+
+            // Update last activity
+            $this->updateLastActivity($user['id']);
+
+            // Log API call for audit
+            $this->userAuditService->logUserAction(
+                userId: $user['id'],
+                actionType: 'api_call',
+                metadata: ['endpoint' => 'check-session']
+            );
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Session is valid',
+                'data' => [
+                    'user' => [
+                        'id' => $user['id'],
+                        'email' => $user['email'],
+                        'first_name' => $user['first_name'] ?? null,
+                        'last_name' => $user['last_name'] ?? null
+                    ],
+                    'session_valid' => true,
+                    'last_activity' => date('c')
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Session check error', [
+                'error' => $e->getMessage(),
+                'ip' => Flight::request()->ip
+            ]);
+
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Get user from JWT token
+     */
+    private function getUserFromToken(): ?array
+    {
+        try {
+            $authHeader = Flight::request()->getHeader('Authorization');
+            
+            if (!$authHeader || !str_starts_with($authHeader, 'Bearer ')) {
+                return null;
+            }
+
+            $token = substr($authHeader, 7); // Remove 'Bearer ' prefix
+            
+            // Decode token (simplified - in production use proper JWT library)
+            $payload = json_decode(base64_decode($token), true);
+            
+            if (!$payload || !isset($payload['user_id']) || !isset($payload['exp'])) {
+                return null;
+            }
+
+            // Check if token is expired
+            if ($payload['exp'] < time()) {
+                return null;
+            }
+
+            // Get user from database
+            $connection = Database::getConnection();
+            $sql = "SELECT id, email, first_name, last_name, status, archived_at FROM fw_users WHERE id = ? LIMIT 1";
+            $result = $connection->executeQuery($sql, [$payload['user_id']]);
+            $user = $result->fetchAssociative();
+
+            if (!$user || $user['archived_at'] !== null) {
+                return null;
+            }
+
+            return $user;
+
+        } catch (\Exception $e) {
+            $this->logger->error('Token validation error', [
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Calculate session duration in seconds
+     */
+    private function calculateSessionDuration(int $userId): ?int
+    {
+        try {
+            $connection = Database::getConnection();
+            
+            // Get last login time
+            $sql = "SELECT created_at FROM fw_user_audit_log 
+                    WHERE user_id = ? AND action_type = 'login' AND success = 1 
+                    ORDER BY created_at DESC LIMIT 1";
+            
+            $result = $connection->executeQuery($sql, [$userId]);
+            $loginRecord = $result->fetchAssociative();
+            
+            if (!$loginRecord) {
+                return null;
+            }
+
+            $loginTime = strtotime($loginRecord['created_at']);
+            return time() - $loginTime;
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to calculate session duration', [
+                'error' => $e->getMessage(),
+                'user_id' => $userId
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Update user's last activity timestamp
+     */
+    private function updateLastActivity(int $userId): void
+    {
+        try {
+            // Log the activity in audit
+            $this->userAuditService->logUserAction(
+                userId: $userId,
+                actionType: 'api_call',
+                metadata: ['activity_check' => true]
+            );
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to update last activity', [
+                'error' => $e->getMessage(),
+                'user_id' => $userId
+            ]);
         }
     }
 

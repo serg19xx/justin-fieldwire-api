@@ -58,5 +58,5 @@ echo -e "   • http://localhost:$PORT/api${NC}"
 echo -e "   • http://localhost:$PORT/api/docs${NC}"
 echo -e "${YELLOW}🛑 Press Ctrl+C to stop the server${NC}"
 
-# Start PHP development server
-php -S localhost:$PORT -t public
+# Start PHP development server (listen on both IPv4 and IPv6)
+php -S [::]:$PORT -t public

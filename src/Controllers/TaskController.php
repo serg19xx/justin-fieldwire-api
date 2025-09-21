@@ -447,7 +447,7 @@ class TaskController
             $data = json_decode($request->getBody(), true);
 
             // Валидация данных
-            $validation = $this->validateTaskData($data);
+            $validation = $this->validateTaskData($data, true);
             if (!$validation['valid']) {
                 Flight::json([
                     'error_code' => 400,
@@ -929,6 +929,8 @@ class TaskController
             }
         }
 
+        // Проверка границ проекта убрана - теперь выполняется на фронтенде
+
         // Валидация статуса
         if (isset($data['status'])) {
             $validStatuses = ['planned', 'in_progress', 'done', 'blocked', 'delayed'];
@@ -950,7 +952,133 @@ class TaskController
             }
         }
 
+        // Валидация task_lead_id
+        if (isset($data['task_lead_id'])) {
+            if (!is_numeric($data['task_lead_id']) || $data['task_lead_id'] <= 0) {
+                return [
+                    'valid' => false,
+                    'message' => 'Task lead ID must be a positive number'
+                ];
+            }
+            
+            // Проверяем, существует ли пользователь
+            try {
+                $connection = $this->database->getConnection();
+                $stmt = $connection->executeQuery(
+                    "SELECT id FROM fw_users WHERE id = ? AND status = 1",
+                    [$data['task_lead_id']]
+                );
+                
+                if (!$stmt->fetchOne()) {
+                    return [
+                        'valid' => false,
+                        'message' => 'Task lead user not found or inactive'
+                    ];
+                }
+            } catch (Exception $e) {
+                // Если не удается проверить пользователя, пропускаем валидацию
+                // чтобы не блокировать создание задачи из-за проблем с БД
+            }
+        }
+
         return ['valid' => true];
+    }
+
+    /**
+     * Проверка дат задачи против границ проекта
+     */
+    private function validateTaskDatesAgainstProject(array $data, int $projectId): array
+    {
+        try {
+            // Логируем начало валидации
+            $this->logger->info('Starting project bounds validation', [
+                'current_date' => date('Y-m-d H:i:s'),
+                'project_id' => $projectId,
+                'task_data' => $data
+            ]);
+            
+            $connection = $this->database->getConnection();
+            
+            // Получаем даты проекта
+            $projectResult = $connection->executeQuery(
+                "SELECT date_start, date_end FROM fw_projects WHERE id = ?",
+                [$projectId]
+            );
+            $project = $projectResult->fetchAssociative();
+            
+            if (!$project) {
+                return [
+                    'valid' => false,
+                    'message' => 'Project not found'
+                ];
+            }
+            
+            $projectStart = $project['date_start'];
+            $projectEnd = $project['date_end'];
+            
+            // Проверяем дату начала задачи
+            if (isset($data['start_planned'])) {
+                $taskStart = new \DateTime($data['start_planned']);
+                $projectStartDate = new \DateTime($projectStart);
+                
+                // Сравниваем объекты DateTime напрямую
+                $isBefore = $taskStart < $projectStartDate;
+                
+                // Логируем для отладки
+                $this->logger->info('Project bounds validation - start date', [
+                    'current_date' => date('Y-m-d H:i:s'),
+                    'task_start' => $data['start_planned'],
+                    'project_start' => $projectStart,
+                    'task_start_date' => $taskStart->format('Y-m-d'),
+                    'project_start_date' => $projectStartDate->format('Y-m-d'),
+                    'is_before' => $isBefore
+                ]);
+                
+                if ($isBefore) {
+                    return [
+                        'valid' => false,
+                        'message' => 'Task start date cannot be before project start date'
+                    ];
+                }
+            }
+            
+            // Проверяем дату окончания задачи
+            if (isset($data['end_planned']) && $data['end_planned']) {
+                $taskEnd = new \DateTime($data['end_planned']);
+                $projectEndDate = new \DateTime($projectEnd);
+                
+                // Сравниваем объекты DateTime напрямую
+                $isAfter = $taskEnd > $projectEndDate;
+                
+                // Логируем для отладки
+                $this->logger->info('Project bounds validation - end date', [
+                    'current_date' => date('Y-m-d H:i:s'),
+                    'task_end' => $data['end_planned'],
+                    'project_end' => $projectEnd,
+                    'task_end_date' => $taskEnd->format('Y-m-d'),
+                    'project_end_date' => $projectEndDate->format('Y-m-d'),
+                    'task_end_full' => $taskEnd->format('Y-m-d H:i:s'),
+                    'project_end_full' => $projectEndDate->format('Y-m-d H:i:s'),
+                    'task_timestamp' => $taskEnd->getTimestamp(),
+                    'project_timestamp' => $projectEndDate->getTimestamp(),
+                    'is_after' => $isAfter
+                ]);
+                
+                // Используем > чтобы срабатывало только после 8 октября (на 9 октября и позже)
+                if ($isAfter) {
+                    return [
+                        'valid' => false,
+                        'message' => 'Task end date cannot be after project end date'
+                    ];
+                }
+            }
+            
+            return ['valid' => true];
+            
+        } catch (Exception $e) {
+            // Если не удается проверить проект, пропускаем валидацию
+            return ['valid' => true];
+        }
     }
 
     /**
@@ -990,6 +1118,153 @@ class TaskController
             'created_at' => $task['created_at'],
             'updated_at' => $task['updated_at']
         ];
+    }
+
+    /**
+     * Проверить границы проекта для задачи
+     * GET /api/v1/projects/{project_id}/tasks/check-bounds
+     *
+     * @OA\Get(
+     *     path="/api/v1/projects/{project_id}/tasks/check-bounds",
+     *     summary="Check task bounds against project",
+     *     description="Check if task dates are within project bounds",
+     *     tags={"Tasks"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="project_id",
+     *         in="path",
+     *         description="Project ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="start_planned",
+     *         in="query",
+     *         description="Task start date",
+     *         required=false,
+     *         @OA\Schema(type="string", format="date")
+     *     ),
+     *     @OA\Parameter(
+     *         name="end_planned",
+     *         in="query",
+     *         description="Task end date",
+     *         required=false,
+     *         @OA\Schema(type="string", format="date")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Bounds check result",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Task dates are within project bounds"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="valid", type="boolean", example=true),
+     *                 @OA\Property(property="project_start", type="string", format="date"),
+     *                 @OA\Property(property="project_end", type="string", format="date")
+     *             )
+     *         )
+     *     )
+     * )
+     */
+    public function checkTaskBounds(int $projectId): void
+    {
+        // Проверка токена
+        if (!$this->checkAuth()) {
+            return;
+        }
+
+        try {
+            $request = Flight::request();
+            $startPlanned = $request->query['start_planned'] ?? null;
+            $endPlanned = $request->query['end_planned'] ?? null;
+
+            $connection = $this->database->getConnection();
+            
+            // Получаем даты проекта
+            $projectResult = $connection->executeQuery(
+                "SELECT date_start, date_end FROM fw_projects WHERE id = ?",
+                [$projectId]
+            );
+            $project = $projectResult->fetchAssociative();
+            
+            if (!$project) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => 'Project not found',
+                    'data' => null
+                ], 404);
+                return;
+            }
+
+            $projectStart = $project['date_start'];
+            $projectEnd = $project['date_end'];
+
+            $validation = $this->validateTaskDatesAgainstProject([
+                'start_planned' => $startPlanned,
+                'end_planned' => $endPlanned
+            ], $projectId);
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => $validation['valid'] ? 'Task dates are within project bounds' : 'Task dates are outside project bounds',
+                'data' => [
+                    'valid' => $validation['valid'],
+                    'project_start' => $projectStart,
+                    'project_end' => $projectEnd,
+                    'message' => $validation['message'] ?? null
+                ]
+            ]);
+
+        } catch (Exception $e) {
+            $this->logger->error('Failed to check task bounds', [
+                'project_id' => $projectId,
+                'error' => $e->getMessage()
+            ]);
+
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Failed to check task bounds',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Получить информацию о границах проекта
+     */
+    private function getProjectBoundsInfo(int $projectId): array
+    {
+        try {
+            $connection = $this->database->getConnection();
+            
+            $projectResult = $connection->executeQuery(
+                "SELECT date_start, date_end FROM fw_projects WHERE id = ?",
+                [$projectId]
+            );
+            $project = $projectResult->fetchAssociative();
+            
+            if (!$project) {
+                return [
+                    'project_start' => null,
+                    'project_end' => null
+                ];
+            }
+            
+            return [
+                'project_start' => $project['date_start'],
+                'project_end' => $project['date_end']
+            ];
+            
+        } catch (Exception $e) {
+            return [
+                'project_start' => null,
+                'project_end' => null
+            ];
+        }
     }
 
     /**
