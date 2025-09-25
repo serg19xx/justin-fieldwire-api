@@ -24,7 +24,7 @@ The FieldWire API supports two email delivery methods:
 ### Step 3: Configure Environment
 Add to your `.env` file:
 ```env
-SENDGRID_API_KEY=SG.your_actual_api_key_here
+SENDGRID_API_KEY=your_sendgrid_api_key_here
 SENDGRID_FROM_EMAIL=noreply@fieldwire.com
 SENDGRID_FROM_NAME=FieldWire
 ```
