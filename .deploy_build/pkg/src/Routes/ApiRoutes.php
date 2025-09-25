@@ -612,6 +612,109 @@ class ApiRoutes
             }
         });
 
+        // Plans (folders/files)
+        Flight::route('GET /api/v1/plan/folders/tree', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->getFolderTree();
+            }
+        });
+
+        Flight::route('POST /api/v1/plan/folders', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->createFolder();
+            }
+        });
+
+        Flight::route('DELETE /api/v1/plan/folders/@folderId', function($folderId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->deleteFolder((int)$folderId);
+            }
+        });
+
+        Flight::route('GET /api/v1/plan/folders/@folderId/content', function($folderId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->getFolderContent((int)$folderId);
+            }
+        });
+
+        Flight::route('POST /api/v1/plan/files/upload', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->uploadFile();
+            }
+        });
+
+        Flight::route('DELETE /api/v1/plan/files/@fileId', function($fileId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->deleteFile((int)$fileId);
+            }
+        });
+
+        Flight::route('GET /api/v1/plan/files/@fileId/download', function($fileId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->downloadFile((int)$fileId);
+            }
+        });
+
+        // File copy/move operations
+        Flight::route('PUT /api/v1/plan/files/@fileId/move', function($fileId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->moveFile((int)$fileId);
+            }
+        });
+
+        Flight::route('POST /api/v1/plan/files/@fileId/copy', function($fileId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->copyFile((int)$fileId);
+            }
+        });
+
+        // Folder copy/move operations
+        Flight::route('PUT /api/v1/plan/folders/@folderId/move', function($folderId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->moveFolder((int)$folderId);
+            }
+        });
+
+        Flight::route('POST /api/v1/plan/folders/@folderId/copy', function($folderId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->copyFolder((int)$folderId);
+            }
+        });
+
+        // File and folder rename operations
+        Flight::route('PUT /api/v1/plan/files/@fileId/rename', function($fileId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->renameFile((int)$fileId);
+            }
+        });
+
+        Flight::route('PUT /api/v1/plan/folders/@folderId/rename', function($folderId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->renameFolder((int)$folderId);
+            }
+        });
+
+        // File description update
+        Flight::route('PUT /api/v1/plan/files/@fileId/description', function($fileId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $planController = new \App\Controllers\PlanController($this->logger);
+                $planController->updateFileDescription((int)$fileId);
+            }
+        });
+
         // Project team routes
         Flight::route('GET /api/v1/projects/@project_id/team', function($project_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
