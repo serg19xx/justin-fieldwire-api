@@ -965,7 +965,7 @@ class TaskController
             try {
                 $connection = $this->database->getConnection();
                 $stmt = $connection->executeQuery(
-                    "SELECT id FROM fw_users WHERE id = ? AND status = 1",
+                    "SELECT id FROM fw_v_users WHERE id = ? AND status = 1",
                     [$data['task_lead_id']]
                 );
                 

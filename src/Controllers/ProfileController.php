@@ -69,7 +69,6 @@ class ProfileController
      *                     @OA\Property(property="last_name", type="string", example="Doe"),
      *                     @OA\Property(property="name", type="string", example="John Doe"),
      *                     @OA\Property(property="phone", type="string", example="+1234567890"),
-     *                     @OA\Property(property="user_type", type="string", example="contractor"),
      *                     @OA\Property(property="job_title", type="string", example="Field Worker"),
      *                     @OA\Property(property="status", type="string", example="active"),
      *                     @OA\Property(property="avatar_url", type="string", example="http://localhost:8000/api/v1/avatar?file=avatar.png"),
@@ -125,7 +124,6 @@ class ProfileController
                         'last_name' => $user['last_name'] ?? null,
                         'name' => ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''),
                         'phone' => $user['phone'] ?? null,
-                        'user_type' => $user['user_type'] ?? null,
                         'job_title' => $user['job_title'] ?? null,
                         'status' => (bool)$user['status'],
                         'status_reason' => $user['status_reason'] ?? null,
@@ -253,7 +251,6 @@ class ProfileController
                         'last_name' => $updatedUser['last_name'] ?? null,
                         'name' => ($updatedUser['first_name'] ?? '') . ' ' . ($updatedUser['last_name'] ?? ''),
                         'phone' => $updatedUser['phone'] ?? null,
-                        'user_type' => $updatedUser['user_type'] ?? null,
                         'job_title' => $updatedUser['job_title'] ?? null,
                         'status' => (bool)$updatedUser['status'],
                         'status_reason' => $updatedUser['status_reason'] ?? null,
@@ -1003,7 +1000,7 @@ class ProfileController
         $updateFields[] = 'updated_at = NOW()';
         $params[] = $userId;
 
-        $sql = "UPDATE fw_users SET " . implode(', ', $updateFields) . " WHERE id = ?";
+        $sql = "UPDATE fw_v_users SET " . implode(', ', $updateFields) . " WHERE id = ?";
         $connection->executeStatement($sql, $params);
 
         return $this->getUserById($userId);
@@ -1016,7 +1013,7 @@ class ProfileController
     {
         $connection = Database::getConnection();
         
-        $sql = "UPDATE fw_users SET avatar_url = ?, updated_at = NOW() WHERE id = ?";
+        $sql = "UPDATE fw_v_users SET avatar_url = ?, updated_at = NOW() WHERE id = ?";
         $connection->executeStatement($sql, [$avatarUrl, $userId]);
     }
 
@@ -1027,9 +1024,9 @@ class ProfileController
     {
         $connection = Database::getConnection();
         
-        $sql = 'SELECT id, email, first_name, last_name, phone, user_type, job_title, status, 
+        $sql = 'SELECT id, email, first_name, last_name, phone, , job_title, status, 
                        additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
-                FROM fw_users 
+                FROM fw_v_users 
                 WHERE id = ?';
         
         $result = $connection->executeQuery($sql, [$userId]);
@@ -1087,7 +1084,7 @@ class ProfileController
     {
         $connection = Database::getConnection();
         
-        $sql = "UPDATE fw_users SET two_factor_enabled = ?, updated_at = NOW() WHERE id = ?";
+        $sql = "UPDATE fw_v_users SET two_factor_enabled = ?, updated_at = NOW() WHERE id = ?";
         $connection->executeStatement($sql, [$enabled ? 1 : 0, $userId]);
     }
 
@@ -1120,7 +1117,7 @@ class ProfileController
             
             if ($isActive) {
                 // If user is active, clear inactive reasons
-                $sql = "UPDATE fw_users SET 
+                $sql = "UPDATE fw_v_users SET 
                         status = TRUE,
                         status_reason = NULL,
                         status_details = NULL,
@@ -1129,7 +1126,7 @@ class ProfileController
                 $connection->executeStatement($sql, [$userId]);
             } else {
                 // If user is inactive, set reasons
-                $sql = "UPDATE fw_users SET 
+                $sql = "UPDATE fw_v_users SET 
                         status = FALSE,
                         status_reason = ?,
                         status_details = ?,
@@ -1153,9 +1150,9 @@ class ProfileController
         try {
             $connection = Database::getConnection();
             
-            $sql = 'SELECT id, email, first_name, last_name, phone, user_type, job_title, status, 
+            $sql = 'SELECT id, email, first_name, last_name, phone, , job_title, status, 
                            status_reason, status_details, additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
-                    FROM fw_users 
+                    FROM fw_v_users 
                     WHERE id = ?';
             
             $this->logger->info('Executing SQL query', [

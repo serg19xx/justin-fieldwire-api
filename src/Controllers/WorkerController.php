@@ -89,7 +89,7 @@ class WorkerController
      *                     @OA\Property(property="first_name", type="string", example="John"),
      *                     @OA\Property(property="last_name", type="string", example="Doe"),
      *                     @OA\Property(property="phone", type="string", example="+1234567890"),
-     *                     @OA\Property(property="user_type", type="string", example="Employee"),
+     *                     @OA\Property(property="", type="string", example="Employee"),
      *                     @OA\Property(property="job_title", type="string", example="Developer"),
      *                     @OA\Property(property="status", type="integer", example=1),
      *                     @OA\Property(property="status_reason", type="string", nullable=true),
@@ -148,12 +148,12 @@ class WorkerController
 
             // Базовый SQL запрос - возвращаем все поля
             $sql = "SELECT 
-                        id, email, password_hash, first_name, last_name, phone, user_type, job_title, 
+                        id, email, password_hash, first_name, last_name, phone, , job_title, 
                         status, status_reason, status_details, additional_info, avatar_url,
                         two_factor_enabled, two_factor_secret, last_login, created_at, updated_at,
                         invitation_status, invitation_token, invitation_sent_at, invitation_expires_at, 
                         invited_by, registration_completed_at, invitation_attempts, last_reminder_sent_at
-                    FROM fw_users 
+                    FROM fw_v_users 
                     WHERE 1=1";
 
             $params = [];
@@ -175,7 +175,7 @@ class WorkerController
             }
 
             // Подсчет общего количества
-            $countSql = "SELECT COUNT(*) as total FROM fw_users WHERE 1=1";
+            $countSql = "SELECT COUNT(*) as total FROM fw_v_users WHERE 1=1";
             $countParams = [];
             
             if ($status && in_array($status, ['invited', 'registered'])) {
@@ -210,7 +210,7 @@ class WorkerController
                     'first_name' => $worker['first_name'],
                     'last_name' => $worker['last_name'],
                     'phone' => $worker['phone'],
-                    'user_type' => $worker['user_type'],
+                    '' => $worker[''],
                     'job_title' => $worker['job_title'],
                     'status' => (int)$worker['status'],
                     'status_reason' => $worker['status_reason'],
@@ -279,7 +279,7 @@ class WorkerController
      *             @OA\Property(property="email", type="string", format="email", example="newworker@example.com"),
      *             @OA\Property(property="first_name", type="string", example="John"),
      *             @OA\Property(property="last_name", type="string", example="Doe"),
-     *             @OA\Property(property="user_type", type="string", example="Employee"),
+     *             @OA\Property(property="", type="string", example="Employee"),
      *             @OA\Property(property="job_title", type="string", example="Developer"),
      *             @OA\Property(property="phone", type="string", example="+1234567890"),
      *             @OA\Property(property="email_provider", type="string", example="sendgrid", description="Email provider: sendgrid, phpmailer, or auto")
@@ -336,7 +336,7 @@ class WorkerController
             $email = $data->email;
             $firstName = $data->first_name;
             $lastName = $data->last_name;
-            $userType = $data->user_type ?? 'Employee';
+            $userType = 'Employee';
             $jobTitle = $data->job_title ?? null;
             $phone = $data->phone ?? null;
             $emailProvider = $data->email_provider ?? 'auto';
@@ -344,7 +344,7 @@ class WorkerController
             // Проверяем, не существует ли уже пользователь с таким email
             $connection = $this->database->getConnection();
             $existingUser = $connection->executeQuery(
-                "SELECT id, invitation_status FROM fw_users WHERE email = ?",
+                "SELECT id, invitation_status FROM fw_v_users WHERE email = ?",
                 [$email]
             )->fetchAssociative();
 
@@ -385,8 +385,8 @@ class WorkerController
             try {
             if ($existingUser) {
                 // Обновляем существующего пользователя
-                $sql = "UPDATE fw_users SET 
-                            first_name = ?, last_name = ?, user_type = ?, job_title = ?, phone = ?,
+                $sql = "UPDATE fw_v_users SET 
+                            first_name = ?, last_name = ?,  = ?, job_title = ?, phone = ?,
                             invitation_status = 'invited', invitation_token = ?, 
                                 invitation_sent_at = NOW(), invitation_expires_at = ?, invited_by = ?,
                                 password_hash = ?
@@ -398,8 +398,8 @@ class WorkerController
                 ]);
             } else {
                 // Создаем нового пользователя
-                $sql = "INSERT INTO fw_users (
-                            email, first_name, last_name, user_type, job_title, phone,
+                $sql = "INSERT INTO fw_v_users (
+                            email, first_name, last_name, , job_title, phone,
                             invitation_status, invitation_token, invitation_sent_at, 
                                 invitation_expires_at, invited_by, password_hash, created_at
                             ) VALUES (?, ?, ?, ?, ?, ?, 'invited', ?, NOW(), ?, ?, ?, NOW())";

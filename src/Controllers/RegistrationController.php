@@ -68,7 +68,7 @@ class RegistrationController
      *                     @OA\Property(property="email", type="string", example="worker@example.com"),
      *                     @OA\Property(property="first_name", type="string", example="John"),
      *                     @OA\Property(property="last_name", type="string", example="Doe"),
-     *                     @OA\Property(property="user_type", type="string", example="Employee"),
+     *                     @OA\Property(property="", type="string", example="Employee"),
      *                     @OA\Property(property="job_title", type="string", example="Developer")
      *                 ),
      *                 @OA\Property(property="expires_at", type="string", format="date-time")
@@ -101,9 +101,9 @@ class RegistrationController
         try {
             $connection = $this->database->getConnection();
             
-            $sql = "SELECT email, first_name, last_name, user_type, job_title, 
+            $sql = "SELECT email, first_name, last_name, , job_title, 
                            invitation_status, invitation_expires_at
-                    FROM fw_users 
+                    FROM fw_v_users 
                     WHERE invitation_token = ? AND invitation_status = 'invited'";
             
             $result = $connection->executeQuery($sql, [$token]);
@@ -140,7 +140,7 @@ class RegistrationController
                         'email' => $user['email'],
                         'first_name' => $user['first_name'],
                         'last_name' => $user['last_name'],
-                        'user_type' => $user['user_type'],
+                        '' => $user[''],
                         'job_title' => $user['job_title']
                     ],
                     'expires_at' => $user['invitation_expires_at']
@@ -190,7 +190,7 @@ class RegistrationController
      *                     @OA\Property(property="email", type="string", example="worker@example.com"),
      *                     @OA\Property(property="first_name", type="string", example="John"),
      *                     @OA\Property(property="last_name", type="string", example="Doe"),
-     *                     @OA\Property(property="user_type", type="string", example="Employee"),
+     *                     @OA\Property(property="", type="string", example="Employee"),
      *                     @OA\Property(property="job_title", type="string", example="Developer")
      *                 ),
      *                 @OA\Property(property="token", type="string", example="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."),
@@ -251,9 +251,9 @@ class RegistrationController
             $connection = $this->database->getConnection();
             
             // Проверяем токен и получаем данные пользователя
-            $sql = "SELECT id, email, first_name, last_name, user_type, job_title, 
+            $sql = "SELECT id, email, first_name, last_name, , job_title, 
                            invitation_status, invitation_expires_at
-                    FROM fw_users 
+                    FROM fw_v_users 
                     WHERE invitation_token = ? AND invitation_status = 'invited'";
             
             $result = $connection->executeQuery($sql, [$token]);
@@ -284,7 +284,7 @@ class RegistrationController
             $passwordHash = password_hash($password, PASSWORD_DEFAULT);
 
             // Обновляем пользователя
-            $updateSql = "UPDATE fw_users SET 
+            $updateSql = "UPDATE fw_v_users SET 
                             password_hash = ?, 
                             phone = ?,
                             invitation_status = 'registered',
@@ -311,7 +311,7 @@ class RegistrationController
                 success: true,
                 metadata: [
                     'registration_completed' => true,
-                    'user_type' => $user['user_type'],
+                    '' => $user[''],
                     'job_title' => $user['job_title'],
                     'phone_provided' => !empty($phone),
                     'changed_fields' => ['password_hash', 'phone', 'invitation_status', 'status']
@@ -356,7 +356,7 @@ class RegistrationController
             $this->logger->info('Registration completed', [
                 'user_id' => $user['id'],
                 'email' => $user['email'],
-                'user_type' => $user['user_type'],
+                '' => $user[''],
                 'ip' => Flight::request()->ip
             ]);
 
@@ -370,7 +370,7 @@ class RegistrationController
                         'email' => $user['email'],
                         'first_name' => $user['first_name'],
                         'last_name' => $user['last_name'],
-                        'user_type' => $user['user_type'],
+                        '' => $user[''],
                         'job_title' => $user['job_title']
                     ],
                     'token' => $jwtToken,
