@@ -72,7 +72,7 @@ class ProjectTeamController
      *                         @OA\Property(property="added_by", type="integer", example=1),
      *                         @OA\Property(property="name", type="string", example="Mike Davis"),
      *                         @OA\Property(property="email", type="string", example="mike@example.com"),
-     *                         @OA\Property(property="user_type", type="string", example="Project Manager"),
+     *                         @OA\Property(property="", type="string", example="Project Manager"),
      *                         @OA\Property(property="job_title", type="string", example="Senior PM"),
      *                         @OA\Property(property="status", type="integer", example=1)
      *                     )
@@ -119,10 +119,10 @@ class ProjectTeamController
             $countSql = "
                 SELECT COUNT(*) as total 
                 FROM fw_prj_team_members tm
-                JOIN fw_users u ON tm.user_id = u.id
+                JOIN fw_v_users u ON tm.user_id = u.id
                 WHERE tm.project_id = ? 
                   AND u.archived_at IS NULL 
-                  AND u.user_type NOT IN ('System Administrator', 'Project Manager')
+                  AND u. NOT IN ('System Administrator', 'Project Manager')
             ";
             $countResult = $connection->executeQuery($countSql, [$projectId]);
             $total = $countResult->fetchOne();
@@ -138,14 +138,14 @@ class ProjectTeamController
                     u.first_name,
                     u.last_name,
                     u.email,
-                    u.user_type,
+                    u.,
                     u.job_title,
                     u.status
                 FROM fw_prj_team_members tm
-                JOIN fw_users u ON tm.user_id = u.id
+                JOIN fw_v_users u ON tm.user_id = u.id
                 WHERE tm.project_id = ? 
                   AND u.archived_at IS NULL 
-                  AND u.user_type NOT IN ('System Administrator', 'Project Manager')
+                  AND u. NOT IN ('System Administrator', 'Project Manager')
                 ORDER BY tm.assigned_at DESC
                 LIMIT " . (int)$limit . " OFFSET " . (int)$offset . "
             ";
@@ -219,7 +219,7 @@ class ProjectTeamController
      *                         @OA\Property(property="id", type="integer", example=45),
      *                         @OA\Property(property="name", type="string", example="John Smith"),
      *                         @OA\Property(property="email", type="string", example="architect1@example.com"),
-     *                         @OA\Property(property="user_type", type="string", example="Architect"),
+     *                         @OA\Property(property="", type="string", example="Architect"),
      *                         @OA\Property(property="job_title", type="string", example="Senior Architect"),
      *                         @OA\Property(property="status", type="integer", example=1)
      *                     )
@@ -258,12 +258,12 @@ class ProjectTeamController
                     u.first_name,
                     u.last_name,
                     u.email,
-                    u.user_type,
+                    u.,
                     u.job_title,
                     u.status
-                FROM fw_users u
+                FROM fw_v_users u
                 WHERE u.archived_at IS NULL 
-                  AND u.user_type NOT IN ('System Administrator', 'Project Manager')
+                  AND u. NOT IN ('System Administrator', 'Project Manager')
                   AND u.id NOT IN (
                       SELECT tm.user_id 
                       FROM fw_prj_team_members tm 
@@ -381,7 +381,7 @@ class ProjectTeamController
             $connection = $this->database->getConnection();
 
             // Check if user exists, is not archived, and is not System Administrator or Project Manager
-            $userSql = "SELECT id, user_type FROM fw_users WHERE id = ? AND archived_at IS NULL";
+            $userSql = "SELECT id,  FROM fw_v_users WHERE id = ? AND archived_at IS NULL";
             $userResult = $connection->executeQuery($userSql, [$input['user_id']]);
             $user = $userResult->fetchAssociative();
             
@@ -389,7 +389,7 @@ class ProjectTeamController
                 return $this->errorResponse('User not found', 404);
             }
             
-            if (in_array($user['user_type'], ['System Administrator', 'Project Manager'])) {
+            if (in_array($user[''], ['System Administrator', 'Project Manager'])) {
                 return $this->errorResponse('Cannot add System Administrator or Project Manager to team', 400);
             }
 
@@ -678,7 +678,7 @@ class ProjectTeamController
             'added_by' => null, // This field doesn't exist in current schema
             'name' => trim($member['first_name'] . ' ' . $member['last_name']),
             'email' => $member['email'],
-            'user_type' => $member['user_type'],
+            '' => $member[''],
             'job_title' => $member['job_title'],
             'status' => (int) $member['status']
         ];

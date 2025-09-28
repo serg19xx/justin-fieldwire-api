@@ -202,13 +202,17 @@ class AuthController
                             'last_name' => $user['last_name'] ?? null,
                             'name' => ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''),
                             'phone' => $user['phone'] ?? null,
-                            'user_type' => $user['user_type'] ?? null,
                             'job_title' => $user['job_title'] ?? null,
                             'status' => $user['status'] ?? 'active',
                             'additional_info' => $user['additional_info'] ?? null,
                             'avatar_url' => $user['avatar_url'] ?? null,
                             'two_factor_enabled' => true,
-                            'last_login' => $user['last_login'] ?? null
+                            'last_login' => $user['last_login'] ?? null,
+                            'role_id' => $user['role_id'] ?? null,
+                            'role_code' => $user['role_code'] ?? null,
+                            'role_name' => $user['role_name'] ?? null,
+                            'role_category' => $user['role_category'] ?? null,
+                            'role_description' => $user['role_description'] ?? null
                         ],
                         'requires_2fa' => true,
                         'token' => null,
@@ -242,13 +246,17 @@ class AuthController
                         'last_name' => $user['last_name'] ?? null,
                         'name' => ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''),
                         'phone' => $user['phone'] ?? null,
-                        'user_type' => $user['user_type'] ?? null,
                         'job_title' => $user['job_title'] ?? null,
                         'status' => $user['status'] ?? 'active',
                         'additional_info' => $user['additional_info'] ?? null,
                         'avatar_url' => $user['avatar_url'] ?? null,
                         'two_factor_enabled' => false,
-                        'last_login' => $user['last_login'] ?? null
+                        'last_login' => $user['last_login'] ?? null,
+                        'role_id' => $user['role_id'] ?? null,
+                        'role_code' => $user['role_code'] ?? null,
+                        'role_name' => $user['role_name'] ?? null,
+                        'role_category' => $user['role_category'] ?? null,
+                        'role_description' => $user['role_description'] ?? null
                     ],
                     'requires_2fa' => false,
                     'token' => $token,
@@ -300,8 +308,8 @@ class AuthController
             $connection = Database::getConnection();
             error_log('Database connection OK');
             
-            // Правильный SQL
-            $sql = "SELECT id, email, password_hash, first_name, last_name, phone, user_type, job_title, status, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_users WHERE email = ? LIMIT 1";
+            // Используем таблицу fw_v_users с правильными колонками
+            $sql = "SELECT id, email, password_hash, first_name, last_name, phone, role_id, job_title, status, status_reason, status_details, additional_info, avatar_url, two_factor_enabled, two_factor_secret, last_login, created_at, updated_at, invitation_status, invitation_token, invitation_sent_at, invitation_expires_at, invited_by, registration_completed_at, invitation_attempts, last_reminder_sent_at, archived_at, role_code, role_name, role_category, role_description FROM fw_v_users WHERE email = ? LIMIT 1";
             error_log('SQL: ' . $sql);
             error_log('Email: ' . $email);
             
@@ -325,7 +333,7 @@ class AuthController
 
             error_log('User found, checking password');
             
-            // ИСПРАВЛЯЕМ: используем правильное название колонки password_hash
+            // Проверяем пароль - используем password_hash
             if (password_verify($password, $user['password_hash'])) {
                 error_log('Password verified OK');
                 return $user;
@@ -354,7 +362,7 @@ class AuthController
             error_log('Database connection OK');
             
             // Check if token exists
-            $sql = "SELECT invitation_expires_at FROM fw_users WHERE invitation_token = ? AND invitation_status = 'invited' LIMIT 1";
+            $sql = "SELECT invitation_expires_at FROM fw_v_users WHERE invitation_token = ? AND invitation_status = 'invited' LIMIT 1";
             error_log('SQL: ' . $sql);
             error_log('Invitation token: ' . $invitationToken);
             
@@ -464,7 +472,7 @@ class AuthController
             $connection = Database::getConnection();
             
             // Find user by invitation status (only invited users can change password this way)
-            $sql = "SELECT id, email FROM fw_users WHERE invitation_status = 'invited' LIMIT 1";
+            $sql = "SELECT id, email FROM fw_v_users WHERE invitation_status = 'invited' LIMIT 1";
             $result = $connection->executeQuery($sql);
             $user = $result->fetchAssociative();
             
@@ -612,7 +620,7 @@ class AuthController
             
             // Check if token exists and is valid
             $sql = "SELECT invitation_expires_at 
-                    FROM fw_users 
+                    FROM fw_v_users 
                     WHERE invitation_token = ? AND invitation_status = 'invited' 
                     LIMIT 1";
             
@@ -861,7 +869,7 @@ class AuthController
 
             // Get user from database
             $connection = Database::getConnection();
-            $sql = "SELECT id, email, first_name, last_name, status, archived_at FROM fw_users WHERE id = ? LIMIT 1";
+            $sql = "SELECT id, email, first_name, last_name, status, archived_at FROM fw_v_users WHERE id = ? LIMIT 1";
             $result = $connection->executeQuery($sql, [$payload['user_id']]);
             $user = $result->fetchAssociative();
 

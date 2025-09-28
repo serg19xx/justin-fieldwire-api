@@ -150,7 +150,7 @@ class ProjectController
                         p.priority, p.status, p.prj_manager, p.created_at, p.updated_at,
                         u.first_name, u.last_name
                     FROM fw_projects p
-                    LEFT JOIN fw_users u ON p.prj_manager = u.id
+                    LEFT JOIN fw_v_users u ON p.prj_manager = u.id
                     WHERE 1=1";
 
             $params = [];
@@ -335,7 +335,7 @@ class ProjectController
                         p.priority, p.status, p.prj_manager, p.created_at, p.updated_at,
                         u.first_name, u.last_name
                     FROM fw_projects p
-                    LEFT JOIN fw_users u ON p.prj_manager = u.id
+                    LEFT JOIN fw_v_users u ON p.prj_manager = u.id
                     WHERE p.id = ?";
             
             $result = $connection->executeQuery($sql, [$id]);

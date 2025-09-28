@@ -342,7 +342,7 @@ class TwoFactorController
                         'last_name' => $user['last_name'],
                         'name' => $user['first_name'] . ' ' . $user['last_name'],
                         'phone' => $user['phone'],
-                        'user_type' => $user['user_type'],
+                        '' => $user[''],
                         'job_title' => $user['job_title'],
                         'status' => $user['status'],
                         'additional_info' => $user['additional_info'],
@@ -509,7 +509,7 @@ class TwoFactorController
     {
         try {
             $connection = Database::getConnection();
-            $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, user_type, job_title, status, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_users WHERE email = ?';
+            $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, , job_title, status, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_v_users WHERE email = ?';
             $result = $connection->executeQuery($sql, [$email]);
             $user = $result->fetchAssociative();
             return $user ?: null;
@@ -526,7 +526,7 @@ class TwoFactorController
     {
         try {
             $connection = Database::getConnection();
-            $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, user_type, job_title, status, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_users WHERE id = ?';
+            $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, , job_title, status, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_v_users WHERE id = ?';
             $result = $connection->executeQuery($sql, [$userId]);
             $user = $result->fetchAssociative();
             return $user ?: null;
@@ -602,7 +602,7 @@ class TwoFactorController
         try {
             $connection = Database::getConnection();
             $connection->executeStatement(
-                'UPDATE fw_users SET phone = ?, two_factor_enabled = ?, updated_at = NOW() WHERE id = ?',
+                'UPDATE fw_v_users SET phone = ?, two_factor_enabled = ?, updated_at = NOW() WHERE id = ?',
                 [$phone, $enabled ? 1 : 0, $userId]
             );
             return true;
@@ -622,7 +622,7 @@ class TwoFactorController
             'user_id' => $user['id'],
             'email' => $user['email'],
             'name' => $user['first_name'] . ' ' . $user['last_name'],
-            'user_type' => $user['user_type'],
+            '' => $user[''],
             'iat' => time(),
             'exp' => time() + 3600
         ]);

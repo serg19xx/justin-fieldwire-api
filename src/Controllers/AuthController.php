@@ -143,7 +143,7 @@ class AuthController
 
             if (!$user) {
                 // Логируем неудачную попытку входа
-                $this->userAuditService->logLogin(null, false, 'Invalid credentials');
+                // Не логируем неудачную попытку, так как user_id неизвестен
 
                 $this->logger->warning('Failed login attempt', [
                     'email' => $email,
