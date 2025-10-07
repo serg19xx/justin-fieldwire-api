@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Full Image Upload Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .section {
+            margin: 20px 0;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .form-group {
+            margin: 10px 0;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="file"], input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 3px;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .image-preview {
+            max-width: 300px;
+            max-height: 300px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+    </style>
+</head>
+<body>
+    <h1>Full Image Upload Test</h1>
+    
+    <div class="section">
+        <h2>Authentication</h2>
+        <div class="form-group">
+            <label for="token">JWT Token:</label>
+            <input type="text" id="token" placeholder="Enter your JWT token">
+        </div>
+        <button onclick="testAuth()">Test Authentication</button>
+        <div id="authResult"></div>
+    </div>
+
+    <div class="section">
+        <h2>Upload Image (Creates Both Avatar and Full Image)</h2>
+        <div class="form-group">
+            <label for="imageFile">Select Image File:</label>
+            <input type="file" id="imageFile" accept="image/*">
+        </div>
+        <button onclick="uploadImage()">Upload Image</button>
+        <div id="uploadResult"></div>
+        <div id="imagePreview"></div>
+    </div>
+
+    <div class="section">
+        <h2>Get Full Image Info</h2>
+        <button onclick="getFullImageInfo()">Get Full Image Info</button>
+        <div id="getResult"></div>
+    </div>
+
+    <div class="section">
+        <h2>Upload Avatar (for comparison)</h2>
+        <div class="form-group">
+            <label for="avatarFile">Select Avatar File:</label>
+            <input type="file" id="avatarFile" accept="image/*">
+        </div>
+        <button onclick="uploadAvatar()">Upload Avatar</button>
+        <div id="avatarResult"></div>
+        <div id="avatarPreview"></div>
+    </div>
+
+    <div class="section">
+        <h2>Get Profile (Both Images)</h2>
+        <button onclick="getProfile()">Get Profile</button>
+        <div id="profileResult"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000/api/v1';
+        
+        function getToken() {
+            return document.getElementById('token').value;
+        }
+
+        function showResult(elementId, message, isError = false) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="result ${isError ? 'error' : 'success'}">${message}</div>`;
+        }
+
+        function showInfo(elementId, message) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="result info">${message}</div>`;
+        }
+
+        async function testAuth() {
+            const token = getToken();
+            if (!token) {
+                showResult('authResult', 'Please enter a JWT token', true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/profile`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.error_code === 0) {
+                    showResult('authResult', `Authentication successful! User: ${data.data.first_name} ${data.data.last_name}`);
+                } else {
+                    showResult('authResult', `Authentication failed: ${data.message}`, true);
+                }
+            } catch (error) {
+                showResult('authResult', `Error: ${error.message}`, true);
+            }
+        }
+
+        async function uploadImage() {
+            const token = getToken();
+            const fileInput = document.getElementById('imageFile');
+            
+            if (!token) {
+                showResult('uploadResult', 'Please enter a JWT token', true);
+                return;
+            }
+            
+            if (!fileInput.files[0]) {
+                showResult('uploadResult', 'Please select a file', true);
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('avatar', fileInput.files[0]);
+
+            try {
+                const response = await fetch(`${API_BASE}/profile/avatar`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.error_code === 0) {
+                    let html = `Image uploaded successfully!<br>`;
+                    html += `Avatar URL: ${data.data.avatar_full_url}<br>`;
+                    html += `Full Image URL: ${data.data.full_image_full_url}`;
+                    showResult('uploadResult', html);
+                    
+                    document.getElementById('imagePreview').innerHTML = 
+                        `<div><strong>Avatar:</strong><br><img src="${data.data.avatar_full_url}" class="image-preview" alt="Avatar Preview"></div>
+                         <div><strong>Full Image:</strong><br><img src="${data.data.full_image_full_url}" class="image-preview" alt="Full Image Preview"></div>`;
+                } else {
+                    showResult('uploadResult', `Upload failed: ${data.message}`, true);
+                }
+            } catch (error) {
+                showResult('uploadResult', `Error: ${error.message}`, true);
+            }
+        }
+
+        async function getFullImageInfo() {
+            const token = getToken();
+            
+            if (!token) {
+                showResult('getResult', 'Please enter a JWT token', true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/profile/full-image`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.error_code === 0) {
+                    showResult('getResult', `Full image info retrieved!<br>URL: ${data.data.full_url}`);
+                } else {
+                    showResult('getResult', `Failed to get full image info: ${data.message}`, true);
+                }
+            } catch (error) {
+                showResult('getResult', `Error: ${error.message}`, true);
+            }
+        }
+
+        async function uploadAvatar() {
+            const token = getToken();
+            const fileInput = document.getElementById('avatarFile');
+            
+            if (!token) {
+                showResult('avatarResult', 'Please enter a JWT token', true);
+                return;
+            }
+            
+            if (!fileInput.files[0]) {
+                showResult('avatarResult', 'Please select a file', true);
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('avatar', fileInput.files[0]);
+
+            try {
+                const response = await fetch(`${API_BASE}/profile/avatar`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: formData
+                });
+                
+                const data = await response.json();
+                
+                if (data.error_code === 0) {
+                    showResult('avatarResult', `Avatar uploaded successfully!<br>URL: ${data.data.full_url}`);
+                    document.getElementById('avatarPreview').innerHTML = 
+                        `<img src="${data.data.full_url}" class="image-preview" alt="Avatar Preview">`;
+                } else {
+                    showResult('avatarResult', `Upload failed: ${data.message}`, true);
+                }
+            } catch (error) {
+                showResult('avatarResult', `Error: ${error.message}`, true);
+            }
+        }
+
+        async function getProfile() {
+            const token = getToken();
+            
+            if (!token) {
+                showResult('profileResult', 'Please enter a JWT token', true);
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/profile`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.error_code === 0) {
+                    const user = data.data;
+                    let html = `<strong>Profile Information:</strong><br>`;
+                    html += `Name: ${user.first_name} ${user.last_name}<br>`;
+                    html += `Email: ${user.email}<br>`;
+                    html += `Avatar URL: ${user.avatar_url || 'Not set'}<br>`;
+                    html += `Full Image URL: ${user.full_image_url || 'Not set'}<br>`;
+                    
+                    if (user.avatar_url) {
+                        html += `<br><strong>Avatar Preview:</strong><br>`;
+                        html += `<img src="${user.avatar_url}" class="image-preview" alt="Avatar">`;
+                    }
+                    
+                    if (user.full_image_url) {
+                        html += `<br><strong>Full Image Preview:</strong><br>`;
+                        html += `<img src="${user.full_image_url}" class="image-preview" alt="Full Image">`;
+                    }
+                    
+                    showInfo('profileResult', html);
+                } else {
+                    showResult('profileResult', `Failed to get profile: ${data.message}`, true);
+                }
+            } catch (error) {
+                showResult('profileResult', `Error: ${error.message}`, true);
+            }
+        }
+    </script>
+</body>
+</html>
