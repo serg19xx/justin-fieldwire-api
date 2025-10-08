@@ -244,7 +244,7 @@ class LanguageController
 
             $result = $connection->executeQuery(
                 "SELECT wl.language_id, l.name as language_name, wl.prof_level 
-                 FROM fw_user_languages wl 
+                 FROM fw_worker_languages wl 
                  INNER JOIN fw_languages l ON wl.language_id = l.id 
                  WHERE wl.worker_id = ? 
                  ORDER BY l.name",
@@ -397,7 +397,7 @@ class LanguageController
 
             // Check if worker already has this language
             $existing = $connection->executeQuery(
-                "SELECT worker_id FROM fw_user_languages WHERE worker_id = ? AND language_id = ?",
+                "SELECT worker_id FROM fw_worker_languages WHERE worker_id = ? AND language_id = ?",
                 [$workerIdInt, $languageId]
             )->fetchAssociative();
 
@@ -412,7 +412,7 @@ class LanguageController
 
             // Add language to worker
             $connection->executeStatement(
-                "INSERT INTO fw_user_languages (worker_id, language_id, prof_level) VALUES (?, ?, ?)",
+                "INSERT INTO fw_worker_languages (worker_id, language_id, prof_level) VALUES (?, ?, ?)",
                 [$workerIdInt, $languageId, $profLevel]
             );
 
@@ -519,7 +519,7 @@ class LanguageController
 
             // Check if worker language exists
             $existing = $connection->executeQuery(
-                "SELECT worker_id FROM fw_user_languages WHERE worker_id = ? AND language_id = ?",
+                "SELECT worker_id FROM fw_worker_languages WHERE worker_id = ? AND language_id = ?",
                 [$workerIdInt, $languageIdInt]
             )->fetchAssociative();
 
@@ -534,7 +534,7 @@ class LanguageController
 
             // Update proficiency level
             $connection->executeStatement(
-                "UPDATE fw_user_languages SET prof_level = ? WHERE worker_id = ? AND language_id = ?",
+                "UPDATE fw_worker_languages SET prof_level = ? WHERE worker_id = ? AND language_id = ?",
                 [$profLevel, $workerIdInt, $languageIdInt]
             );
 
@@ -740,7 +740,7 @@ class LanguageController
 
             // Check if worker language exists
             $existing = $connection->executeQuery(
-                "SELECT worker_id FROM fw_user_languages WHERE worker_id = ? AND language_id = ?",
+                "SELECT worker_id FROM fw_worker_languages WHERE worker_id = ? AND language_id = ?",
                 [$workerIdInt, $languageIdInt]
             )->fetchAssociative();
 
@@ -755,7 +755,7 @@ class LanguageController
 
             // Remove language from worker
             $connection->executeStatement(
-                "DELETE FROM fw_user_languages WHERE worker_id = ? AND language_id = ?",
+                "DELETE FROM fw_worker_languages WHERE worker_id = ? AND language_id = ?",
                 [$workerIdInt, $languageIdInt]
             );
 

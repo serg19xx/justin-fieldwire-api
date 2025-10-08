@@ -112,8 +112,6 @@ class ApiRoutes
                                 'profile_get' => 'GET /api/v1/profile',
                                 'profile_update' => 'PUT /api/v1/profile',
                                 'profile_avatar' => 'POST /api/v1/profile/avatar',
-                                'profile_2fa_enable' => 'POST /api/v1/profile/2fa/enable',
-                                'profile_2fa_disable' => 'POST /api/v1/profile/2fa/disable',
                                 '2fa_toggle' => 'POST /api/v1/2fa/toggle',
                                 'event_rules' => 'GET /api/v1/event-rules',
                                 'event_logs_get' => 'GET /api/v1/event-logs',
@@ -247,16 +245,23 @@ class ApiRoutes
                 }
             });
             
-            // 2FA management routes with auth middleware
-            Flight::route('POST /api/v1/profile/2fa/enable', function() use ($profileController, $authMiddleware) {
+            // Professional data routes
+            Flight::route('GET /api/v1/profile/professional', function() use ($profileController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
-                    $profileController->enable2FA();
+                    $profileController->getProfessionalData();
                 }
             });
             
-            Flight::route('POST /api/v1/profile/2fa/disable', function() use ($profileController, $authMiddleware) {
+            Flight::route('PUT /api/v1/profile/professional', function() use ($profileController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
-                    $profileController->disable2FA();
+                    $profileController->updateProfessionalData();
+                }
+            });
+            
+            // Change password route
+            Flight::route('POST /api/v1/profile/change-password', function() use ($profileController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $profileController->changePassword();
                 }
             });
             
@@ -272,15 +277,15 @@ class ApiRoutes
             
             Flight::route('POST /api/v1/2fa/send-code', [$twoFactorController, 'sendCode']);
             Flight::route('POST /api/v1/2fa/verify-code', [$twoFactorController, 'verifyCode']);
-            Flight::route('POST /api/v1/2fa/enable', [$twoFactorController, 'enable2FA']);
-            Flight::route('POST /api/v1/2fa/disable', [$twoFactorController, 'disable2FA']);
-            Flight::route('POST /api/v1/2fa/toggle', [$twoFactorController, 'toggle2FA']);
+            Flight::route('POST /api/v1/2fa/toggle', function() use ($twoFactorController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $twoFactorController->toggle2FA();
+                }
+            });
             
             // Legacy 2FA routes
             Flight::route('POST /2fa/send-code', [$twoFactorController, 'sendCode']);
             Flight::route('POST /2fa/verify-code', [$twoFactorController, 'verifyCode']);
-            Flight::route('POST /2fa/enable', [$twoFactorController, 'enable2FA']);
-            Flight::route('POST /2fa/disable', [$twoFactorController, 'disable2FA']);
             Flight::route('POST /2fa/toggle', [$twoFactorController, 'toggle2FA']);
             
         } catch (\Exception $e) {

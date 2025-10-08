@@ -61,18 +61,95 @@ class WorkerController
      *         @OA\Schema(type="integer", minimum=1, maximum=100, default=20)
      *     ),
      *     @OA\Parameter(
+     *         name="id",
+     *         in="query",
+     *         description="Filter by specific user ID",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="project_id",
+     *         in="query",
+     *         description="Filter by project ID - show only team members of this project",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="prj_mngr_id",
+     *         in="query",
+     *         description="Filter by project manager ID - show only users who manage projects",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="invitation_status",
+     *         in="query",
+     *         description="Filter by invitation status: invited, registered, expired",
+     *         required=false,
+     *         @OA\Schema(type="string", enum={"invited", "registered", "expired"})
+     *     ),
+     *     @OA\Parameter(
      *         name="status",
      *         in="query",
-     *         description="Filter by invitation status: invited, registered",
+     *         description="Filter by user status: 1 (active), 0 (inactive)",
      *         required=false,
-     *         @OA\Schema(type="string", enum={"invited", "registered"})
+     *         @OA\Schema(type="integer", enum={0, 1})
+     *     ),
+     *     @OA\Parameter(
+     *         name="role_id",
+     *         in="query",
+     *         description="Filter by role ID",
+     *         required=false,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="role_code",
+     *         in="query",
+     *         description="Filter by role code: admin, contractor, architect, project_manager",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="job_title",
+     *         in="query",
+     *         description="Filter by job title (partial match)",
+     *         required=false,
+     *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="archived",
+     *         in="query",
+     *         description="Filter by archived status: true, false",
+     *         required=false,
+     *         @OA\Schema(type="boolean")
+     *     ),
+     *     @OA\Parameter(
+     *         name="two_factor",
+     *         in="query",
+     *         description="Filter by 2FA status: true, false",
+     *         required=false,
+     *         @OA\Schema(type="boolean")
      *     ),
      *     @OA\Parameter(
      *         name="search",
      *         in="query",
-     *         description="Search by name or email",
+     *         description="Search by name, email, phone, or job title",
      *         required=false,
      *         @OA\Schema(type="string")
+     *     ),
+     *     @OA\Parameter(
+     *         name="sort_by",
+     *         in="query",
+     *         description="Sort by field: id, email, first_name, last_name, created_at, updated_at, last_login, role_name, job_title",
+     *         required=false,
+     *         @OA\Schema(type="string", enum={"id", "email", "first_name", "last_name", "created_at", "updated_at", "last_login", "role_name", "job_title"}, default="created_at")
+     *     ),
+     *     @OA\Parameter(
+     *         name="sort_order",
+     *         in="query",
+     *         description="Sort order: ASC, DESC",
+     *         required=false,
+     *         @OA\Schema(type="string", enum={"ASC", "DESC"}, default="DESC")
      *     ),
      *     @OA\Response(
      *         response=200,
@@ -89,7 +166,7 @@ class WorkerController
      *                     @OA\Property(property="first_name", type="string", example="John"),
      *                     @OA\Property(property="last_name", type="string", example="Doe"),
      *                     @OA\Property(property="phone", type="string", example="+1234567890"),
-     *                     @OA\Property(property="", type="string", example="Employee"),
+     *                     @OA\Property(property="role_id", type="integer", example=3),
      *                     @OA\Property(property="job_title", type="string", example="Developer"),
      *                     @OA\Property(property="status", type="integer", example=1),
      *                     @OA\Property(property="status_reason", type="string", nullable=true),
@@ -108,13 +185,24 @@ class WorkerController
      *                     @OA\Property(property="invited_by", type="integer", nullable=true),
      *                     @OA\Property(property="registration_completed_at", type="string", format="date-time", nullable=true),
      *                     @OA\Property(property="invitation_attempts", type="integer", example=0),
-     *                     @OA\Property(property="last_reminder_sent_at", type="string", format="date-time", nullable=true)
+     *                     @OA\Property(property="last_reminder_sent_at", type="string", format="date-time", nullable=true),
+     *                     @OA\Property(property="archived_at", type="string", format="date-time", nullable=true),
+     *                     @OA\Property(property="role_code", type="string", example="contractor"),
+     *                     @OA\Property(property="role_name", type="string", example="Contractor"),
+     *                     @OA\Property(property="role_category", type="string", example="task"),
+     *                     @OA\Property(property="role_description", type="string", nullable=true)
      *                 )),
      *                 @OA\Property(property="pagination", type="object",
      *                     @OA\Property(property="current_page", type="integer", example=1),
      *                     @OA\Property(property="per_page", type="integer", example=20),
      *                     @OA\Property(property="total", type="integer", example=100),
-     *                     @OA\Property(property="last_page", type="integer", example=5)
+     *                     @OA\Property(property="last_page", type="integer", example=5),
+     *                     @OA\Property(property="from", type="integer", example=1),
+     *                     @OA\Property(property="to", type="integer", example=20),
+     *                     @OA\Property(property="has_next_page", type="boolean", example=true),
+     *                     @OA\Property(property="has_prev_page", type="boolean", example=false),
+     *                     @OA\Property(property="next_page", type="integer", nullable=true, example=2),
+     *                     @OA\Property(property="prev_page", type="integer", nullable=true, example=null)
      *                 )
      *             )
      *         )
@@ -141,51 +229,215 @@ class WorkerController
             $request = Flight::request();
             $page = (int)($request->query['page'] ?? 1);
             $limit = min((int)($request->query['limit'] ?? 20), 100);
-            $status = $request->query['status'] ?? null;
+            
+            // Параметры фильтрации
+            $id = $request->query['id'] ?? null; // выборка по ID
+            $projectId = $request->query['project_id'] ?? null; // фильтр по проекту
+            $prjMngrId = $request->query['prj_mngr_id'] ?? null; // фильтр по менеджеру проекта
+            $invitationStatus = $request->query['invitation_status'] ?? null; // invitation_status
+            $status = $request->query['status'] ?? null; // user status (active, suspended, etc.)
+            $roleId = $request->query['role_id'] ?? null;
+            $roleCode = $request->query['role_code'] ?? null;
+            $jobTitle = $request->query['job_title'] ?? null;
+            $archived = $request->query['archived'] ?? null; // true/false для архивированных
+            $twoFactor = $request->query['two_factor'] ?? null; // true/false для 2FA
             $search = $request->query['search'] ?? null;
+            $sortBy = $request->query['sort_by'] ?? 'created_at';
+            $sortOrder = $request->query['sort_order'] ?? 'DESC';
 
             $offset = ($page - 1) * $limit;
 
-            // Базовый SQL запрос - возвращаем все поля
-            $sql = "SELECT 
-                        id, email, password_hash, first_name, last_name, phone, , job_title, 
-                        status, status_reason, status_details, additional_info, avatar_url,
-                        two_factor_enabled, two_factor_secret, last_login, created_at, updated_at,
-                        invitation_status, invitation_token, invitation_sent_at, invitation_expires_at, 
-                        invited_by, registration_completed_at, invitation_attempts, last_reminder_sent_at
-                    FROM fw_v_users 
-                    WHERE 1=1";
+            // Базовый SQL запрос - возвращаем все поля из fw_v_users
+            if ($projectId && is_numeric($projectId)) {
+                // Если указан project_id, делаем JOIN с таблицей участников проекта
+                $sql = "SELECT 
+                            u.id, u.email, u.password_hash, u.first_name, u.last_name, u.phone, u.role_id, u.job_title, 
+                            u.status, u.status_reason, u.status_details, u.additional_info, u.avatar_url,
+                            u.two_factor_enabled, u.two_factor_secret, u.last_login, u.status_changed_at, u.status_end_at, u.dob, u.gender, u.nationality, u.country_of_origin, u.workforce_group, u.emergency, u.created_at, u.updated_at,
+                            u.invitation_status, u.invitation_token, u.invitation_sent_at, u.invitation_expires_at, 
+                            u.invited_by, u.registration_completed_at, u.invitation_attempts, u.last_reminder_sent_at,
+                            u.archived_at, u.role_code, u.role_name, u.role_category, u.role_description,
+                            tm.role_in_project, tm.assigned_at
+                        FROM fw_v_users u
+                        INNER JOIN fw_prj_team_members tm ON u.id = tm.user_id
+                        WHERE tm.project_id = ?";
+                $params[] = (int)$projectId;
+            } elseif ($prjMngrId && is_numeric($prjMngrId)) {
+                // Если указан prj_mngr_id, делаем JOIN с таблицей проектов
+                $sql = "SELECT 
+                            u.id, u.email, u.password_hash, u.first_name, u.last_name, u.phone, u.role_id, u.job_title, 
+                            u.status, u.status_reason, u.status_details, u.additional_info, u.avatar_url,
+                            u.two_factor_enabled, u.two_factor_secret, u.last_login, u.status_changed_at, u.status_end_at, u.dob, u.gender, u.nationality, u.country_of_origin, u.workforce_group, u.emergency, u.created_at, u.updated_at,
+                            u.invitation_status, u.invitation_token, u.invitation_sent_at, u.invitation_expires_at, 
+                            u.invited_by, u.registration_completed_at, u.invitation_attempts, u.last_reminder_sent_at,
+                            u.archived_at, u.role_code, u.role_name, u.role_category, u.role_description
+                        FROM fw_v_users u
+                        INNER JOIN fw_projects p ON u.id = p.prj_manager
+                        WHERE p.prj_manager = ?";
+                $params[] = (int)$prjMngrId;
+            } else {
+                // Обычный запрос для всех пользователей
+                $sql = "SELECT 
+                            id, email, password_hash, first_name, last_name, phone, role_id, job_title, 
+                            status, status_reason, status_details, additional_info, avatar_url,
+                            two_factor_enabled, two_factor_secret, last_login, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, emergency, created_at, updated_at,
+                            invitation_status, invitation_token, invitation_sent_at, invitation_expires_at, 
+                            invited_by, registration_completed_at, invitation_attempts, last_reminder_sent_at,
+                            archived_at, role_code, role_name, role_category, role_description
+                        FROM fw_v_users 
+                        WHERE 1=1";
+            }
 
-            $params = [];
-            $paramCount = 0;
+            // Инициализируем параметры только если project_id и prj_mngr_id не указаны
+            if ((!$projectId || !is_numeric($projectId)) && (!$prjMngrId || !is_numeric($prjMngrId))) {
+                $params = [];
+            }
+
+            // Фильтр по ID (точное совпадение)
+            if ($id && is_numeric($id)) {
+                $sql .= " AND id = ?";
+                $params[] = (int)$id;
+            }
 
             // Фильтр по статусу приглашения
-            if ($status && in_array($status, ['invited', 'registered'])) {
-                $sql .= " AND invitation_status = ?";
-                $params[] = $status;
+            if ($invitationStatus) {
+                if (in_array($invitationStatus, ['invited', 'registered', 'expired'])) {
+                    $sql .= " AND invitation_status = ?";
+                    $params[] = $invitationStatus;
+                } else {
+                    // Для невалидных статусов возвращаем пустой результат
+                    $sql .= " AND 1=0";
+                }
             }
 
-            // Поиск по имени или email
+            // Фильтр по статусу пользователя (1=активный, 0=неактивный)
+            if ($status !== null && in_array($status, [0, 1, '0', '1'])) {
+                $sql .= " AND status = ?";
+                $params[] = (int)$status;
+            }
+
+            // Фильтр по роли (ID)
+            if ($roleId && is_numeric($roleId)) {
+                $sql .= " AND role_id = ?";
+                $params[] = (int)$roleId;
+            }
+
+            // Фильтр по коду роли
+            if ($roleCode) {
+                $sql .= " AND role_code = ?";
+                $params[] = $roleCode;
+            }
+
+            // Фильтр по должности
+            if ($jobTitle) {
+                $sql .= " AND job_title LIKE ?";
+                $params[] = "%{$jobTitle}%";
+            }
+
+            // Фильтр по архивированным пользователям
+            if ($archived !== null) {
+                if ($archived === 'true' || $archived === true) {
+                    $sql .= " AND archived_at IS NOT NULL";
+                } else {
+                    $sql .= " AND archived_at IS NULL";
+                }
+            }
+
+            // Фильтр по 2FA
+            if ($twoFactor !== null) {
+                if ($twoFactor === 'true' || $twoFactor === true) {
+                    $sql .= " AND two_factor_enabled = 1";
+                } else {
+                    $sql .= " AND two_factor_enabled = 0";
+                }
+            }
+
+            // Поиск по имени, email, телефону или должности
             if ($search) {
-                $sql .= " AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)";
+                $sql .= " AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ? OR phone LIKE ? OR job_title LIKE ?)";
                 $searchTerm = "%{$search}%";
                 $params[] = $searchTerm;
                 $params[] = $searchTerm;
                 $params[] = $searchTerm;
+                $params[] = $searchTerm;
+                $params[] = $searchTerm;
             }
 
-            // Подсчет общего количества
-            $countSql = "SELECT COUNT(*) as total FROM fw_v_users WHERE 1=1";
-            $countParams = [];
+            // Подсчет общего количества с теми же фильтрами
+            if ($projectId && is_numeric($projectId)) {
+                $countSql = "SELECT COUNT(*) as total 
+                            FROM fw_v_users u
+                            INNER JOIN fw_prj_team_members tm ON u.id = tm.user_id
+                            WHERE tm.project_id = ?";
+                $countParams = [(int)$projectId];
+            } elseif ($prjMngrId && is_numeric($prjMngrId)) {
+                $countSql = "SELECT COUNT(*) as total 
+                            FROM fw_v_users u
+                            INNER JOIN fw_projects p ON u.id = p.prj_manager
+                            WHERE p.prj_manager = ?";
+                $countParams = [(int)$prjMngrId];
+            } else {
+                $countSql = "SELECT COUNT(*) as total FROM fw_v_users WHERE 1=1";
+                $countParams = [];
+            }
             
-            if ($status && in_array($status, ['invited', 'registered'])) {
-                $countSql .= " AND invitation_status = ?";
-                $countParams[] = $status;
+            // Применяем те же фильтры для подсчета
+            if ($id && is_numeric($id)) {
+                $countSql .= " AND id = ?";
+                $countParams[] = (int)$id;
+            }
+            
+            if ($invitationStatus) {
+                if (in_array($invitationStatus, ['invited', 'registered', 'expired'])) {
+                    $countSql .= " AND invitation_status = ?";
+                    $countParams[] = $invitationStatus;
+                } else {
+                    // Для невалидных статусов возвращаем пустой результат
+                    $countSql .= " AND 1=0";
+                }
+            }
+            
+            if ($status !== null && in_array($status, [0, 1, '0', '1'])) {
+                $countSql .= " AND status = ?";
+                $countParams[] = (int)$status;
+            }
+            
+            if ($roleId && is_numeric($roleId)) {
+                $countSql .= " AND role_id = ?";
+                $countParams[] = (int)$roleId;
+            }
+            
+            if ($roleCode) {
+                $countSql .= " AND role_code = ?";
+                $countParams[] = $roleCode;
+            }
+            
+            if ($jobTitle) {
+                $countSql .= " AND job_title LIKE ?";
+                $countParams[] = "%{$jobTitle}%";
+            }
+            
+            if ($archived !== null) {
+                if ($archived === 'true' || $archived === true) {
+                    $countSql .= " AND archived_at IS NOT NULL";
+                } else {
+                    $countSql .= " AND archived_at IS NULL";
+                }
+            }
+            
+            if ($twoFactor !== null) {
+                if ($twoFactor === 'true' || $twoFactor === true) {
+                    $countSql .= " AND two_factor_enabled = 1";
+                } else {
+                    $countSql .= " AND two_factor_enabled = 0";
+                }
             }
             
             if ($search) {
-                $countSql .= " AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ?)";
+                $countSql .= " AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ? OR phone LIKE ? OR job_title LIKE ?)";
                 $searchTerm = "%{$search}%";
+                $countParams[] = $searchTerm;
+                $countParams[] = $searchTerm;
                 $countParams[] = $searchTerm;
                 $countParams[] = $searchTerm;
                 $countParams[] = $searchTerm;
@@ -196,21 +448,26 @@ class WorkerController
             $total = $countResult->fetchOne();
 
             // Добавляем сортировку и пагинацию
-            $sql .= " ORDER BY created_at DESC LIMIT {$limit} OFFSET {$offset}";
+            // Сортировка
+            $allowedSortFields = ['id', 'email', 'first_name', 'last_name', 'created_at', 'updated_at', 'last_login', 'role_name', 'job_title'];
+            $sortBy = in_array($sortBy, $allowedSortFields) ? $sortBy : 'created_at';
+            $sortOrder = strtoupper($sortOrder) === 'ASC' ? 'ASC' : 'DESC';
+            
+            $sql .= " ORDER BY {$sortBy} {$sortOrder} LIMIT {$limit} OFFSET {$offset}";
 
             $result = $connection->executeQuery($sql, $params);
             $workers = $result->fetchAllAssociative();
 
-            // Форматируем данные - возвращаем все поля
+            // Форматируем данные - возвращаем все поля из fw_v_users
             $formattedWorkers = array_map(function($worker) {
                 return [
                     'id' => (int)$worker['id'],
                     'email' => $worker['email'],
-                    'password_hash' => $worker['password_hash'], // Включаем хеш пароля
+                    //'password_hash' => $worker['password_hash'],
                     'first_name' => $worker['first_name'],
                     'last_name' => $worker['last_name'],
                     'phone' => $worker['phone'],
-                    '' => $worker[''],
+                    'role_id' => $worker['role_id'] ? (int)$worker['role_id'] : null,
                     'job_title' => $worker['job_title'],
                     'status' => (int)$worker['status'],
                     'status_reason' => $worker['status_reason'],
@@ -218,22 +475,40 @@ class WorkerController
                     'additional_info' => $worker['additional_info'],
                     'avatar_url' => $worker['avatar_url'],
                     'two_factor_enabled' => (bool)$worker['two_factor_enabled'],
-                    'two_factor_secret' => $worker['two_factor_secret'],
+                    //'two_factor_secret' => $worker['two_factor_secret'],
                     'last_login' => $worker['last_login'],
+                    'status_changed_at' => $worker['status_changed_at'],
+                    'status_end_at' => $worker['status_end_at'],
+                    'dob' => $worker['dob'],
+                    'gender' => $worker['gender'],
+                    'nationality' => $worker['nationality'],
+                    'country_of_origin' => $worker['country_of_origin'],
+                    'workforce_group' => $worker['workforce_group'],
+                    'emergency' => $this->getEmergencyData($worker['id']),
                     'created_at' => $worker['created_at'],
                     'updated_at' => $worker['updated_at'],
                     'invitation_status' => $worker['invitation_status'],
-                    'invitation_token' => $worker['invitation_token'],
+                    //'invitation_token' => $worker['invitation_token'],
                     'invitation_sent_at' => $worker['invitation_sent_at'],
                     'invitation_expires_at' => $worker['invitation_expires_at'],
                     'invited_by' => $worker['invited_by'] ? (int)$worker['invited_by'] : null,
                     'registration_completed_at' => $worker['registration_completed_at'],
                     'invitation_attempts' => (int)$worker['invitation_attempts'],
-                    'last_reminder_sent_at' => $worker['last_reminder_sent_at']
+                    'last_reminder_sent_at' => $worker['last_reminder_sent_at'],
+                    'archived_at' => $worker['archived_at'],
+                    'role_code' => $worker['role_code'],
+                    'role_name' => $worker['role_name'],
+                    'role_category' => $worker['role_category'],
+                    'role_description' => $worker['role_description'],
+                    // Поля проекта (если указан project_id)
+                    'role_in_project' => $worker['role_in_project'] ?? null,
+                    'assigned_at' => $worker['assigned_at'] ?? null
                 ];
             }, $workers);
 
             $lastPage = ceil($total / $limit);
+            $hasNextPage = $page < $lastPage;
+            $hasPrevPage = $page > 1;
 
             Flight::json([
                 'error_code' => 0,
@@ -245,7 +520,13 @@ class WorkerController
                         'current_page' => $page,
                         'per_page' => $limit,
                         'total' => (int)$total,
-                        'last_page' => $lastPage
+                        'last_page' => $lastPage,
+                        'from' => $total > 0 ? $offset + 1 : 0,
+                        'to' => min($offset + $limit, $total),
+                        'has_next_page' => $hasNextPage,
+                        'has_prev_page' => $hasPrevPage,
+                        'next_page' => $hasNextPage ? $page + 1 : null,
+                        'prev_page' => $hasPrevPage ? $page - 1 : null
                     ]
                 ]
             ]);
@@ -656,4 +937,30 @@ class WorkerController
         // Перемешиваем символы
         return str_shuffle($password);
     }
+
+    /**
+     * Get emergency data for user
+     */
+    private function getEmergencyData(int $userId): ?array
+    {
+        try {
+            $connection = Database::getConnection();
+            $sql = "SELECT emergency FROM fw_v_users WHERE id = ?";
+            $result = $connection->executeQuery($sql, [$userId]);
+            $row = $result->fetchAssociative();
+            
+            if ($row['emergency']) {
+                return json_decode($row['emergency'], true) ?: null;
+            }
+            
+            return null;
+        } catch (Exception $e) {
+            $this->logger->error('Error fetching emergency data', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
 }

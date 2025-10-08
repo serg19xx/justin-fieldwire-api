@@ -178,6 +178,46 @@ use OpenApi\Annotations as OA;
          *     @OA\Property(property="policy_number", type="string", example="BC123456789"),
          *     @OA\Property(property="insurance_emergency_contact", type="string", example="(555) 800-HELP")
          * )
+         * 
+         * @OA\Schema(
+         *     schema="ProfessionalData",
+         *     type="object",
+         *     @OA\Property(property="work_experience", type="array", @OA\Items(
+         *         @OA\Property(property="company", type="string", example="ABC Construction"),
+         *         @OA\Property(property="position", type="string", example="Senior Project Manager"),
+         *         @OA\Property(property="start_date", type="string", format="date", example="2020-01-15"),
+         *         @OA\Property(property="end_date", type="string", format="date", example="2023-12-31"),
+         *         @OA\Property(property="description", type="string", example="Managed large construction projects")
+         *     )),
+         *     @OA\Property(property="education", type="array", @OA\Items(
+         *         @OA\Property(property="institution", type="string", example="University of Toronto"),
+         *         @OA\Property(property="degree", type="string", example="Bachelor of Engineering"),
+         *         @OA\Property(property="field", type="string", example="Civil Engineering"),
+         *         @OA\Property(property="graduation_year", type="integer", example=2018)
+         *     )),
+         *     @OA\Property(property="certifications", type="array", @OA\Items(
+         *         @OA\Property(property="name", type="string", example="PMP Certification"),
+         *         @OA\Property(property="issuer", type="string", example="PMI"),
+         *         @OA\Property(property="issue_date", type="string", format="date", example="2022-06-15"),
+         *         @OA\Property(property="expiry_date", type="string", format="date", example="2025-06-15")
+         *     )),
+         *     @OA\Property(property="safety_certifications", type="array", @OA\Items(
+         *         @OA\Property(property="name", type="string", example="OSHA 30-Hour Construction"),
+         *         @OA\Property(property="issuer", type="string", example="OSHA"),
+         *         @OA\Property(property="issue_date", type="string", format="date", example="2023-01-10"),
+         *         @OA\Property(property="expiry_date", type="string", format="date", example="2026-01-10")
+         *     )),
+         *     @OA\Property(property="skills", type="array", @OA\Items(
+         *         @OA\Property(property="category", type="string", example="Technical"),
+         *         @OA\Property(property="skills", type="array", @OA\Items(type="string"), example={"Project Management", "AutoCAD", "Budget Planning"})
+         *     )),
+         *     @OA\Property(property="equipment", type="array", @OA\Items(
+         *         @OA\Property(property="name", type="string", example="Personal Protective Equipment"),
+         *         @OA\Property(property="type", type="string", example="Safety"),
+         *         @OA\Property(property="certification_required", type="boolean", example=true)
+         *     )),
+         *     @OA\Property(property="professional_summary", type="string", example="Experienced construction project manager with 10+ years in the industry")
+         * )
          */
 class OpenApiSpec
 {

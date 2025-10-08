@@ -415,6 +415,161 @@
                 }
             }
         },
+        "/api/v1/auth/logout": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "User logout",
+                "description": "Logout user and invalidate session",
+                "operationId": "bef2185b2c23f4032c00e38a015d290a",
+                "responses": {
+                    "200": {
+                        "description": "Logout successful",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Logout successful"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/auth/check-session": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Check session validity",
+                "description": "Check if user session is still valid and update last activity",
+                "operationId": "7ea9f6d2909f93214515da2bd86c4199",
+                "responses": {
+                    "200": {
+                        "description": "Session is valid",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Session is valid"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "user": {
+                                                    "type": "object"
+                                                },
+                                                "session_valid": {
+                                                    "type": "boolean",
+                                                    "example": true
+                                                },
+                                                "last_activity": {
+                                                    "type": "string",
+                                                    "example": "2024-01-15T10:30:00Z"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Session expired or invalid",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Session expired"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/database/tables": {
             "get": {
                 "tags": [
@@ -473,6 +628,502 @@
                         }
                     }
                 }
+            }
+        },
+        "/api/v1/event-logs": {
+            "get": {
+                "tags": [
+                    "Event Logs"
+                ],
+                "summary": "Get event logs with filtering",
+                "operationId": "f7a0591a4ecb7bd09611fd8f2a4dddf8",
+                "parameters": [
+                    {
+                        "name": "entity_type",
+                        "in": "query",
+                        "description": "Filter by entity type",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "example": "task"
+                        }
+                    },
+                    {
+                        "name": "entity_id",
+                        "in": "query",
+                        "description": "Filter by entity ID",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "example": 123
+                        }
+                    },
+                    {
+                        "name": "event_type",
+                        "in": "query",
+                        "description": "Filter by event type",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "example": "STATUS_CHANGED"
+                        }
+                    },
+                    {
+                        "name": "severity",
+                        "in": "query",
+                        "description": "Filter by severity",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "critical",
+                                "important"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "actor_type",
+                        "in": "query",
+                        "description": "Filter by actor type",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "user",
+                                "system",
+                                "api"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "date_from",
+                        "in": "query",
+                        "description": "Filter from date (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date",
+                            "example": "2025-01-01"
+                        }
+                    },
+                    {
+                        "name": "date_to",
+                        "in": "query",
+                        "description": "Filter to date (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date",
+                            "example": "2025-12-31"
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Number of records to return",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 50,
+                            "maximum": 100,
+                            "minimum": 1
+                        }
+                    },
+                    {
+                        "name": "offset",
+                        "in": "query",
+                        "description": "Number of records to skip",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 0,
+                            "minimum": 0
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Event logs retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Event logs retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "logs": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "$ref": "#/components/schemas/EventLog"
+                                                    }
+                                                },
+                                                "total": {
+                                                    "type": "integer",
+                                                    "example": 150
+                                                },
+                                                "limit": {
+                                                    "type": "integer",
+                                                    "example": 50
+                                                },
+                                                "offset": {
+                                                    "type": "integer",
+                                                    "example": 0
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing token"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Event Logs"
+                ],
+                "summary": "Create a new event log entry",
+                "operationId": "bb38f71aa4a4fa8db6222ec23bf2a97a",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "entity_type": {
+                                        "type": "string",
+                                        "example": "task"
+                                    },
+                                    "entity_id": {
+                                        "type": "integer",
+                                        "example": 123
+                                    },
+                                    "event_type": {
+                                        "type": "string",
+                                        "example": "STATUS_CHANGED"
+                                    },
+                                    "before_data": {
+                                        "description": "Data before change",
+                                        "type": "object"
+                                    },
+                                    "after_data": {
+                                        "description": "Data after change",
+                                        "type": "object"
+                                    },
+                                    "changed_fields": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string"
+                                        },
+                                        "example": [
+                                            "status",
+                                            "updated_at"
+                                        ]
+                                    },
+                                    "comment": {
+                                        "type": "string",
+                                        "example": "Status changed from pending to completed"
+                                    },
+                                    "actor_type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "user",
+                                            "system",
+                                            "api"
+                                        ],
+                                        "example": "user"
+                                    },
+                                    "actor_id": {
+                                        "type": "integer",
+                                        "example": 456
+                                    },
+                                    "entity_version": {
+                                        "type": "integer",
+                                        "example": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Event log created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Event log created successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "event_log_id": {
+                                                    "type": "integer",
+                                                    "example": 789
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request data"
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing token"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/event-logs/{id}": {
+            "get": {
+                "tags": [
+                    "Event Logs"
+                ],
+                "summary": "Get specific event log by ID",
+                "operationId": "c50e3b731158b19ecbc6f79a9c27426e",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Event log ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 123
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Event log retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Event log retrieved successfully"
+                                        },
+                                        "data": {
+                                            "$ref": "#/components/schemas/EventLog"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Event log not found"
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing token"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/event-logs/outbox/pending": {
+            "get": {
+                "tags": [
+                    "Event Logs"
+                ],
+                "summary": "Get pending outbox events for processing",
+                "operationId": "3435781a3e37603cecf700cef2a13ad4",
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Number of events to return",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 100,
+                            "maximum": 100,
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Pending outbox events retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Pending outbox events retrieved successfully"
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/components/schemas/OutboxEvent"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing token"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/event-logs/outbox/{id}/status": {
+            "put": {
+                "tags": [
+                    "Event Logs"
+                ],
+                "summary": "Update outbox event status",
+                "operationId": "4deae61ca0c062812a5ec49d69a78130",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Outbox event ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer",
+                            "example": 123
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "status": {
+                                        "type": "string",
+                                        "enum": [
+                                            "sent",
+                                            "error"
+                                        ],
+                                        "example": "sent"
+                                    },
+                                    "error": {
+                                        "description": "Error message if status is 'error'",
+                                        "type": "string",
+                                        "example": "Connection timeout"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Outbox event status updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Outbox event status updated successfully"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request data"
+                    },
+                    "401": {
+                        "description": "Unauthorized - Invalid or missing token"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
             }
         },
         "/api/v1/health": {
@@ -589,6 +1240,315 @@
                                         },
                                         "message": {
                                             "type": "string"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/n8n/webhook/manual-trigger": {
+            "post": {
+                "tags": [
+                    "N8N Integration"
+                ],
+                "summary": "Manual trigger webhook for n8n workflows",
+                "operationId": "04e09a8e53bd0b8adace693896e91072",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "trigger_type": {
+                                        "description": "Type of manual trigger",
+                                        "type": "string",
+                                        "example": "button_click"
+                                    },
+                                    "entity_type": {
+                                        "description": "Entity type affected",
+                                        "type": "string",
+                                        "example": "task"
+                                    },
+                                    "entity_id": {
+                                        "description": "Entity ID",
+                                        "type": "integer",
+                                        "example": 123
+                                    },
+                                    "action": {
+                                        "description": "Action performed",
+                                        "type": "string",
+                                        "example": "status_change"
+                                    },
+                                    "data": {
+                                        "description": "Additional data for the trigger",
+                                        "type": "object"
+                                    },
+                                    "user_id": {
+                                        "description": "User who triggered the action",
+                                        "type": "integer",
+                                        "example": 456
+                                    },
+                                    "workflow_id": {
+                                        "description": "N8N workflow ID to trigger",
+                                        "type": "string",
+                                        "example": "workflow_123"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Webhook processed successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Webhook processed successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "event_log_id": {
+                                                    "type": "integer",
+                                                    "example": 789
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request data"
+                    }
+                }
+            }
+        },
+        "/api/v1/n8n/scheduled/data-collection": {
+            "get": {
+                "tags": [
+                    "N8N Integration"
+                ],
+                "summary": "Scheduled data collection for n8n workflows",
+                "operationId": "0951e8fa94d8f9c0260d4499ce732582",
+                "parameters": [
+                    {
+                        "name": "report_type",
+                        "in": "query",
+                        "description": "Type of report to generate",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "daily_summary",
+                                "weekly_report",
+                                "monthly_report",
+                                "task_status",
+                                "project_progress",
+                                "user_activity"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "date_from",
+                        "in": "query",
+                        "description": "Start date for data collection (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date",
+                            "example": "2025-09-01"
+                        }
+                    },
+                    {
+                        "name": "date_to",
+                        "in": "query",
+                        "description": "End date for data collection (YYYY-MM-DD)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date",
+                            "example": "2025-09-10"
+                        }
+                    },
+                    {
+                        "name": "manager_level",
+                        "in": "query",
+                        "description": "Manager level for report (team, department, company)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "team",
+                                "department",
+                                "company"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "format",
+                        "in": "query",
+                        "description": "Output format",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "json",
+                            "enum": [
+                                "json",
+                                "csv",
+                                "pdf"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Data collected successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Data collected successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "report_type": {
+                                                    "type": "string",
+                                                    "example": "daily_summary"
+                                                },
+                                                "date_range": {
+                                                    "type": "object"
+                                                },
+                                                "summary": {
+                                                    "type": "object"
+                                                },
+                                                "details": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "generated_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid parameters"
+                    }
+                }
+            }
+        },
+        "/api/v1/n8n/workflow/status": {
+            "get": {
+                "tags": [
+                    "N8N Integration"
+                ],
+                "summary": "Get workflow execution status",
+                "operationId": "aefc0bcce9ed635b949ff1bb7506dd3d",
+                "parameters": [
+                    {
+                        "name": "correlation_id",
+                        "in": "query",
+                        "description": "Correlation ID to track workflow execution",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "example": "550e8400-e29b-41d4-a716-446655440000"
+                        }
+                    },
+                    {
+                        "name": "workflow_id",
+                        "in": "query",
+                        "description": "N8N workflow ID",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "example": "workflow_123"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Workflow status retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Workflow status retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "workflow_id": {
+                                                    "type": "string"
+                                                },
+                                                "correlation_id": {
+                                                    "type": "string"
+                                                },
+                                                "status": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                        "pending",
+                                                        "running",
+                                                        "completed",
+                                                        "failed"
+                                                    ]
+                                                },
+                                                "events": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
                                         }
                                     },
                                     "type": "object"
@@ -851,6 +1811,877 @@
                 ]
             }
         },
+        "/api/v1/plan/folders/tree": {
+            "get": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Get folders tree",
+                "description": "\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0434\u0435\u0440\u0435\u0432\u043e \u043f\u0430\u043f\u043e\u043a (\u043b\u0435\u0432\u043e\u0435 \u043c\u0435\u043d\u044e)\nGET /api/v1/plan/folders/tree?project_id=10",
+                "operationId": "5792ac538c824cf725d03b67b74837fc",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Tree returned with folders and files",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "array",
+                                    "items": {
+                                        "properties": {
+                                            "id": {
+                                                "type": "integer"
+                                            },
+                                            "name": {
+                                                "type": "string"
+                                            },
+                                            "parent_id": {
+                                                "type": "integer",
+                                                "nullable": true
+                                            },
+                                            "created_at": {
+                                                "type": "string"
+                                            },
+                                            "updated_at": {
+                                                "type": "string"
+                                            },
+                                            "children": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "files": {
+                                                "type": "array",
+                                                "items": {
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "integer"
+                                                        },
+                                                        "file_name": {
+                                                            "type": "string"
+                                                        },
+                                                        "original_name": {
+                                                            "type": "string"
+                                                        },
+                                                        "file_path": {
+                                                            "type": "string"
+                                                        },
+                                                        "folder_id": {
+                                                            "type": "integer"
+                                                        },
+                                                        "file_size": {
+                                                            "type": "integer"
+                                                        },
+                                                        "mime_type": {
+                                                            "type": "string"
+                                                        },
+                                                        "category": {
+                                                            "type": "string"
+                                                        },
+                                                        "description": {
+                                                            "type": "string"
+                                                        },
+                                                        "version": {
+                                                            "type": "string"
+                                                        },
+                                                        "uploaded_by": {
+                                                            "type": "integer"
+                                                        },
+                                                        "uploaded_at": {
+                                                            "type": "string"
+                                                        },
+                                                        "updated_at": {
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                }
+                                            }
+                                        },
+                                        "type": "object"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/folders/{folderId}/content": {
+            "get": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Get folder content",
+                "description": "\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0441\u043e\u0434\u0435\u0440\u0436\u0438\u043c\u043e\u0435 \u043f\u0430\u043f\u043a\u0438 (\u043f\u0440\u0430\u0432\u0430\u044f \u043f\u0430\u043d\u0435\u043b\u044c)\nGET /api/v1/plan/folders/{folderId}/content",
+                "operationId": "e8182f5c4e26e79f9cb7120684837034",
+                "parameters": [
+                    {
+                        "name": "folderId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Content returned",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/folders": {
+            "post": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Create folder",
+                "description": "\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u043f\u0430\u043f\u043a\u0443\nPOST /api/v1/plan/folders",
+                "operationId": "3a81be09c5dc4f95833b48ad5d52ff29",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "name",
+                                    "project_id"
+                                ],
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "\u041d\u0430\u0437\u0432\u0430\u043d\u0438\u0435 \u043f\u0430\u043f\u043a\u0438"
+                                    },
+                                    "project_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "parent_id": {
+                                        "description": "Optional, null for root folder",
+                                        "type": "integer",
+                                        "example": 2
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Folder created",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/folders/{folderId}": {
+            "delete": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Delete folder recursively",
+                "description": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u0430\u043f\u043a\u0443 \u0440\u0435\u043a\u0443\u0440\u0441\u0438\u0432\u043d\u043e (\u0441\u043e \u0432\u0441\u0435\u043c \u0441\u043e\u0434\u0435\u0440\u0436\u0438\u043c\u044b\u043c)\nDELETE /api/v1/plan/folders/{folderId}",
+                "operationId": "6c670300b0931c120b2a1d7c3ca22512",
+                "parameters": [
+                    {
+                        "name": "folderId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Folder and all contents deleted successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Folder not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/files/upload": {
+            "post": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Upload file",
+                "description": "\u0417\u0430\u0433\u0440\u0443\u0437\u0438\u0442\u044c \u0444\u0430\u0439\u043b\nPOST /api/v1/plan/files/upload",
+                "operationId": "e69b51e43eac1c05d20b98a15cdcd8b4",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "required": [
+                                    "file",
+                                    "folder_id"
+                                ],
+                                "properties": {
+                                    "file": {
+                                        "type": "string",
+                                        "format": "binary"
+                                    },
+                                    "folder_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "fileName": {
+                                        "type": "string",
+                                        "example": "document.pdf"
+                                    },
+                                    "description": {
+                                        "type": "string",
+                                        "example": "Project document"
+                                    },
+                                    "category": {
+                                        "type": "string",
+                                        "example": "pdf"
+                                    },
+                                    "version": {
+                                        "type": "string",
+                                        "example": "1.0"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "File uploaded successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/files/{fileId}": {
+            "delete": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Delete file",
+                "description": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0444\u0430\u0439\u043b\nDELETE /api/v1/plan/files/{fileId}",
+                "operationId": "b9aae6f5141a7cc7e4429fb1ca09aace",
+                "parameters": [
+                    {
+                        "name": "fileId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File deleted successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "File not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/files/{fileId}/download": {
+            "get": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Download or preview file",
+                "description": "\u0421\u043a\u0430\u0447\u0430\u0442\u044c \u0444\u0430\u0439\u043b \u0438\u043b\u0438 \u043f\u043e\u043a\u0430\u0437\u0430\u0442\u044c \u0432 \u0431\u0440\u0430\u0443\u0437\u0435\u0440\u0435\nGET /api/v1/plan/files/{fileId}/download\nGET /api/v1/plan/files/{fileId}/download?action=preview",
+                "operationId": "0c90fe130b23e7cdef5f596b93168971",
+                "parameters": [
+                    {
+                        "name": "fileId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "action",
+                        "in": "query",
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "preview"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "File content",
+                        "content": {
+                            "application/octet-stream": {}
+                        }
+                    },
+                    "404": {
+                        "description": "File not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/files/{fileId}/move": {
+            "put": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Move file to different folder",
+                "description": "Move file to different folder\nPUT /api/v1/plan/files/{fileId}/move",
+                "operationId": "68ef5a3e1d0f8010f2d734574edd8815",
+                "parameters": [
+                    {
+                        "name": "fileId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "folder_id": {
+                                        "type": "integer",
+                                        "example": 123
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "File moved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "description": "File or folder not found"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "409": {
+                        "description": "Conflict"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/files/{fileId}/copy": {
+            "post": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Copy file to different folder",
+                "description": "Copy file to different folder\nPOST /api/v1/plan/files/{fileId}/copy",
+                "operationId": "7ea0a802e0c61db52348a68517c0e4f3",
+                "parameters": [
+                    {
+                        "name": "fileId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "folder_id": {
+                                        "type": "integer",
+                                        "example": 123
+                                    },
+                                    "file_name": {
+                                        "type": "string",
+                                        "example": "document_copy.pdf"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "File copied successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "description": "File or folder not found"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "409": {
+                        "description": "Conflict"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/folders/{folderId}/move": {
+            "put": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Move folder to different parent",
+                "description": "Move folder to different parent\nPUT /api/v1/plan/folders/{folderId}/move",
+                "operationId": "2eb250f15bbe7a3a22bc9d166fc2748d",
+                "parameters": [
+                    {
+                        "name": "folderId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "parent_id": {
+                                        "description": "null for root level",
+                                        "type": "integer",
+                                        "example": 456
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Folder moved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "description": "Folder not found"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "409": {
+                        "description": "Conflict"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/folders/{folderId}/copy": {
+            "post": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Copy folder to different parent",
+                "description": "Copy folder to different parent\nPOST /api/v1/plan/folders/{folderId}/copy",
+                "operationId": "d056ad9d312d84c40f08c5dd83da29e6",
+                "parameters": [
+                    {
+                        "name": "folderId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "parent_id": {
+                                        "description": "null for root level",
+                                        "type": "integer",
+                                        "example": 456
+                                    },
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Project Documents Copy"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Folder copied successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "description": "Folder not found"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "409": {
+                        "description": "Conflict"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/files/{fileId}/rename": {
+            "put": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Rename a file",
+                "description": "Rename file\nPUT /api/v1/plan/files/{fileId}/rename",
+                "operationId": "7e0d5190c7279821d33e77a14d64db4a",
+                "parameters": [
+                    {
+                        "name": "fileId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "new_name": {
+                                        "type": "string",
+                                        "example": "new_filename.pdf"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "File renamed successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "description": "File not found"
+                    },
+                    "409": {
+                        "description": "Conflict"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/folders/{folderId}/rename": {
+            "put": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Rename a folder",
+                "description": "Rename folder\nPUT /api/v1/plan/folders/{folderId}/rename",
+                "operationId": "0680e8c33b065b5d2d3c31372ea9cd99",
+                "parameters": [
+                    {
+                        "name": "folderId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "new_name": {
+                                        "type": "string",
+                                        "example": "New Folder Name"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Folder renamed successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "description": "Folder not found"
+                    },
+                    "409": {
+                        "description": "Conflict"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/plan/files/{fileId}/description": {
+            "put": {
+                "tags": [
+                    "Plans"
+                ],
+                "summary": "Update file description",
+                "description": "Update file description\nPUT /api/v1/plan/files/{fileId}/description",
+                "operationId": "f2694303ad6e1fc1f8c9aebc3230efe2",
+                "parameters": [
+                    {
+                        "name": "fileId",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "description": {
+                                        "type": "string",
+                                        "example": "Updated file description"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "File description updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request"
+                    },
+                    "404": {
+                        "description": "File not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/profile": {
             "get": {
                 "tags": [
@@ -905,10 +2736,6 @@
                                                         "phone": {
                                                             "type": "string",
                                                             "example": "+1234567890"
-                                                        },
-                                                        "user_type": {
-                                                            "type": "string",
-                                                            "example": "contractor"
                                                         },
                                                         "job_title": {
                                                             "type": "string",
@@ -2220,7 +4047,7 @@
                                                                 "type": "string",
                                                                 "example": "mike@example.com"
                                                             },
-                                                            "user_type": {
+                                                            "": {
                                                                 "type": "string",
                                                                 "example": "Project Manager"
                                                             },
@@ -2374,6 +4201,105 @@
                     },
                     "409": {
                         "description": "User already in team"
+                    }
+                }
+            }
+        },
+        "/api/v1/projects/{project_id}/team/available-users": {
+            "get": {
+                "tags": [
+                    "Project Team"
+                ],
+                "summary": "Get available users for team",
+                "description": "Get list of users that can be added to project team (excludes System Administrators and Project Managers)",
+                "operationId": "ddd0f87e8aeaf0a6a5949a383fb07505",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "search",
+                        "in": "query",
+                        "description": "Search term for user name or email",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Available users retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Available users retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "users": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "integer",
+                                                                "example": 45
+                                                            },
+                                                            "name": {
+                                                                "type": "string",
+                                                                "example": "John Smith"
+                                                            },
+                                                            "email": {
+                                                                "type": "string",
+                                                                "example": "architect1@example.com"
+                                                            },
+                                                            "": {
+                                                                "type": "string",
+                                                                "example": "Architect"
+                                                            },
+                                                            "job_title": {
+                                                                "type": "string",
+                                                                "example": "Senior Architect"
+                                                            },
+                                                            "status": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Project not found"
                     }
                 }
             }
@@ -2606,7 +4532,7 @@
                                                             "type": "string",
                                                             "example": "Doe"
                                                         },
-                                                        "user_type": {
+                                                        "": {
                                                             "type": "string",
                                                             "example": "Employee"
                                                         },
@@ -2736,7 +4662,7 @@
                                                             "type": "string",
                                                             "example": "Doe"
                                                         },
-                                                        "user_type": {
+                                                        "": {
                                                             "type": "string",
                                                             "example": "Employee"
                                                         },
@@ -3752,6 +5678,95 @@
                 ]
             }
         },
+        "/api/v1/projects/{project_id}/tasks/check-bounds": {
+            "get": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "Check task bounds against project",
+                "description": "Check if task dates are within project bounds",
+                "operationId": "68f53f42e66157c30c5fdb36713759dd",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "start_planned",
+                        "in": "query",
+                        "description": "Task start date",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "end_planned",
+                        "in": "query",
+                        "description": "Task end date",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Bounds check result",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task dates are within project bounds"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "valid": {
+                                                    "type": "boolean",
+                                                    "example": true
+                                                },
+                                                "project_start": {
+                                                    "type": "string",
+                                                    "format": "date"
+                                                },
+                                                "project_end": {
+                                                    "type": "string",
+                                                    "format": "date"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/2fa/send-code": {
             "post": {
                 "tags": [
@@ -4031,25 +6046,146 @@
                         }
                     },
                     {
-                        "name": "status",
+                        "name": "id",
                         "in": "query",
-                        "description": "Filter by invitation status: invited, registered",
+                        "description": "Filter by specific user ID",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "project_id",
+                        "in": "query",
+                        "description": "Filter by project ID - show only team members of this project",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "prj_mngr_id",
+                        "in": "query",
+                        "description": "Filter by project manager ID - show only users who manage projects",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "invitation_status",
+                        "in": "query",
+                        "description": "Filter by invitation status: invited, registered, expired",
                         "required": false,
                         "schema": {
                             "type": "string",
                             "enum": [
                                 "invited",
-                                "registered"
+                                "registered",
+                                "expired"
                             ]
+                        }
+                    },
+                    {
+                        "name": "status",
+                        "in": "query",
+                        "description": "Filter by user status: 1 (active), 0 (inactive)",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "enum": [
+                                0,
+                                1
+                            ]
+                        }
+                    },
+                    {
+                        "name": "role_id",
+                        "in": "query",
+                        "description": "Filter by role ID",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "role_code",
+                        "in": "query",
+                        "description": "Filter by role code: admin, contractor, architect, project_manager",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "job_title",
+                        "in": "query",
+                        "description": "Filter by job title (partial match)",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "name": "archived",
+                        "in": "query",
+                        "description": "Filter by archived status: true, false",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean"
+                        }
+                    },
+                    {
+                        "name": "two_factor",
+                        "in": "query",
+                        "description": "Filter by 2FA status: true, false",
+                        "required": false,
+                        "schema": {
+                            "type": "boolean"
                         }
                     },
                     {
                         "name": "search",
                         "in": "query",
-                        "description": "Search by name or email",
+                        "description": "Search by name, email, phone, or job title",
                         "required": false,
                         "schema": {
                             "type": "string"
+                        }
+                    },
+                    {
+                        "name": "sort_by",
+                        "in": "query",
+                        "description": "Sort by field: id, email, first_name, last_name, created_at, updated_at, last_login, role_name, job_title",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "created_at",
+                            "enum": [
+                                "id",
+                                "email",
+                                "first_name",
+                                "last_name",
+                                "created_at",
+                                "updated_at",
+                                "last_login",
+                                "role_name",
+                                "job_title"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "sort_order",
+                        "in": "query",
+                        "description": "Sort order: ASC, DESC",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "default": "DESC",
+                            "enum": [
+                                "ASC",
+                                "DESC"
+                            ]
                         }
                     }
                 ],
@@ -4102,9 +6238,9 @@
                                                                 "type": "string",
                                                                 "example": "+1234567890"
                                                             },
-                                                            "user_type": {
-                                                                "type": "string",
-                                                                "example": "Employee"
+                                                            "role_id": {
+                                                                "type": "integer",
+                                                                "example": 3
                                                             },
                                                             "job_title": {
                                                                 "type": "string",
@@ -4185,6 +6321,27 @@
                                                                 "type": "string",
                                                                 "format": "date-time",
                                                                 "nullable": true
+                                                            },
+                                                            "archived_at": {
+                                                                "type": "string",
+                                                                "format": "date-time",
+                                                                "nullable": true
+                                                            },
+                                                            "role_code": {
+                                                                "type": "string",
+                                                                "example": "contractor"
+                                                            },
+                                                            "role_name": {
+                                                                "type": "string",
+                                                                "example": "Contractor"
+                                                            },
+                                                            "role_category": {
+                                                                "type": "string",
+                                                                "example": "task"
+                                                            },
+                                                            "role_description": {
+                                                                "type": "string",
+                                                                "nullable": true
                                                             }
                                                         },
                                                         "type": "object"
@@ -4207,6 +6364,32 @@
                                                         "last_page": {
                                                             "type": "integer",
                                                             "example": 5
+                                                        },
+                                                        "from": {
+                                                            "type": "integer",
+                                                            "example": 1
+                                                        },
+                                                        "to": {
+                                                            "type": "integer",
+                                                            "example": 20
+                                                        },
+                                                        "has_next_page": {
+                                                            "type": "boolean",
+                                                            "example": true
+                                                        },
+                                                        "has_prev_page": {
+                                                            "type": "boolean",
+                                                            "example": false
+                                                        },
+                                                        "next_page": {
+                                                            "type": "integer",
+                                                            "example": 2,
+                                                            "nullable": true
+                                                        },
+                                                        "prev_page": {
+                                                            "type": "integer",
+                                                            "example": null,
+                                                            "nullable": true
                                                         }
                                                     },
                                                     "type": "object"
@@ -4285,7 +6468,7 @@
                                         "type": "string",
                                         "example": "Doe"
                                     },
-                                    "user_type": {
+                                    "": {
                                         "type": "string",
                                         "example": "Employee"
                                     },
@@ -4494,12 +6677,24 @@
             "description": "Project team management endpoints"
         },
         {
+            "name": "Event Logs",
+            "description": "Event logging and audit trail management endpoints"
+        },
+        {
+            "name": "N8N Integration",
+            "description": "Endpoints for n8n workflow integration"
+        },
+        {
             "name": "Database",
             "description": "Database operations"
         },
         {
             "name": "Patients",
             "description": "Patient management endpoints"
+        },
+        {
+            "name": "Plans",
+            "description": "Folders and files management for plans"
         },
         {
             "name": "Registration",

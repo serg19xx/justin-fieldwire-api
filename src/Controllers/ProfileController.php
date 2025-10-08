@@ -658,9 +658,9 @@ class ProfileController
     }
 
     /**
-     * Enable 2FA for current user
+     * Change user password from profile settings
      */
-    public function enable2FA(): void
+    public function changePassword(): void
     {
         // Проверка токена
         if (!$this->checkAuth()) {
@@ -673,132 +673,87 @@ class ProfileController
             $requestBody = Flight::request()->getBody();
             $data = json_decode($requestBody, true);
 
+            $this->logger->info('Change password request', [
+                'user_id' => $user['id']
+            ]);
+
             // Validate input
-            if (!isset($data['delivery_method']) || !in_array($data['delivery_method'], ['sms', 'email'])) {
+            if (!isset($data['current_password']) || !isset($data['new_password'])) {
                 Flight::json([
-                    'error_code' => 400,
                     'status' => 'error',
-                    'message' => 'Invalid delivery method. Use "sms" or "email".',
-                    'data' => null
+                    'message' => 'Current password and new password are required'
                 ], 400);
                 return;
             }
 
-            $deliveryMethod = $data['delivery_method'];
+            $currentPassword = $data['current_password'];
+            $newPassword = $data['new_password'];
 
-            // Check if user has required contact method
-            if ($deliveryMethod === 'sms' && empty($user['phone'])) {
+            // Validate new password strength
+            if (strlen($newPassword) < 8) {
                 Flight::json([
-                    'error_code' => 400,
                     'status' => 'error',
-                    'message' => 'Phone number required for SMS 2FA',
-                    'data' => null
+                    'message' => 'New password must be at least 8 characters long'
                 ], 400);
                 return;
             }
 
-            // Generate verification code
-            $code = $this->twilioService->generateVerificationCode();
-            $expiresAt = date('Y-m-d H:i:s', time() + 600); // 10 minutes
+            $connection = Database::getConnection();
 
-            // Save verification code to database
-            $this->saveVerificationCode($user['id'], $code, $expiresAt, $deliveryMethod);
+            // Get current password hash
+            $sql = "SELECT password_hash FROM fw_users WHERE id = ?";
+            $result = $connection->executeQuery($sql, [$user['id']]);
+            $userData = $result->fetchAssociative();
 
-            // Send verification code
-            if ($deliveryMethod === 'sms') {
-                $this->twilioService->sendSMS($user['phone'], "Your FieldWire verification code is: {$code}");
-            } else {
-                $this->emailService->sendEmail(
-                    $user['email'],
-                    'FieldWire 2FA Verification Code',
-                    "Your verification code is: {$code}"
-                );
+            if (!$userData) {
+                Flight::json([
+                    'status' => 'error',
+                    'message' => 'User not found'
+                ], 404);
+                return;
             }
+
+            // Verify current password
+            if (!password_verify($currentPassword, $userData['password_hash'])) {
+                $this->logger->warning('Failed password change attempt - incorrect current password', [
+                    'user_id' => $user['id'],
+                    'ip' => Flight::request()->ip
+                ]);
+
+                Flight::json([
+                    'status' => 'error',
+                    'message' => 'Current password is incorrect'
+                ], 400);
+                return;
+            }
+
+            // Hash new password
+            $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
+
+            // Update password
+            $updateSql = "UPDATE fw_users SET password_hash = ?, updated_at = NOW() WHERE id = ?";
+            $connection->executeStatement($updateSql, [$hashedPassword, $user['id']]);
+
+            $this->logger->info('Password changed successfully', [
+                'user_id' => $user['id'],
+                'ip' => Flight::request()->ip
+            ]);
 
             Flight::json([
-                'error_code' => 0,
                 'status' => 'success',
-                'message' => '2FA verification code sent',
-                'data' => [
-                    'delivery_method' => $deliveryMethod,
-                    'expires_at' => $expiresAt
-                ]
+                'message' => 'Password changed successfully'
             ]);
 
         } catch (Exception $e) {
-            $this->logger->error('Error enabling 2FA', [
-                'error' => $e->getMessage()
+            $this->logger->error('Error changing password', [
+                'user_id' => $user['id'] ?? null,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             Flight::json([
-                'error_code' => 500,
                 'status' => 'error',
-                'message' => 'Internal server error',
-                'data' => null
-            ], 500);
-        }
-    }
-
-    /**
-     * Disable 2FA for current user
-     */
-    public function disable2FA(): void
-    {
-        // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
-        try {
-            $user = Flight::get('current_user');
-
-            $requestBody = Flight::request()->getBody();
-            $data = json_decode($requestBody, true);
-
-            // Validate input
-            if (!isset($data['verification_code']) || empty($data['verification_code'])) {
-                Flight::json([
-                    'error_code' => 400,
-                    'status' => 'error',
-                    'message' => 'Verification code is required',
-                    'data' => null
-                ], 400);
-                return;
-            }
-
-            $verificationCode = $data['verification_code'];
-
-            // Verify code
-            if (!$this->verifyCode($user['id'], $verificationCode)) {
-                Flight::json([
-                    'error_code' => 400,
-                    'status' => 'error',
-                    'message' => 'Invalid verification code',
-                    'data' => null
-                ], 400);
-                return;
-            }
-
-            // Disable 2FA
-            $this->update2FAStatus($user['id'], false);
-
-            Flight::json([
-                'error_code' => 0,
-                'status' => 'success',
-                'message' => '2FA disabled successfully',
-                'data' => null
-            ]);
-
-        } catch (Exception $e) {
-            $this->logger->error('Error disabling 2FA', [
-                'error' => $e->getMessage()
-            ]);
-
-            Flight::json([
-                'error_code' => 500,
-                'status' => 'error',
-                'message' => 'Internal server error',
-                'data' => null
+                'message' => 'Failed to change password'
             ], 500);
         }
     }
@@ -1420,7 +1375,7 @@ class ProfileController
             // Get current languages from database
             $currentLanguages = [];
             $result = $connection->executeQuery(
-                "SELECT language_id, prof_level FROM fw_worker_languages WHERE worker_id = ?",
+                "SELECT language_id, prof_level FROM fw_user_languages WHERE worker_id = ?",
                 [$workerId]
             );
             
@@ -1441,7 +1396,7 @@ class ProfileController
                 if (!isset($currentLanguages[$languageId])) {
                     // Add new language
                     $connection->executeStatement(
-                        "INSERT INTO fw_worker_languages (worker_id, language_id, prof_level) VALUES (?, ?, ?)",
+                        "INSERT INTO fw_user_languages (worker_id, language_id, prof_level) VALUES (?, ?, ?)",
                         [$workerId, $languageId, $profLevel]
                     );
                     $this->logger->info('Added new language', [
@@ -1452,7 +1407,7 @@ class ProfileController
                 } elseif ($currentLanguages[$languageId] !== $profLevel) {
                     // Update existing language
                     $connection->executeStatement(
-                        "UPDATE fw_worker_languages SET prof_level = ? WHERE worker_id = ? AND language_id = ?",
+                        "UPDATE fw_user_languages SET prof_level = ? WHERE worker_id = ? AND language_id = ?",
                         [$profLevel, $workerId, $languageId]
                     );
                     $this->logger->info('Updated language proficiency', [
@@ -1469,7 +1424,7 @@ class ProfileController
                 if (!isset($newLanguages[$languageId])) {
                     // Remove language
                     $connection->executeStatement(
-                        "DELETE FROM fw_worker_languages WHERE worker_id = ? AND language_id = ?",
+                        "DELETE FROM fw_user_languages WHERE worker_id = ? AND language_id = ?",
                         [$workerId, $languageId]
                     );
                     $this->logger->info('Removed language', [
@@ -1744,6 +1699,293 @@ class ProfileController
     }
 
     /**
+     * Get professional data
+     * 
+     * @OA\Get(
+     *     path="/api/v1/profile/professional",
+     *     summary="Get professional data",
+     *     description="Retrieve professional information including work experience, education, certifications, and skills for the authenticated user",
+     *     tags={"Profile"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="Professional data retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Professional data retrieved successfully"),
+     *             @OA\Property(property="data", ref="#/components/schemas/ProfessionalData")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Unauthorized")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Failed to retrieve professional data")
+     *         )
+     *     )
+     * )
+     */
+    public function getProfessionalData(): void
+    {
+        if (!$this->checkAuth()) {
+            return;
+        }
+
+        try {
+            $user = Flight::get('current_user');
+            $connection = Database::getConnection();
+            
+            $sql = "SELECT 
+                        total_experience, education_level, field_of_study, institution_name, graduation_year,
+                        professional_summary, specialized_skills, specialized_experience, key_projects,
+                        previous_employers, `references`, availability, travel_willingness, drivers_license,
+                        red_seal, provincial_certificate, union_membership, equipment_tools, whmis,
+                        first_aid, fall_protection, confined_space, lockout_tagout, other_safety
+                    FROM fw_user_professional WHERE user_id = ?";
+            
+            $result = $connection->executeQuery($sql, [$user['id']]);
+            $professionalData = $result->fetchAssociative();
+
+            if (!$professionalData) {
+                // Return empty structure if no professional data exists
+                Flight::json([
+                    'status' => 'success',
+                    'data' => [
+                        'user_id' => $user['id'],
+                        'total_experience' => null,
+                        'education_level' => null,
+                        'field_of_study' => null,
+                        'institution_name' => null,
+                        'graduation_year' => null,
+                        'professional_summary' => null,
+                        'specialized_skills' => null,
+                        'specialized_experience' => null,
+                        'key_projects' => null,
+                        'previous_employers' => null,
+                        'references' => null,
+                        'availability' => null,
+                        'travel_willingness' => null,
+                        'drivers_license' => null,
+                        'red_seal' => null,
+                        'provincial_certificate' => null,
+                        'union_membership' => null,
+                        'equipment_tools' => null,
+                        'whmis' => null,
+                        'first_aid' => null,
+                        'fall_protection' => null,
+                        'confined_space' => null,
+                        'lockout_tagout' => null,
+                        'other_safety' => null
+                    ]
+                ]);
+                return;
+            }
+
+            // Add user_id to the response data
+            $professionalData['user_id'] = $user['id'];
+            
+            Flight::json([
+                'status' => 'success',
+                'data' => $professionalData
+            ]);
+
+        } catch (Exception $e) {
+            $this->logger->error('Error fetching professional data', [
+                'user_id' => $user['id'],
+                'error' => $e->getMessage()
+            ]);
+            
+            Flight::json([
+                'status' => 'error',
+                'message' => 'Failed to retrieve professional data'
+            ], 500);
+        }
+    }
+
+    /**
+     * Update professional data
+     * 
+     * @OA\Put(
+     *     path="/api/v1/profile/professional",
+     *     summary="Update professional data",
+     *     description="Update professional information including work experience, education, certifications, and skills for the authenticated user",
+     *     tags={"Profile"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             @OA\Property(property="data", ref="#/components/schemas/ProfessionalData")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Professional data updated successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Professional data retrieved successfully"),
+     *             @OA\Property(property="data", ref="#/components/schemas/ProfessionalData")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Bad request",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid request format. Expected data object.")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Unauthorized")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Failed to update professional data")
+     *         )
+     *     )
+     * )
+     */
+    public function updateProfessionalData(): void
+    {
+        if (!$this->checkAuth()) {
+            return;
+        }
+
+        try {
+            $user = Flight::get('current_user');
+            $requestBody = Flight::request()->getBody();
+            $data = json_decode($requestBody, true);
+
+            $this->logger->info('Professional data update request', [
+                'user_id' => $user['id'],
+                'request_data' => $data
+            ]);
+
+            // Data is now sent directly without wrapper
+            $professionalData = $data;
+            $allowedFields = [
+                'total_experience', 'education_level', 'field_of_study', 'institution_name', 'graduation_year',
+                'professional_summary', 'specialized_skills', 'specialized_experience', 'key_projects',
+                'previous_employers', 'references', 'availability', 'travel_willingness', 'drivers_license',
+                'red_seal', 'provincial_certificate', 'union_membership', 'equipment_tools', 'whmis',
+                'first_aid', 'fall_protection', 'confined_space', 'lockout_tagout', 'other_safety'
+            ];
+            
+            // Remove user_id from data if present (it's not allowed to be updated)
+            unset($professionalData['user_id']);
+
+            $connection = Database::getConnection();
+            
+            // Check if professional data exists
+            $checkSql = "SELECT id FROM fw_user_professional WHERE user_id = ?";
+            $existingResult = $connection->executeQuery($checkSql, [$user['id']]);
+            $existing = $existingResult->fetchAssociative();
+
+            $updateFields = [];
+            $params = [];
+
+            foreach ($allowedFields as $field) {
+                if (isset($professionalData[$field])) {
+                    $value = $professionalData[$field];
+                    
+                    // Convert empty strings to null for all fields
+                    if ($value === '') {
+                        $value = null;
+                    }
+                    
+                    // Convert total_experience and graduation_year to integer if they are numeric
+                    if (in_array($field, ['total_experience', 'graduation_year']) && is_numeric($value)) {
+                        $value = (int) $value;
+                    }
+                    
+                    // Handle references field with backticks for SQL
+                    $sqlField = $field === 'references' ? '`references`' : $field;
+                    $updateFields[] = "{$sqlField} = ?";
+                    $params[] = $value;
+                    
+                    // Log references field specifically
+                    if ($field === 'references') {
+                        $this->logger->info('Processing references field', [
+                            'field' => $field,
+                            'value' => $value,
+                            'sqlField' => $sqlField
+                        ]);
+                    }
+                }
+            }
+
+            if (empty($updateFields)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'No valid fields provided for update',
+                    'data' => null
+                ], 400);
+                return;
+            }
+
+            if ($existing) {
+                // Update existing record
+                $params[] = $user['id'];
+                $sql = "UPDATE fw_user_professional SET " . implode(', ', $updateFields) . ", updated_at = NOW() WHERE user_id = ?";
+            } else {
+                // Insert new record
+                $params[] = $user['id'];
+                $sql = "INSERT INTO fw_user_professional (" . implode(', ', array_map(function($field) {
+                    return str_replace(' = ?', '', $field);
+                }, $updateFields)) . ", user_id, created_at, updated_at) VALUES (" . str_repeat('?, ', count($updateFields)) . "?, NOW(), NOW())";
+            }
+            
+            $this->logger->info('Updating professional data', [
+                'user_id' => $user['id'],
+                'sql' => $sql,
+                'params' => $params
+            ]);
+
+            $connection->executeStatement($sql, $params);
+
+            // Return updated data
+            $this->getProfessionalData();
+
+        } catch (Exception $e) {
+            $this->logger->error('Error updating professional data', [
+                'user_id' => $user['id'],
+                'error' => $e->getMessage()
+            ]);
+            
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Failed to update professional data',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
      * Get emergency data for user
      */
     private function getEmergencyData(int $userId): ?array
@@ -1778,7 +2020,7 @@ class ProfileController
             
             $result = $connection->executeQuery(
                 "SELECT wl.language_id, l.name as language_name, wl.prof_level 
-                 FROM fw_worker_languages wl 
+                 FROM fw_user_languages wl 
                  INNER JOIN fw_languages l ON wl.language_id = l.id 
                  WHERE wl.worker_id = ? 
                  ORDER BY l.name",

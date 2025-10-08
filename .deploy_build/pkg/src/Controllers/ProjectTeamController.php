@@ -122,7 +122,7 @@ class ProjectTeamController
                 JOIN fw_v_users u ON tm.user_id = u.id
                 WHERE tm.project_id = ? 
                   AND u.archived_at IS NULL 
-                  AND u. NOT IN ('System Administrator', 'Project Manager')
+                  AND u.role_name NOT IN ('System Administrator', 'Project Manager')
             ";
             $countResult = $connection->executeQuery($countSql, [$projectId]);
             $total = $countResult->fetchOne();
@@ -138,14 +138,14 @@ class ProjectTeamController
                     u.first_name,
                     u.last_name,
                     u.email,
-                    u.,
+                    u.role_name,
                     u.job_title,
                     u.status
                 FROM fw_prj_team_members tm
                 JOIN fw_v_users u ON tm.user_id = u.id
                 WHERE tm.project_id = ? 
                   AND u.archived_at IS NULL 
-                  AND u. NOT IN ('System Administrator', 'Project Manager')
+                  AND u.role_name NOT IN ('System Administrator', 'Project Manager')
                 ORDER BY tm.assigned_at DESC
                 LIMIT " . (int)$limit . " OFFSET " . (int)$offset . "
             ";
@@ -258,12 +258,12 @@ class ProjectTeamController
                     u.first_name,
                     u.last_name,
                     u.email,
-                    u.,
+                    u.role_name,
                     u.job_title,
                     u.status
                 FROM fw_v_users u
                 WHERE u.archived_at IS NULL 
-                  AND u. NOT IN ('System Administrator', 'Project Manager')
+                  AND u.role_name NOT IN ('System Administrator', 'Project Manager')
                   AND u.id NOT IN (
                       SELECT tm.user_id 
                       FROM fw_prj_team_members tm 
@@ -381,7 +381,7 @@ class ProjectTeamController
             $connection = $this->database->getConnection();
 
             // Check if user exists, is not archived, and is not System Administrator or Project Manager
-            $userSql = "SELECT id,  FROM fw_v_users WHERE id = ? AND archived_at IS NULL";
+            $userSql = "SELECT id, email, first_name, last_name, status, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency FROM fw_v_users WHERE id = ? AND archived_at IS NULL";
             $userResult = $connection->executeQuery($userSql, [$input['user_id']]);
             $user = $userResult->fetchAssociative();
             
@@ -678,7 +678,7 @@ class ProjectTeamController
             'added_by' => null, // This field doesn't exist in current schema
             'name' => trim($member['first_name'] . ' ' . $member['last_name']),
             'email' => $member['email'],
-            '' => $member[''],
+            'role_name' => $member['role_name'],
             'job_title' => $member['job_title'],
             'status' => (int) $member['status']
         ];

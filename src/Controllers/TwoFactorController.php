@@ -371,124 +371,6 @@ class TwoFactorController
         }
     }
 
-    /**
-     * Enable 2FA for user
-     */
-    public function enable2FA(): void
-    {
-        try {
-            $requestBody = Flight::request()->getBody();
-            $data = json_decode($requestBody, true);
-
-            if (!isset($data['user_id']) || !isset($data['phone'])) {
-                Flight::json([
-                    'error_code' => 400,
-                    'status' => 'error',
-                    'message' => 'User ID and phone number are required',
-                    'data' => null
-                ], 400);
-                return;
-            }
-
-            $userId = $data['user_id'];
-            $phone = $data['phone'];
-
-            // Validate phone number
-            if (!$this->twilioService->validatePhoneNumber($phone)) {
-                Flight::json([
-                    'error_code' => 400,
-                    'status' => 'error',
-                    'message' => 'Invalid phone number format',
-                    'data' => null
-                ], 400);
-                return;
-            }
-
-            // Update user's phone and enable 2FA
-            $this->updateUser2FA($userId, $phone, true);
-
-            $this->logger->info('2FA enabled for user', [
-                'user_id' => $userId,
-                'phone' => $phone
-            ]);
-
-            Flight::json([
-                'error_code' => 0,
-                'status' => 'success',
-                'message' => '2FA enabled successfully',
-                'data' => [
-                    'user_id' => $userId,
-                    'phone' => $this->maskPhoneNumber($phone),
-                    'two_factor_enabled' => true
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            $this->logger->error('Error enabling 2FA', [
-                'error' => $e->getMessage()
-            ]);
-
-            Flight::json([
-                'error_code' => 500,
-                'status' => 'error',
-                'message' => 'Internal server error',
-                'data' => null
-            ], 500);
-        }
-    }
-
-    /**
-     * Disable 2FA for user
-     */
-    public function disable2FA(): void
-    {
-        try {
-            $requestBody = Flight::request()->getBody();
-            $data = json_decode($requestBody, true);
-
-            if (!isset($data['user_id'])) {
-                Flight::json([
-                    'error_code' => 400,
-                    'status' => 'error',
-                    'message' => 'User ID is required',
-                    'data' => null
-                ], 400);
-                return;
-            }
-
-            $userId = $data['user_id'];
-
-            // Disable 2FA
-            $this->updateUser2FA($userId, null, false);
-
-            $this->logger->info('2FA disabled for user', [
-                'user_id' => $userId
-            ]);
-
-            Flight::json([
-                'error_code' => 0,
-                'status' => 'success',
-                'message' => '2FA disabled successfully',
-                'data' => [
-                    'user_id' => $userId,
-                    'two_factor_enabled' => false
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            $this->logger->error('Error disabling 2FA', [
-                'error' => $e->getMessage()
-            ]);
-
-            Flight::json([
-                'error_code' => 500,
-                'status' => 'error',
-                'message' => 'Internal server error',
-                'data' => null
-            ], 500);
-        }
-    }
-
     // Private helper methods
 
     private function validateSendCodeData(?array $data): bool
@@ -674,29 +556,36 @@ class TwoFactorController
     public function toggle2FA(): void
     {
         try {
+            // Get authenticated user
+            $user = Flight::get('current_user');
+            
             $requestBody = Flight::request()->getBody();
             $data = json_decode($requestBody, true);
 
-            if (!isset($data['enabled']) || !in_array($data['enabled'], [0, 1])) {
+            $this->logger->info('toggle2FA called', [
+                'user_id' => $user['id'] ?? 'not authenticated',
+                'request_data' => $data
+            ]);
+
+            if (!isset($data['enabled'])) {
                 Flight::json([
-                    'error_code' => 400,
                     'status' => 'error',
-                    'message' => 'Invalid input. "enabled" field must be 0 or 1',
-                    'data' => null
+                    'message' => 'Missing enabled parameter'
                 ], 400);
                 return;
             }
 
-            $enabled = (bool)$data['enabled'];
-            $userId = $data['user_id'] ?? null;
+            // Convert to boolean (accept true, false, 1, 0, "true", "false")
+            $enabled = filter_var($data['enabled'], FILTER_VALIDATE_BOOLEAN);
+            
+            // Use authenticated user's ID if available, otherwise check data
+            $userId = $user['id'] ?? $data['user_id'] ?? null;
 
             if (!$userId) {
                 Flight::json([
-                    'error_code' => 400,
                     'status' => 'error',
-                    'message' => 'User ID is required',
-                    'data' => null
-                ], 400);
+                    'message' => 'User not authenticated'
+                ], 401);
                 return;
             }
 
@@ -709,18 +598,17 @@ class TwoFactorController
             ]);
 
             Flight::json([
-                'error_code' => 0,
                 'status' => 'success',
                 'message' => $enabled ? '2FA enabled successfully' : '2FA disabled successfully',
                 'data' => [
-                    'user_id' => $userId,
-                    'two_factor_enabled' => $enabled
+                    'enabled' => $enabled
                 ]
             ]);
 
         } catch (\Exception $e) {
             $this->logger->error('Error toggling 2FA', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
 
             Flight::json([

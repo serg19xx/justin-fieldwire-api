@@ -143,7 +143,7 @@ class AuthController
 
             if (!$user) {
                 // Логируем неудачную попытку входа
-                $this->userAuditService->logLogin(null, false, 'Invalid credentials');
+                // Не логируем неудачную попытку, так как user_id неизвестен
 
                 $this->logger->warning('Failed login attempt', [
                     'email' => $email,
@@ -309,7 +309,7 @@ class AuthController
             error_log('Database connection OK');
             
             // Используем таблицу fw_v_users с правильными колонками
-            $sql = "SELECT id, email, password_hash, first_name, last_name, phone, role_id, job_title, status, status_reason, status_details, additional_info, avatar_url, two_factor_enabled, two_factor_secret, last_login, created_at, updated_at, invitation_status, invitation_token, invitation_sent_at, invitation_expires_at, invited_by, registration_completed_at, invitation_attempts, last_reminder_sent_at, archived_at, role_code, role_name, role_category, role_description FROM fw_v_users WHERE email = ? LIMIT 1";
+            $sql = "SELECT id, email, password_hash, first_name, last_name, phone, role_id, job_title, status, status_reason, status_details, additional_info, avatar_url, two_factor_enabled, two_factor_secret, last_login, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency, created_at, updated_at, invitation_status, invitation_token, invitation_sent_at, invitation_expires_at, invited_by, registration_completed_at, invitation_attempts, last_reminder_sent_at, archived_at, role_code, role_name, role_category, role_description FROM fw_v_users WHERE email = ? LIMIT 1";
             error_log('SQL: ' . $sql);
             error_log('Email: ' . $email);
             

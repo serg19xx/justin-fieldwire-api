@@ -13,6 +13,7 @@ use App\Controllers\TaskController;
 use App\Controllers\ProjectTeamController;
 use App\Controllers\EventLogController;
 use App\Controllers\N8nIntegrationController;
+use App\Controllers\LanguageController;
 use Flight;
 use Monolog\Logger;
 use OpenApi\Annotations as OA;
@@ -122,7 +123,16 @@ class ApiRoutes
                                 'event_logs_outbox_update_status' => 'PUT /api/v1/event-logs/outbox/{id}/status',
                                 'n8n_webhook_manual_trigger' => 'POST /api/v1/n8n/webhook/manual-trigger',
                                 'n8n_scheduled_data_collection' => 'GET /api/v1/n8n/scheduled/data-collection',
-                                'n8n_workflow_status' => 'GET /api/v1/n8n/workflow/status'
+                                'n8n_workflow_status' => 'GET /api/v1/n8n/workflow/status',
+                                
+                                // Language endpoints
+                                'languages_get' => 'GET /api/v1/languages',
+                                'languages_create' => 'POST /api/v1/languages',
+                                'languages_update' => 'PUT /api/v1/languages/{languageId}',
+                                'worker_languages_get' => 'GET /api/v1/workers/{workerId}/languages',
+                                'worker_languages_add' => 'POST /api/v1/workers/{workerId}/languages',
+                                'worker_languages_update' => 'PUT /api/v1/workers/{workerId}/languages/{languageId}',
+                                'worker_languages_remove' => 'DELETE /api/v1/workers/{workerId}/languages/{languageId}'
                             ]
                         ]
                     ]
@@ -208,10 +218,32 @@ class ApiRoutes
                 $profileController->serveAvatar();
             });
             
+            // Full image routes (for serving only)
+            Flight::route('GET /api/v1/profile/full-image', function() use ($profileController) {
+                $profileController->getFullImage();
+            });
+            
+            Flight::route('GET /api/v1/full-image', function() use ($profileController) {
+                $profileController->serveFullImage();
+            });
+            
             // Work status management route
             Flight::route('PUT /api/v1/profile/work-status', function() use ($profileController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
                     $profileController->updateWorkStatus();
+                }
+            });
+            
+            // Emergency contact routes
+            Flight::route('GET /api/v1/profile/emergency', function() use ($profileController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $profileController->getEmergencyContact();
+                }
+            });
+            
+            Flight::route('PUT /api/v1/profile/emergency', function() use ($profileController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $profileController->updateEmergencyContact();
                 }
             });
             
@@ -747,6 +779,9 @@ class ApiRoutes
         // Event logs routes
         $eventLogController = new EventLogController($this->logger);
         
+        // Language routes
+        $languageController = new LanguageController($this->logger);
+        
         // Event rules routes
         Flight::route('GET /api/v1/event-rules', [$eventLogController, 'getEventRules']);
         
@@ -767,5 +802,36 @@ class ApiRoutes
         
         // Workflow status tracking
         Flight::route('GET /api/v1/n8n/workflow/status', [$n8nController, 'getWorkflowStatus']);
+
+        // Language routes
+        Flight::route('GET /api/v1/languages', [$languageController, 'getLanguages']);
+        Flight::route('POST /api/v1/languages', function() use ($languageController, $authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $languageController->createLanguage();
+            }
+        });
+        Flight::route('PUT /api/v1/languages/@languageId', function($languageId) use ($languageController, $authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $languageController->updateLanguage($languageId);
+            }
+        });
+
+        // Worker language routes
+        Flight::route('GET /api/v1/workers/@workerId/languages', [$languageController, 'getWorkerLanguages']);
+        Flight::route('POST /api/v1/workers/@workerId/languages', function($workerId) use ($languageController, $authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $languageController->addWorkerLanguage((int)$workerId);
+            }
+        });
+        Flight::route('PUT /api/v1/workers/@workerId/languages/@languageId', function($workerId, $languageId) use ($languageController, $authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $languageController->updateWorkerLanguage((int)$workerId, (int)$languageId);
+            }
+        });
+        Flight::route('DELETE /api/v1/workers/@workerId/languages/@languageId', function($workerId, $languageId) use ($languageController, $authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $languageController->removeWorkerLanguage((int)$workerId, (int)$languageId);
+            }
+        });
     }
 }
