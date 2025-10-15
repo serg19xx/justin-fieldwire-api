@@ -81,24 +81,60 @@ class AuthMiddleware
     }
 
     /**
-     * Decode simple base64 token
+     * Decode JWT token with HMAC verification
      */
     private function decodeJWT(string $token): ?array
     {
         try {
-            // Декодируем простой base64 токен
-            $decoded = base64_decode($token);
-            if ($decoded === false) {
+            // Split JWT into parts
+            $parts = explode('.', $token);
+            if (count($parts) !== 3) {
                 return null;
             }
             
-            $payload = json_decode($decoded, true);
-            if (!$payload || !isset($payload['exp']) || $payload['exp'] < time()) {
+            [$header, $payload, $signature] = $parts;
+            
+            // Decode header and payload
+            $header = str_replace(['-', '_'], ['+', '/'], $header);
+            $payload = str_replace(['-', '_'], ['+', '/'], $payload);
+            
+            // Add padding if needed
+            $header = str_pad($header, strlen($header) % 4, '=', STR_PAD_RIGHT);
+            $payload = str_pad($payload, strlen($payload) % 4, '=', STR_PAD_RIGHT);
+            
+            $headerDecoded = base64_decode($header);
+            $payloadDecoded = base64_decode($payload);
+            
+            if ($headerDecoded === false || $payloadDecoded === false) {
                 return null;
             }
             
-            return $payload;
+            $headerData = json_decode($headerDecoded, true);
+            $payloadData = json_decode($payloadDecoded, true);
+            
+            if (!$headerData || !$payloadData) {
+                return null;
+            }
+            
+            // Verify signature
+            $secret = $_ENV['JWT_SECRET'] ?? 'your-secret-key-change-in-production';
+            $expectedSignature = hash_hmac('sha256', $header . "." . $payload, $secret, true);
+            $expectedSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($expectedSignature));
+            
+            if (!hash_equals($expectedSignature, $signature)) {
+                return null;
+            }
+            
+            // Check expiration
+            if (!isset($payloadData['exp']) || $payloadData['exp'] < time()) {
+                return null;
+            }
+            
+            return $payloadData;
         } catch (\Exception $e) {
+            $this->logger->error('JWT decode error', [
+                'error' => $e->getMessage()
+            ]);
             return null;
         }
     }

@@ -275,65 +275,224 @@ class ApiRoutes
             $emailService = new \App\Services\EmailService($this->logger);
             $twoFactorController = new \App\Controllers\TwoFactorController($this->logger, $twilioService, $emailService);
             
+            /**
+             * @OA\Post(
+             *     path="/api/v1/2fa/send-code",
+             *     tags={"Two-Factor"},
+             *     summary="Send 2FA verification code",
+             *     description="Send a verification code via SMS or email for two-factor authentication",
+             *     @OA\RequestBody(
+             *         required=true,
+             *         @OA\JsonContent(
+             *             required={"user_id", "method"},
+             *             @OA\Property(property="user_id", type="integer", example=47, description="User ID"),
+             *             @OA\Property(property="method", type="string", enum={"sms", "email"}, example="sms", description="Verification method")
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=200,
+             *         description="Code sent successfully",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=true),
+             *             @OA\Property(property="message", type="string", example="Verification code sent successfully"),
+             *             @OA\Property(property="method", type="string", example="sms"),
+             *             @OA\Property(property="expires_in", type="integer", example=600, description="Code expiration time in seconds")
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=400,
+             *         description="Bad request",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=false),
+             *             @OA\Property(property="error", type="string", example="Invalid user ID or method")
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=500,
+             *         description="Internal server error",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=false),
+             *             @OA\Property(property="error", type="string", example="Failed to send verification code")
+             *         )
+             *     )
+             * )
+             */
             Flight::route('POST /api/v1/2fa/send-code', [$twoFactorController, 'sendCode']);
-            Flight::route('POST /api/v1/2fa/verify-code', [$twoFactorController, 'verifyCode']);
-            Flight::route('POST /api/v1/2fa/toggle', function() use ($twoFactorController, $authMiddleware) {
-                if ($authMiddleware->handle()) {
-                    $twoFactorController->toggle2FA();
-                }
-            });
             
-            // Legacy 2FA routes
+            /**
+             * @OA\Post(
+             *     path="/api/v1/2fa/verify-code",
+             *     tags={"Two-Factor"},
+             *     summary="Verify 2FA code",
+             *     description="Verify the two-factor authentication code sent via SMS or email",
+             *     @OA\RequestBody(
+             *         required=true,
+             *         @OA\JsonContent(
+             *             required={"user_id", "code", "method"},
+             *             @OA\Property(property="user_id", type="integer", example=47, description="User ID"),
+             *             @OA\Property(property="code", type="string", example="123456", description="6-digit verification code"),
+             *             @OA\Property(property="method", type="string", enum={"sms", "email"}, example="sms", description="Verification method")
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=200,
+             *         description="Code verified successfully",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=true),
+             *             @OA\Property(property="message", type="string", example="Verification code verified successfully"),
+             *             @OA\Property(property="verified", type="boolean", example=true)
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=400,
+             *         description="Invalid code or expired",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=false),
+             *             @OA\Property(property="error", type="string", example="Invalid or expired verification code")
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=500,
+             *         description="Internal server error",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=false),
+             *             @OA\Property(property="error", type="string", example="Failed to verify code")
+             *         )
+             *     )
+             * )
+             */
+            Flight::route('POST /api/v1/2fa/verify-code', [$twoFactorController, 'verifyCode']);
+            
+            /**
+             * @OA\Post(
+             *     path="/api/v1/2fa/toggle",
+             *     tags={"Two-Factor"},
+             *     summary="Toggle 2FA for user",
+             *     description="Enable or disable two-factor authentication for the authenticated user",
+             *     security={{"bearerAuth": {}}},
+             *     @OA\RequestBody(
+             *         required=true,
+             *         @OA\JsonContent(
+             *             required={"enabled"},
+             *             @OA\Property(property="enabled", type="boolean", example=true, description="Enable or disable 2FA")
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=200,
+             *         description="2FA status updated successfully",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=true),
+             *             @OA\Property(property="message", type="string", example="Two-factor authentication enabled"),
+             *             @OA\Property(property="two_factor_enabled", type="boolean", example=true)
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=401,
+             *         description="Unauthorized",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=false),
+             *             @OA\Property(property="error", type="string", example="Unauthorized")
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=500,
+             *         description="Internal server error",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=false),
+             *             @OA\Property(property="error", type="string", example="Failed to update 2FA status")
+             *         )
+             *     )
+             * )
+             */
+            Flight::route('POST /api/v1/2fa/toggle', [$twoFactorController, 'toggle2FA']);
+            
+            // Legacy 2FA routes (deprecated - use /api/v1/2fa/* instead)
+            /**
+             * @OA\Post(
+             *     path="/2fa/send-code",
+             *     tags={"Two-Factor"},
+             *     summary="Send 2FA verification code (Legacy)",
+             *     description="Legacy endpoint for sending verification code. Use /api/v1/2fa/send-code instead.",
+             *     deprecated=true,
+             *     @OA\RequestBody(
+             *         required=true,
+             *         @OA\JsonContent(
+             *             required={"user_id", "method"},
+             *             @OA\Property(property="user_id", type="integer", example=47, description="User ID"),
+             *             @OA\Property(property="method", type="string", enum={"sms", "email"}, example="sms", description="Verification method")
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=200,
+             *         description="Code sent successfully",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=true),
+             *             @OA\Property(property="message", type="string", example="Verification code sent successfully")
+             *         )
+             *     )
+             * )
+             */
             Flight::route('POST /2fa/send-code', [$twoFactorController, 'sendCode']);
+            
+            /**
+             * @OA\Post(
+             *     path="/2fa/verify-code",
+             *     tags={"Two-Factor"},
+             *     summary="Verify 2FA code (Legacy)",
+             *     description="Legacy endpoint for verifying code. Use /api/v1/2fa/verify-code instead.",
+             *     deprecated=true,
+             *     @OA\RequestBody(
+             *         required=true,
+             *         @OA\JsonContent(
+             *             required={"user_id", "code", "method"},
+             *             @OA\Property(property="user_id", type="integer", example=47, description="User ID"),
+             *             @OA\Property(property="code", type="string", example="123456", description="6-digit verification code"),
+             *             @OA\Property(property="method", type="string", enum={"sms", "email"}, example="sms", description="Verification method")
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=200,
+             *         description="Code verified successfully",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=true),
+             *             @OA\Property(property="message", type="string", example="Verification code verified successfully")
+             *         )
+             *     )
+             * )
+             */
             Flight::route('POST /2fa/verify-code', [$twoFactorController, 'verifyCode']);
+            
+            /**
+             * @OA\Post(
+             *     path="/2fa/toggle",
+             *     tags={"Two-Factor"},
+             *     summary="Toggle 2FA for user (Legacy)",
+             *     description="Legacy endpoint for toggling 2FA. Use /api/v1/2fa/toggle instead.",
+             *     deprecated=true,
+             *     @OA\RequestBody(
+             *         required=true,
+             *         @OA\JsonContent(
+             *             required={"enabled"},
+             *             @OA\Property(property="enabled", type="boolean", example=true, description="Enable or disable 2FA")
+             *         )
+             *     ),
+             *     @OA\Response(
+             *         response=200,
+             *         description="2FA status updated successfully",
+             *         @OA\JsonContent(
+             *             @OA\Property(property="success", type="boolean", example=true),
+             *             @OA\Property(property="message", type="string", example="Two-factor authentication enabled")
+             *         )
+             *     )
+             * )
+             */
             Flight::route('POST /2fa/toggle', [$twoFactorController, 'toggle2FA']);
             
         } catch (\Exception $e) {
             throw $e;
         }
 
-        // Patient routes v1 (protected)
-        Flight::route('GET /api/v1/patients', function() use ($authMiddleware) {
-            if ($authMiddleware->handle()) {
-                $patientController = new \App\Controllers\PatientController($this->logger);
-                $patientController->getPatients();
-            }
-        });
-        
-        Flight::route('GET /api/v1/patients/@id', function($id) use ($authMiddleware) {
-            if ($authMiddleware->handle()) {
-                $patientController = new \App\Controllers\PatientController($this->logger);
-                $patientController->getPatient($id);
-            }
-        });
-        
-        Flight::route('GET /api/v1/patients/search', function() use ($authMiddleware) {
-            if ($authMiddleware->handle()) {
-                $patientController = new \App\Controllers\PatientController($this->logger);
-                $patientController->getPatient();
-            }
-        });
-        
-        Flight::route('POST /api/v1/patients', function() use ($authMiddleware) {
-            if ($authMiddleware->handle()) {
-                $patientController = new \App\Controllers\PatientController($this->logger);
-                $patientController->createPatient();
-            }
-        });
-        
-        Flight::route('PUT /api/v1/patients/@id', function($id) use ($authMiddleware) {
-            if ($authMiddleware->handle()) {
-                $patientController = new \App\Controllers\PatientController($this->logger);
-                $patientController->updatePatient($id);
-            }
-        });
-        
-        Flight::route('DELETE /api/v1/patients/@id', function($id) use ($authMiddleware) {
-            if ($authMiddleware->handle()) {
-                $patientController = new \App\Controllers\PatientController($this->logger);
-                $patientController->deletePatient($id);
-            }
-        });
+        // Patient routes removed - no longer needed
 
         // Driver routes v1 (protected)
         Flight::route('GET /api/v1/drivers', function() use ($authMiddleware) {

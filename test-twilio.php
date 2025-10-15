@@ -4,17 +4,9 @@ require_once 'vendor/autoload.php';
 
 use Twilio\Rest\Client;
 
-// Load environment variables
-$envFile = 'env.development';
-if (file_exists($envFile)) {
-    $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-    foreach ($lines as $line) {
-        if (strpos($line, '=') !== false && strpos($line, '#') !== 0) {
-            list($key, $value) = explode('=', $line, 2);
-            $_ENV[trim($key)] = trim($value);
-        }
-    }
-}
+// Load environment variables using Dotenv
+$dotenv = Dotenv\Dotenv::createImmutable(__DIR__);
+$dotenv->load();
 
 echo "Testing Twilio configuration...\n";
 

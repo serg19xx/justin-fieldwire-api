@@ -78,6 +78,10 @@ use OpenApi\Annotations as OA;
      *         name="Worker Languages",
      *         description="Worker language proficiency management endpoints"
      *     ),
+     *     @OA\Tag(
+     *         name="Two-Factor",
+     *         description="Two-factor authentication endpoints for SMS and email verification"
+     *     ),
      *     @OA\Schema(
      *         schema="EventLog",
      *         type="object",
