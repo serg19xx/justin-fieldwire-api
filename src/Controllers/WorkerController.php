@@ -220,11 +220,8 @@ class WorkerController
      */
     public function getWorkers(): void
     {
-        // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
+        $this->logger->info('WorkerController::getWorkers called');
+        
         try {
             $request = Flight::request();
             $page = (int)($request->query['page'] ?? 1);
@@ -592,11 +589,8 @@ class WorkerController
      */
     public function sendInvitation(): void
     {
-        // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
+        $this->logger->info('WorkerController::sendInvitation called');
+        
         try {
             $data = Flight::request()->data;
 
@@ -804,11 +798,8 @@ class WorkerController
      */
     public function getEmailProviders(): void
     {
-        // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
+        $this->logger->info('WorkerController::getEmailProviders called');
+        
         try {
             $providers = $this->emailService->getAvailableProviders();
 

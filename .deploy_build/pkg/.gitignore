@@ -36,3 +36,5 @@ tests/Unit/AuthControllerTest.php
 public/frontend-test.html
 # GitHub Actions
 .github/
+.env.backup
+copy-env.php

@@ -182,12 +182,14 @@ class ApiRoutes
         // Legacy auth route for backward compatibility
         Flight::route('POST /auth/login', [new AuthController($this->logger), 'login']);
 
+        // Create shared auth middleware for all protected routes
+        $authMiddleware = new \App\Middleware\AuthMiddleware($this->logger);
+
         // Profile management routes (protected)
         try {
             $twilioService = new \App\Services\TwilioService($this->logger);
             $emailService = new \App\Services\EmailService($this->logger);
             $profileController = new \App\Controllers\ProfileController($this->logger, $twilioService, $emailService);
-            $authMiddleware = new \App\Middleware\AuthMiddleware($this->logger);
             
             // Profile routes with auth middleware
             Flight::route('GET /api/v1/profile', function() use ($profileController, $authMiddleware) {
@@ -404,7 +406,11 @@ class ApiRoutes
              *     )
              * )
              */
-            Flight::route('POST /api/v1/2fa/toggle', [$twoFactorController, 'toggle2FA']);
+            Flight::route('POST /api/v1/2fa/toggle', function() use ($twoFactorController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $twoFactorController->toggle2FA();
+                }
+            });
             
             // Legacy 2FA routes (deprecated - use /api/v1/2fa/* instead)
             /**
@@ -486,7 +492,11 @@ class ApiRoutes
              *     )
              * )
              */
-            Flight::route('POST /2fa/toggle', [$twoFactorController, 'toggle2FA']);
+            Flight::route('POST /2fa/toggle', function() use ($twoFactorController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $twoFactorController->toggle2FA();
+                }
+            });
             
         } catch (\Exception $e) {
             throw $e;

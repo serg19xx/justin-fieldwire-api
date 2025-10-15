@@ -1250,6 +1250,802 @@
                 }
             }
         },
+        "/api/v1/languages": {
+            "get": {
+                "tags": [
+                    "Languages"
+                ],
+                "summary": "Get all languages",
+                "description": "Retrieve all available languages",
+                "operationId": "72abab7f3b71c7d0662ec88e069f2e11",
+                "responses": {
+                    "200": {
+                        "description": "Languages retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Languages retrieved successfully"
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "properties": {
+                                                    "id": {
+                                                        "type": "integer",
+                                                        "example": 1
+                                                    },
+                                                    "name": {
+                                                        "type": "string",
+                                                        "example": "English"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Failed to retrieve languages"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Languages"
+                ],
+                "summary": "Create a new language",
+                "description": "Add a new language to the system",
+                "operationId": "c82e2d5ace311634bf98732090064ae9",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Spanish"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Language created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Language created successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "name": {
+                                                    "type": "string",
+                                                    "example": "Spanish"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Language name is required"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 409
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Language already exists"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/workers/{workerId}/languages": {
+            "get": {
+                "tags": [
+                    "Worker Languages"
+                ],
+                "summary": "Get worker languages",
+                "description": "Retrieve all languages for a specific worker",
+                "operationId": "f196a8956fec4c370f33fbfb4617d3df",
+                "parameters": [
+                    {
+                        "name": "workerId",
+                        "in": "path",
+                        "description": "Worker ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Worker languages retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Worker languages retrieved successfully"
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "properties": {
+                                                    "language_id": {
+                                                        "type": "integer",
+                                                        "example": 1
+                                                    },
+                                                    "language_name": {
+                                                        "type": "string",
+                                                        "example": "English"
+                                                    },
+                                                    "prof_level": {
+                                                        "type": "string",
+                                                        "example": "Fluent"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Worker not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Worker not found"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "tags": [
+                    "Worker Languages"
+                ],
+                "summary": "Add language to worker",
+                "description": "Add a language with proficiency level to a worker",
+                "operationId": "1a365af28402d60d0128c4767817591b",
+                "parameters": [
+                    {
+                        "name": "workerId",
+                        "in": "path",
+                        "description": "Worker ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "language_id": {
+                                        "type": "integer",
+                                        "example": 1
+                                    },
+                                    "prof_level": {
+                                        "type": "string",
+                                        "enum": [
+                                            "Basic",
+                                            "Intermidiate",
+                                            "Fluent"
+                                        ],
+                                        "example": "Fluent"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Language added to worker successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Language added to worker successfully"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Language ID and proficiency level are required"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Worker or language not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Worker or language not found"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 409
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Worker already has this language"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/workers/{workerId}/languages/{languageId}": {
+            "put": {
+                "tags": [
+                    "Worker Languages"
+                ],
+                "summary": "Update worker language proficiency",
+                "description": "Update the proficiency level of a worker's language",
+                "operationId": "c38013872c47c5c3ef15561bc9e9bba3",
+                "parameters": [
+                    {
+                        "name": "workerId",
+                        "in": "path",
+                        "description": "Worker ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "languageId",
+                        "in": "path",
+                        "description": "Language ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "prof_level": {
+                                        "type": "string",
+                                        "enum": [
+                                            "Basic",
+                                            "Intermidiate",
+                                            "Fluent"
+                                        ],
+                                        "example": "Fluent"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Worker language updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Worker language updated successfully"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Proficiency level is required"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Worker language not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Worker language not found"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Worker Languages"
+                ],
+                "summary": "Remove language from worker",
+                "description": "Remove a language from a worker",
+                "operationId": "cc8905ae934977c6350f8c36971fba15",
+                "parameters": [
+                    {
+                        "name": "workerId",
+                        "in": "path",
+                        "description": "Worker ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "languageId",
+                        "in": "path",
+                        "description": "Language ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Language removed from worker successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Language removed from worker successfully"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Worker language not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Worker language not found"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/languages/{languageId}": {
+            "put": {
+                "tags": [
+                    "Languages"
+                ],
+                "summary": "Update language name",
+                "description": "Update the name of an existing language",
+                "operationId": "f7220cdd612c28ae9ed97bbc16a460f3",
+                "parameters": [
+                    {
+                        "name": "languageId",
+                        "in": "path",
+                        "description": "Language ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Updated Language Name"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Language updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Language updated successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "id": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                },
+                                                "name": {
+                                                    "type": "string",
+                                                    "example": "Updated Language Name"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Language name is required"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Language not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Language not found"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 409
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Language name already exists"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/n8n/webhook/manual-trigger": {
             "post": {
                 "tags": [
@@ -1557,258 +2353,6 @@
                         }
                     }
                 }
-            }
-        },
-        "/api/v1/patients": {
-            "get": {
-                "tags": [
-                    "Patients"
-                ],
-                "summary": "Get list of patients",
-                "description": "Retrieve a paginated list of patients with optional filtering by country and region",
-                "operationId": "418cef01f7444e32d1ee5296c3a08566",
-                "parameters": [
-                    {
-                        "name": "page",
-                        "in": "query",
-                        "description": "Page number for pagination",
-                        "required": false,
-                        "schema": {
-                            "type": "integer",
-                            "default": 1,
-                            "minimum": 1
-                        }
-                    },
-                    {
-                        "name": "limit",
-                        "in": "query",
-                        "description": "Number of items per page",
-                        "required": false,
-                        "schema": {
-                            "type": "integer",
-                            "default": 10,
-                            "maximum": 100,
-                            "minimum": 1
-                        }
-                    },
-                    {
-                        "name": "country",
-                        "in": "query",
-                        "description": "Filter by country name",
-                        "required": false,
-                        "schema": {
-                            "type": "string"
-                        }
-                    },
-                    {
-                        "name": "region",
-                        "in": "query",
-                        "description": "Filter by region/province name",
-                        "required": false,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful response with patients list",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "success": {
-                                            "type": "boolean",
-                                            "example": true
-                                        },
-                                        "data": {
-                                            "properties": {
-                                                "patients": {
-                                                    "type": "array",
-                                                    "items": {
-                                                        "type": "object"
-                                                    }
-                                                },
-                                                "pagination": {
-                                                    "properties": {
-                                                        "current_page": {
-                                                            "type": "integer"
-                                                        },
-                                                        "total_pages": {
-                                                            "type": "integer"
-                                                        },
-                                                        "total_items": {
-                                                            "type": "integer"
-                                                        },
-                                                        "items_per_page": {
-                                                            "type": "integer"
-                                                        }
-                                                    },
-                                                    "type": "object"
-                                                }
-                                            },
-                                            "type": "object"
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized - Token required",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "success": {
-                                            "type": "boolean",
-                                            "example": false
-                                        },
-                                        "error": {
-                                            "type": "string",
-                                            "example": "Unauthorized - Token required"
-                                        },
-                                        "error_code": {
-                                            "type": "integer",
-                                            "example": 401
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    },
-                    "500": {
-                        "description": "Internal server error",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "success": {
-                                            "type": "boolean",
-                                            "example": false
-                                        },
-                                        "error": {
-                                            "type": "string",
-                                            "example": "Internal server error"
-                                        },
-                                        "error_code": {
-                                            "type": "integer",
-                                            "example": 500
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
-            }
-        },
-        "/api/v1/patients/{id}": {
-            "get": {
-                "tags": [
-                    "Patients"
-                ],
-                "summary": "Get patient by ID",
-                "description": "Retrieve a specific patient by ID, email, or name substring",
-                "operationId": "8d2210fd8c50cc6696a120fdfdee0d3c",
-                "parameters": [
-                    {
-                        "name": "id",
-                        "in": "path",
-                        "description": "Patient ID, email, or name substring",
-                        "required": true,
-                        "schema": {
-                            "type": "string"
-                        }
-                    }
-                ],
-                "responses": {
-                    "200": {
-                        "description": "Successful response with patient data",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "success": {
-                                            "type": "boolean",
-                                            "example": true
-                                        },
-                                        "data": {
-                                            "properties": {
-                                                "patient": {
-                                                    "type": "object"
-                                                }
-                                            },
-                                            "type": "object"
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    },
-                    "404": {
-                        "description": "Patient not found",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "success": {
-                                            "type": "boolean",
-                                            "example": false
-                                        },
-                                        "error": {
-                                            "type": "string",
-                                            "example": "Patient not found"
-                                        },
-                                        "error_code": {
-                                            "type": "integer",
-                                            "example": 404
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized - Token required",
-                        "content": {
-                            "application/json": {
-                                "schema": {
-                                    "properties": {
-                                        "success": {
-                                            "type": "boolean",
-                                            "example": false
-                                        },
-                                        "error": {
-                                            "type": "string",
-                                            "example": "Unauthorized - Token required"
-                                        },
-                                        "error_code": {
-                                            "type": "integer",
-                                            "example": 401
-                                        }
-                                    },
-                                    "type": "object"
-                                }
-                            }
-                        }
-                    }
-                },
-                "security": [
-                    {
-                        "bearerAuth": []
-                    }
-                ]
             }
         },
         "/api/v1/plan/folders/tree": {
@@ -2749,6 +3293,10 @@
                                                             "type": "string",
                                                             "example": "http://localhost:8000/api/v1/avatar?file=avatar.png"
                                                         },
+                                                        "full_img_url": {
+                                                            "type": "string",
+                                                            "example": "http://localhost:8000/api/v1/full-image?file=full_image.png"
+                                                        },
                                                         "two_factor_enabled": {
                                                             "type": "boolean",
                                                             "example": true
@@ -2876,6 +3424,36 @@
                                         "description": "Additional user information",
                                         "type": "string",
                                         "example": "Additional information"
+                                    },
+                                    "dob": {
+                                        "description": "Date of birth",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "1990-01-15"
+                                    },
+                                    "gender": {
+                                        "description": "Gender",
+                                        "type": "string",
+                                        "enum": [
+                                            "Male",
+                                            "Female"
+                                        ],
+                                        "example": "Male"
+                                    },
+                                    "nationality": {
+                                        "description": "Nationality",
+                                        "type": "string",
+                                        "example": "Canadian"
+                                    },
+                                    "country_of_origin": {
+                                        "description": "Country of origin",
+                                        "type": "string",
+                                        "example": "Canada"
+                                    },
+                                    "workforce_group": {
+                                        "description": "Workforce group",
+                                        "type": "string",
+                                        "example": "Construction"
                                     }
                                 },
                                 "type": "object"
@@ -2929,6 +3507,31 @@
                                                         "job_title": {
                                                             "type": "string",
                                                             "example": "Field Worker"
+                                                        },
+                                                        "dob": {
+                                                            "type": "string",
+                                                            "format": "date",
+                                                            "example": "1990-01-15"
+                                                        },
+                                                        "gender": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "Male",
+                                                                "Female"
+                                                            ],
+                                                            "example": "Male"
+                                                        },
+                                                        "nationality": {
+                                                            "type": "string",
+                                                            "example": "Canadian"
+                                                        },
+                                                        "country_of_origin": {
+                                                            "type": "string",
+                                                            "example": "Canada"
+                                                        },
+                                                        "workforce_group": {
+                                                            "type": "string",
+                                                            "example": "Construction"
                                                         },
                                                         "updated_at": {
                                                             "type": "string",
@@ -3033,12 +3636,18 @@
                                     "inactive_reason": {
                                         "description": "Reason for inactivity (optional)",
                                         "type": "string",
-                                        "example": "vacation"
+                                        "example": "training"
                                     },
                                     "inactive_reason_details": {
                                         "description": "Additional details about inactivity (optional)",
                                         "type": "string",
-                                        "example": "On vacation until next week"
+                                        "example": "\u0442\u0448\u0449\u043e\u0442\u0448\u04409\u0448"
+                                    },
+                                    "inactive_until": {
+                                        "description": "End date for inactivity (optional)",
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2025-10-14"
                                     }
                                 },
                                 "type": "object"
@@ -3075,11 +3684,16 @@
                                                         },
                                                         "inactive_reason": {
                                                             "type": "string",
-                                                            "example": ""
+                                                            "example": "training"
                                                         },
                                                         "inactive_reason_details": {
                                                             "type": "string",
-                                                            "example": ""
+                                                            "example": "\u0442\u0448\u0449\u043e\u0442\u0448\u04409\u0448"
+                                                        },
+                                                        "inactive_until": {
+                                                            "type": "string",
+                                                            "format": "date",
+                                                            "example": "2025-10-14"
                                                         },
                                                         "updated_at": {
                                                             "type": "string",
@@ -3171,6 +3785,448 @@
                                         },
                                         "data": {
                                             "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/profile/emergency": {
+            "get": {
+                "tags": [
+                    "Profile"
+                ],
+                "summary": "Get emergency contact information",
+                "description": "Retrieve emergency contact and medical information for the authenticated user",
+                "operationId": "5b9a53bf84a9faf8837c7a383358ccf1",
+                "responses": {
+                    "200": {
+                        "description": "Emergency contact information retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Emergency contact information retrieved successfully"
+                                        },
+                                        "data": {
+                                            "$ref": "#/components/schemas/EmergencyContact"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Failed to retrieve emergency contact information"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Profile"
+                ],
+                "summary": "Update emergency contact information",
+                "description": "Update emergency contact and medical information for the authenticated user",
+                "operationId": "2e1423a3df420e7498bffa6a26e2e7f0",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "data": {
+                                        "$ref": "#/components/schemas/EmergencyContact"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Emergency contact information updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Emergency contact information retrieved successfully"
+                                        },
+                                        "data": {
+                                            "$ref": "#/components/schemas/EmergencyContact"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid request format. Expected data object."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Failed to update emergency contact information"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/profile/professional": {
+            "get": {
+                "tags": [
+                    "Profile"
+                ],
+                "summary": "Get professional data",
+                "description": "Retrieve professional information including work experience, education, certifications, and skills for the authenticated user",
+                "operationId": "70b0e98e8e75970c4dbaf9ae3add3baf",
+                "responses": {
+                    "200": {
+                        "description": "Professional data retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Professional data retrieved successfully"
+                                        },
+                                        "data": {
+                                            "$ref": "#/components/schemas/ProfessionalData"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Failed to retrieve professional data"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Profile"
+                ],
+                "summary": "Update professional data",
+                "description": "Update professional information including work experience, education, certifications, and skills for the authenticated user",
+                "operationId": "5d23716a92e19ffb7e50787b27156ed7",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "data": {
+                                        "$ref": "#/components/schemas/ProfessionalData"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Professional data updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Professional data retrieved successfully"
+                                        },
+                                        "data": {
+                                            "$ref": "#/components/schemas/ProfessionalData"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid request format. Expected data object."
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Failed to update professional data"
                                         }
                                     },
                                     "type": "object"
@@ -6013,6 +7069,107 @@
                 }
             }
         },
+        "/api/v1/2fa/toggle": {
+            "post": {
+                "tags": [
+                    "Two-Factor"
+                ],
+                "summary": "Toggle 2FA for user",
+                "description": "Enable or disable two-factor authentication for the authenticated user",
+                "operationId": "89219d9e8dbd9cd123fef3fb8b7f7d6b",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "enabled"
+                                ],
+                                "properties": {
+                                    "enabled": {
+                                        "description": "Enable or disable 2FA",
+                                        "type": "boolean",
+                                        "example": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "2FA status updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": true
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Two-factor authentication enabled"
+                                        },
+                                        "two_factor_enabled": {
+                                            "type": "boolean",
+                                            "example": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "success": {
+                                            "type": "boolean",
+                                            "example": false
+                                        },
+                                        "error": {
+                                            "type": "string",
+                                            "example": "Failed to update 2FA status"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/workers": {
             "get": {
                 "tags": [
@@ -6647,6 +7804,229 @@
             }
         }
     },
+    "components": {
+        "schemas": {
+            "EmergencyContact": {
+                "properties": {
+                    "primary_contact_name": {
+                        "type": "string",
+                        "example": "John Smith"
+                    },
+                    "primary_contact_phone": {
+                        "type": "string",
+                        "example": "(555) 123-4567"
+                    },
+                    "primary_contact_relationship": {
+                        "type": "string",
+                        "example": "Wife"
+                    },
+                    "secondary_contact_name": {
+                        "type": "string",
+                        "example": "Jane Doe"
+                    },
+                    "secondary_contact_phone": {
+                        "type": "string",
+                        "example": "(555) 987-6543"
+                    },
+                    "secondary_contact_relationship": {
+                        "type": "string",
+                        "example": "Sister"
+                    },
+                    "blood_type": {
+                        "type": "string",
+                        "example": "A+"
+                    },
+                    "allergies": {
+                        "type": "string",
+                        "example": "Penicillin, dust"
+                    },
+                    "medical_conditions": {
+                        "type": "string",
+                        "example": "Diabetes, asthma"
+                    },
+                    "medications": {
+                        "type": "string",
+                        "example": "Insulin, inhaler"
+                    },
+                    "medical_notes": {
+                        "type": "string",
+                        "example": "Patient has severe allergies to shellfish"
+                    },
+                    "insurance_company": {
+                        "type": "string",
+                        "example": "Blue Cross Blue Shield"
+                    },
+                    "policy_number": {
+                        "type": "string",
+                        "example": "BC123456789"
+                    },
+                    "insurance_emergency_contact": {
+                        "type": "string",
+                        "example": "(555) 800-HELP"
+                    }
+                },
+                "type": "object"
+            },
+            "ProfessionalData": {
+                "properties": {
+                    "work_experience": {
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "company": {
+                                    "type": "string",
+                                    "example": "ABC Construction"
+                                },
+                                "position": {
+                                    "type": "string",
+                                    "example": "Senior Project Manager"
+                                },
+                                "start_date": {
+                                    "type": "string",
+                                    "format": "date",
+                                    "example": "2020-01-15"
+                                },
+                                "end_date": {
+                                    "type": "string",
+                                    "format": "date",
+                                    "example": "2023-12-31"
+                                },
+                                "description": {
+                                    "type": "string",
+                                    "example": "Managed large construction projects"
+                                }
+                            },
+                            "type": "object"
+                        }
+                    },
+                    "education": {
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "institution": {
+                                    "type": "string",
+                                    "example": "University of Toronto"
+                                },
+                                "degree": {
+                                    "type": "string",
+                                    "example": "Bachelor of Engineering"
+                                },
+                                "field": {
+                                    "type": "string",
+                                    "example": "Civil Engineering"
+                                },
+                                "graduation_year": {
+                                    "type": "integer",
+                                    "example": 2018
+                                }
+                            },
+                            "type": "object"
+                        }
+                    },
+                    "certifications": {
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "example": "PMP Certification"
+                                },
+                                "issuer": {
+                                    "type": "string",
+                                    "example": "PMI"
+                                },
+                                "issue_date": {
+                                    "type": "string",
+                                    "format": "date",
+                                    "example": "2022-06-15"
+                                },
+                                "expiry_date": {
+                                    "type": "string",
+                                    "format": "date",
+                                    "example": "2025-06-15"
+                                }
+                            },
+                            "type": "object"
+                        }
+                    },
+                    "safety_certifications": {
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "example": "OSHA 30-Hour Construction"
+                                },
+                                "issuer": {
+                                    "type": "string",
+                                    "example": "OSHA"
+                                },
+                                "issue_date": {
+                                    "type": "string",
+                                    "format": "date",
+                                    "example": "2023-01-10"
+                                },
+                                "expiry_date": {
+                                    "type": "string",
+                                    "format": "date",
+                                    "example": "2026-01-10"
+                                }
+                            },
+                            "type": "object"
+                        }
+                    },
+                    "skills": {
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "category": {
+                                    "type": "string",
+                                    "example": "Technical"
+                                },
+                                "skills": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string"
+                                    },
+                                    "example": [
+                                        "Project Management",
+                                        "AutoCAD",
+                                        "Budget Planning"
+                                    ]
+                                }
+                            },
+                            "type": "object"
+                        }
+                    },
+                    "equipment": {
+                        "type": "array",
+                        "items": {
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "example": "Personal Protective Equipment"
+                                },
+                                "type": {
+                                    "type": "string",
+                                    "example": "Safety"
+                                },
+                                "certification_required": {
+                                    "type": "boolean",
+                                    "example": true
+                                }
+                            },
+                            "type": "object"
+                        }
+                    },
+                    "professional_summary": {
+                        "type": "string",
+                        "example": "Experienced construction project manager with 10+ years in the industry"
+                    }
+                },
+                "type": "object"
+            }
+        }
+    },
     "tags": [
         {
             "name": "Health",
@@ -6685,12 +8065,20 @@
             "description": "Endpoints for n8n workflow integration"
         },
         {
-            "name": "Database",
-            "description": "Database operations"
+            "name": "Languages",
+            "description": "Language management endpoints"
         },
         {
-            "name": "Patients",
-            "description": "Patient management endpoints"
+            "name": "Worker Languages",
+            "description": "Worker language proficiency management endpoints"
+        },
+        {
+            "name": "Two-Factor",
+            "description": "Two-factor authentication endpoints for SMS and email verification"
+        },
+        {
+            "name": "Database",
+            "description": "Database operations"
         },
         {
             "name": "Plans",
@@ -6699,10 +8087,6 @@
         {
             "name": "Registration",
             "description": "User registration and invitation system endpoints"
-        },
-        {
-            "name": "Two-Factor",
-            "description": "Two-factor authentication management"
         }
     ]
 }

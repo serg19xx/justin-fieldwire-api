@@ -11,10 +11,7 @@ use Monolog\Logger;
 use OpenApi\Annotations as OA;
 
 /**
- * @OA\Tag(
- *     name="Two-Factor",
- *     description="Two-factor authentication management"
- * )
+ * Two-Factor Authentication Controller
  */
 class TwoFactorController
 {
@@ -149,7 +146,7 @@ class TwoFactorController
 
             // Generate verification code
             $code = $this->twilioService->generateVerificationCode();
-            $expiresAt = date('Y-m-d H:i:s', time() + 600); // 10 minutes
+            $expiresAt = time() + 60; // 1 minute from now (Unix timestamp)
 
             // Store verification code in database
             $this->storeVerificationCode($user['id'], $code, $expiresAt);
@@ -334,25 +331,17 @@ class TwoFactorController
                 'error_code' => 0,
                 'status' => 'success',
                 'message' => 'Verification successful',
-                'data' => [
-                    'user' => [
-                        'id' => $user['id'],
-                        'email' => $user['email'],
-                        'first_name' => $user['first_name'],
-                        'last_name' => $user['last_name'],
-                        'name' => $user['first_name'] . ' ' . $user['last_name'],
-                        'phone' => $user['phone'],
-                        '' => $user[''],
-                        'job_title' => $user['job_title'],
-                        'status' => $user['status'],
-                        'additional_info' => $user['additional_info'],
-                        'avatar_url' => $user['avatar_url'],
-                        'two_factor_enabled' => (bool)$user['two_factor_enabled'],
-                        'last_login' => $user['last_login']
-                    ],
-                    'token' => $token,
-                    'expires_at' => date('c', time() + 3600)
-                ]
+                'token' => $token,
+                'user' => [
+                    'id' => $user['id'],
+                    'email' => $user['email'],
+                    'first_name' => $user['first_name'],
+                    'last_name' => $user['last_name'],
+                    'name' => $user['first_name'] . ' ' . $user['last_name'],
+                    'phone' => $user['phone'],
+                    'two_factor_enabled' => (bool)($user['two_factor_enabled'] ?? false)
+                ],
+                'expires_at' => date('c', time() + 3600)
             ]);
 
         } catch (\Exception $e) {
@@ -391,7 +380,7 @@ class TwoFactorController
     {
         try {
             $connection = Database::getConnection();
-            $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, , job_title, status, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_v_users WHERE email = ?';
+            $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, job_title, status, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_v_users WHERE email = ?';
             $result = $connection->executeQuery($sql, [$email]);
             $user = $result->fetchAssociative();
             return $user ?: null;
@@ -408,7 +397,7 @@ class TwoFactorController
     {
         try {
             $connection = Database::getConnection();
-            $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, , job_title, status, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_v_users WHERE id = ?';
+            $sql = 'SELECT id, email, password_hash, first_name, last_name, phone, job_title, status, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency, invitation_status, invitation_token, invitation_expires_at, created_at, updated_at, archived_at FROM fw_v_users WHERE id = ?';
             $result = $connection->executeQuery($sql, [$userId]);
             $user = $result->fetchAssociative();
             return $user ?: null;
@@ -421,25 +410,42 @@ class TwoFactorController
         }
     }
 
-    private function storeVerificationCode(int $userId, string $code, string $expiresAt): bool
+    private function storeVerificationCode(int $userId, string $code, int $expiresAt): bool
     {
         try {
             $connection = Database::getConnection();
             
             // Delete any existing codes for this user
-            $connection->executeStatement('DELETE FROM two_factor_codes WHERE user_id = ?', [$userId]);
+            $connection->executeStatement('DELETE FROM fw_2fa_codes WHERE user_id = ?', [$userId]);
+            
+            $createdAt = time();
+            
+            $this->logger->info('Storing verification code', [
+                'user_id' => $userId,
+                'code' => $code,
+                'expires_at' => $expiresAt,
+                'created_at' => $createdAt,
+                'expires_in_seconds' => $expiresAt - $createdAt
+            ]);
             
             // Insert new code
             $connection->executeStatement(
-                'INSERT INTO two_factor_codes (user_id, code, expires_at, created_at) VALUES (?, ?, ?, NOW())',
-                [$userId, $code, $expiresAt]
+                'INSERT INTO fw_2fa_codes (user_id, code, expires_at, created_at) VALUES (?, ?, ?, ?)',
+                [$userId, $code, $expiresAt, $createdAt]
             );
+            
+            $this->logger->info('Verification code stored successfully', [
+                'user_id' => $userId,
+                'code' => $code
+            ]);
             
             return true;
         } catch (Exception $e) {
             $this->logger->error('Database error storing verification code', [
                 'error' => $e->getMessage(),
-                'user_id' => $userId
+                'user_id' => $userId,
+                'code' => $code,
+                'expires_at' => $expiresAt
             ]);
             return false;
         }
@@ -449,9 +455,32 @@ class TwoFactorController
     {
         try {
             $connection = Database::getConnection();
-            $sql = 'SELECT * FROM two_factor_codes WHERE user_id = ? AND code = ? AND expires_at > NOW() AND used = 0';
+            
+            // Get the code record
+            $sql = 'SELECT * FROM fw_2fa_codes WHERE user_id = ? AND code = ? AND used = 0';
             $result = $connection->executeQuery($sql, [$userId, $code]);
-            return $result->fetchAssociative() !== false;
+            $codeRecord = $result->fetchAssociative();
+            
+            if (!$codeRecord) {
+                return false; // Code not found or already used
+            }
+            
+            // Simple check: current time > expires_at timestamp
+            $currentTime = time();
+            $expiresAt = (int)$codeRecord['expires_at'];
+            
+            if ($currentTime > $expiresAt) {
+                $this->logger->info('Code expired', [
+                    'user_id' => $userId,
+                    'code' => $code,
+                    'expires_at' => $expiresAt,
+                    'current_time' => $currentTime,
+                    'expired_seconds_ago' => $currentTime - $expiresAt
+                ]);
+                return false;
+            }
+            
+            return true;
         } catch (Exception $e) {
             $this->logger->error('Database error verifying code', [
                 'error' => $e->getMessage(),
@@ -466,7 +495,7 @@ class TwoFactorController
         try {
             $connection = Database::getConnection();
             $connection->executeStatement(
-                'UPDATE two_factor_codes SET used = 1, used_at = NOW() WHERE user_id = ? AND code = ?',
+                'UPDATE fw_2fa_codes SET used = 1, used_at = NOW() WHERE user_id = ? AND code = ?',
                 [$userId, $code]
             );
             return true;
@@ -504,7 +533,6 @@ class TwoFactorController
             'user_id' => $user['id'],
             'email' => $user['email'],
             'name' => $user['first_name'] . ' ' . $user['last_name'],
-            '' => $user[''],
             'iat' => time(),
             'exp' => time() + 3600
         ]);
@@ -551,7 +579,45 @@ class TwoFactorController
     }
 
     /**
-     * Toggle 2FA status for user
+     * @OA\Post(
+     *     path="/api/v1/2fa/toggle",
+     *     tags={"Two-Factor"},
+     *     summary="Toggle 2FA for user",
+     *     description="Enable or disable two-factor authentication for the authenticated user",
+     *     security={{"bearerAuth": {}}},
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"enabled"},
+     *             @OA\Property(property="enabled", type="boolean", example=true, description="Enable or disable 2FA")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="2FA status updated successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=true),
+     *             @OA\Property(property="message", type="string", example="Two-factor authentication enabled"),
+     *             @OA\Property(property="two_factor_enabled", type="boolean", example=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="error", type="string", example="Unauthorized")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="success", type="boolean", example=false),
+     *             @OA\Property(property="error", type="string", example="Failed to update 2FA status")
+     *         )
+     *     )
+     * )
      */
     public function toggle2FA(): void
     {
