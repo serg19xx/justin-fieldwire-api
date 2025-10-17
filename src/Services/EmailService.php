@@ -101,6 +101,9 @@ class EmailService
             $email->setSubject($subject);
             $email->addTo($to, $toName ?: $to);
             $email->addContent("text/plain", $message);
+            
+            // Disable click tracking to preserve original URLs
+            $email->setClickTracking(false, false);
 
             $response = $this->sendGrid->send($email);
 
@@ -414,6 +417,9 @@ class EmailService
             $mail->addTo($email, $recipientName);
             $mail->addContent("text/plain", $textContent);
             $mail->addContent("text/html", $htmlContent);
+            
+            // Disable click tracking to preserve original URLs (important for reset password links)
+            $mail->setClickTracking(false, false);
 
             $response = $this->sendGrid->send($mail);
             

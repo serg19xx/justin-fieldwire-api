@@ -77,6 +77,7 @@ class AuthMiddleware
 
             // Set user context for the request
             Flight::set('current_user', $user);
+            $this->logger->info('Auth successful, returning true', ['user_id' => $user['id']]);
             
             return true;
 

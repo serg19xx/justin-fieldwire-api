@@ -128,11 +128,8 @@ class ProjectController
      */
     public function getProjects(): void
     {
-        // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
+        $this->logger->info('ProjectController::getProjects called');
+        
         try {
             $request = Flight::request();
             $page = (int)($request->query['page'] ?? 1);
@@ -322,11 +319,8 @@ class ProjectController
      */
     public function getProject(int $id): void
     {
-        // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
+        $this->logger->info('ProjectController::getProject called', ['id' => $id]);
+        
         try {
             $connection = $this->database->getConnection();
             
@@ -451,11 +445,8 @@ class ProjectController
      */
     public function createProject(): void
     {
-        // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
+        $this->logger->info('ProjectController::createProject called');
+        
         try {
             $request = Flight::request();
             $data = json_decode($request->getBody(), true);
@@ -597,11 +588,8 @@ class ProjectController
      */
     public function updateProject(int $id): void
     {
-        // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
+        $this->logger->info('ProjectController::updateProject called', ['id' => $id]);
+        
         try {
             $request = Flight::request();
             $data = json_decode($request->getBody(), true);
@@ -768,12 +756,9 @@ class ProjectController
      */
     public function deleteProject(int $id): void
     {
-        // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
-        try {
+        $this->logger->info('ProjectController::deleteProject called', ['id' => $id]);
+        
+        try{
             $connection = $this->database->getConnection();
             
             // Проверяем, существует ли проект

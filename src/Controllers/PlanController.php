@@ -78,10 +78,8 @@ class PlanController
      */
     public function getFolderTree(): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
+        $this->logger->info('PlanController::getFolderTree called');
+        
         $projectId = $_GET['project_id'] ?? null;
         if (!$projectId) {
             Flight::json([
@@ -191,10 +189,6 @@ class PlanController
      */
     public function getFolderContent(int $folderId): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $connection = $this->database->getConnection();
 
@@ -309,10 +303,6 @@ class PlanController
      */
     public function createFolder(): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         $input = json_decode(file_get_contents('php://input'), true);
         
         if (!$input) {
@@ -450,10 +440,6 @@ class PlanController
      */
     public function deleteFolder(int $folderId): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $connection = $this->database->getConnection();
 
@@ -583,10 +569,6 @@ class PlanController
      */
     public function uploadFile(): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             // Проверяем наличие файла
             if (!isset($_FILES['file']) || $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
@@ -737,10 +719,6 @@ class PlanController
      */
     public function deleteFile(int $fileId): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $connection = $this->database->getConnection();
 
@@ -822,10 +800,6 @@ class PlanController
      */
     public function downloadFile(int $fileId): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-    
         try {
             $connection = $this->database->getConnection();
     
@@ -1010,10 +984,6 @@ class PlanController
      */
     public function moveFile(int $fileId): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $request = json_decode(Flight::request()->getBody(), true);
             $folderId = $request['folder_id'] ?? null;
@@ -1148,10 +1118,6 @@ class PlanController
      */
     public function copyFile(int $fileId): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $request = json_decode(Flight::request()->getBody(), true);
             $folderId = $request['folder_id'] ?? null;
@@ -1315,10 +1281,6 @@ class PlanController
      */
     public function moveFolder(int $folderId): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $request = json_decode(Flight::request()->getBody(), true);
             $parentId = $request['parent_id'] ?? null;
@@ -1460,10 +1422,6 @@ class PlanController
      */
     public function copyFolder(int $folderId): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $request = json_decode(Flight::request()->getBody(), true);
             $parentId = $request['parent_id'] ?? null;
@@ -1749,10 +1707,6 @@ class PlanController
      */
     public function renameFile(int $fileId): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $request = json_decode(Flight::request()->getBody(), true);
             $newName = trim($request['new_name'] ?? '');
@@ -1889,10 +1843,6 @@ class PlanController
      */
     public function renameFolder(int $folderId): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $request = json_decode(Flight::request()->getBody(), true);
             $newName = trim($request['new_name'] ?? '');
@@ -2021,10 +1971,6 @@ class PlanController
      */
     public function updateFileDescription(int $fileId): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $request = json_decode(Flight::request()->getBody(), true);
             $description = trim($request['description'] ?? '');

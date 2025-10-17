@@ -50,10 +50,6 @@ class PharmacyController
     public function getPharmacies()
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
@@ -120,10 +116,6 @@ class PharmacyController
     public function getPharmacy($id = null)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([
@@ -176,10 +168,6 @@ class PharmacyController
     public function createPharmacy()
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $data = Flight::request()->data;
 
@@ -242,10 +230,6 @@ class PharmacyController
     public function updatePharmacy($id)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([
@@ -329,10 +313,6 @@ class PharmacyController
     public function deletePharmacy($id)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([
