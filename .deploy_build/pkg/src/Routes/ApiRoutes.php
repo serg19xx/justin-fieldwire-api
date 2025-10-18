@@ -30,18 +30,7 @@ class ApiRoutes
 
     public function register(): void
     {
-        // Add CORS headers for all API routes
-        Flight::before('start', function() {
-            header('Access-Control-Allow-Origin: *');
-            header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS');
-            header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
-            header('Access-Control-Allow-Credentials: true');
-            
-            if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-                http_response_code(200);
-                exit();
-            }
-        });
+        // CORS headers are handled by CorsMiddleware in Application.php
 
         // API v1 routes
         $this->registerV1Routes();
@@ -107,6 +96,7 @@ class ApiRoutes
                                 'auth_login' => 'POST /api/v1/auth/login',
                                 'auth_logout' => 'POST /api/v1/auth/logout',
                                 'auth_check_session' => 'POST /api/v1/auth/check-session',
+                                'auth_refresh_token' => 'POST /api/v1/auth/refresh-token',
                                 'auth_validate_invitation' => 'GET /api/v1/auth/validate-invitation-token',
                                 'auth_change_password' => 'POST /api/v1/auth/change-password',
                                 'auth_forgot_password' => 'POST /api/v1/auth/forgot-password',
@@ -179,6 +169,7 @@ class ApiRoutes
         });
         
         Flight::route('POST /api/v1/auth/check-session', [new AuthController($this->logger), 'checkSession']);
+        Flight::route('POST /api/v1/auth/refresh-token', [new AuthController($this->logger), 'refreshToken']);
         Flight::route('GET /api/v1/auth/validate-invitation-token', [new AuthController($this->logger), 'validateInvitationToken']);
         Flight::route('POST /api/v1/auth/change-password', [new AuthController($this->logger), 'changePassword']);
         Flight::route('POST /api/v1/auth/forgot-password', [new AuthController($this->logger), 'forgotPassword']);

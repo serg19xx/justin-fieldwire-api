@@ -199,62 +199,36 @@ class EmailService
      */
     public function sendVerificationCode(string $email, string $code, string $userName = 'User', string $provider = 'auto'): bool
     {
-        $subject = 'Your FieldWire Access Code';
+        $subject = 'Your FieldWire Verification Code';
         
-        // HTML version to avoid spam filters
-        $htmlMessage = "
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset='UTF-8'>
-            <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-            <title>FieldWire Access Code</title>
-        </head>
-        <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;'>
-            <div style='background: #f8f9fa; padding: 30px; border-radius: 10px; border: 1px solid #e9ecef;'>
-                <h2 style='color: #2c3e50; margin-bottom: 20px;'>Hello {$userName}!</h2>
-                
-                <p style='font-size: 16px; margin-bottom: 20px;'>You requested an access code for your FieldWire account.</p>
-                
-                <div style='background: #ffffff; padding: 20px; border-radius: 8px; border: 2px solid #3498db; text-align: center; margin: 20px 0;'>
-                    <h3 style='color: #2c3e50; margin: 0 0 10px 0; font-size: 24px;'>Your Access Code</h3>
-                    <div style='font-size: 32px; font-weight: bold; color: #3498db; letter-spacing: 5px; font-family: monospace;'>{$code}</div>
-                </div>
-                
-                <p style='font-size: 14px; color: #7f8c8d; margin-bottom: 20px;'>
-                    <strong>⏰ This code expires in 1 minute</strong><br>
-                    Enter this code in the FieldWire application to complete your login.
-                </p>
-                
-                <div style='background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin: 20px 0;'>
-                    <p style='margin: 0; font-size: 14px; color: #856404;'>
-                        <strong>🔒 Security Notice:</strong> If you didn't request this code, please ignore this email. 
-                        Your account remains secure.
-                    </p>
-                </div>
-                
-                <hr style='border: none; border-top: 1px solid #e9ecef; margin: 30px 0;'>
-                
-                <p style='font-size: 12px; color: #7f8c8d; text-align: center; margin: 0;'>
-                    This email was sent by FieldWire API<br>
-                    <a href='https://medicalcontractor.ca' style='color: #3498db; text-decoration: none;'>Medical Contractor</a> | 
-                    <a href='https://fieldwire.medicalcontractor.ca' style='color: #3498db; text-decoration: none;'>FieldWire</a>
-                </p>
-            </div>
-        </body>
-        </html>";
-        
-        // Plain text version
-        $textMessage = "Hello {$userName}!\n\n";
-        $textMessage .= "You requested an access code for your FieldWire account.\n\n";
-        $textMessage .= "Your Access Code: {$code}\n\n";
-        $textMessage .= "This code expires in 1 minute.\n";
-        $textMessage .= "Enter this code in the FieldWire application to complete your login.\n\n";
-        $textMessage .= "Security Notice: If you didn't request this code, please ignore this email.\n\n";
-        $textMessage .= "Best regards,\nFieldWire Team\n";
-        $textMessage .= "https://medicalcontractor.ca | https://fieldwire.medicalcontractor.ca";
+        try {
+            // Initialize Twig
+            $loader = new \Twig\Loader\FilesystemLoader(__DIR__ . '/../Templates/Email');
+            $twig = new \Twig\Environment($loader);
+            
+            // Render HTML template
+            $htmlTemplate = $twig->load('2fa-verification.html.twig');
+            $htmlMessage = $htmlTemplate->render([
+                'userName' => $userName,
+                'code' => $code,
+                'emailTitle' => '2FA Verification - FieldWire'
+            ]);
+            
+            // Plain text version
+            $textMessage = "Hello {$userName}!\n\n";
+            $textMessage .= "Your FieldWire Verification Code: {$code}\n\n";
+            $textMessage .= "This code expires in 1 minute.\n\n";
+            $textMessage .= "Enter this code to complete your login.\n\n";
+            $textMessage .= "Security Notice: If you didn't request this code, please ignore this email.\n\n";
+            $textMessage .= "Best regards,\nFieldWire Team";
 
-        return $this->sendEmailWithTemplates($email, $subject, $htmlMessage, $textMessage, $userName, $provider);
+            return $this->sendEmailWithTemplates($email, $subject, $htmlMessage, $textMessage, $userName, $provider);
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to render 2FA verification template', [
+                'error' => $e->getMessage()
+            ]);
+            return false;
+        }
     }
 
     /**
@@ -296,8 +270,8 @@ class EmailService
             $loader = new \Twig\Loader\FilesystemLoader(__DIR__ . '/../Templates/Email');
             $twig = new \Twig\Environment($loader);
             
-            // Render HTML template
-            $htmlTemplate = $twig->load('invitation.html.twig');
+            // Render HTML template (use new template)
+            $htmlTemplate = $twig->load('invitation-new.html.twig');
             $htmlContent = $htmlTemplate->render($templateData);
             
             // Render text template
@@ -383,7 +357,7 @@ class EmailService
     /**
      * Send email with HTML and text templates
      */
-    private function sendEmailWithTemplates(string $email, string $subject, string $htmlContent, string $textContent, string $recipientName, string $provider = 'auto'): bool
+    public function sendEmailWithTemplates(string $email, string $subject, string $htmlContent, string $textContent, string $recipientName, string $provider = 'auto'): bool
     {
         try {
             // Use SendGrid by default for templates, fallback to PHPMailer if not available

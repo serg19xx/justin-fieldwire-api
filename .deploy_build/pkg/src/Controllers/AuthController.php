@@ -262,9 +262,20 @@ class AuthController
                     ],
                     'requires_2fa' => false,
                     'token' => $token,
-                    'expires_at' => date('c', time() + 86400) // 24 hours from now
+                    'expires_at' => date('c', time() + 1800) // 30 minutes from now
                 ]
             ]);
+            
+            // Create and set refresh token cookie
+            try {
+                $this->createRefreshToken($user['id']);
+            } catch (\Exception $e) {
+                // Log error but don't fail login
+                $this->logger->error('Failed to create refresh token', [
+                    'user_id' => $user['id'],
+                    'error' => $e->getMessage()
+                ]);
+            }
 
         } catch (\Exception $e) {
             error_log('=== LOGIN METHOD ERROR ===');
@@ -508,6 +519,9 @@ class AuthController
                 
                 $connection->executeStatement($updateSql, [$hashedPassword, $user['id']]);
                 
+                // Revoke all refresh tokens for security
+                $this->revokeRefreshTokens($user['id']);
+                
                 // Commit transaction
                 $connection->commit();
                 
@@ -553,7 +567,7 @@ class AuthController
             'email' => $user['email'],
             'name' => $user['first_name'] . ' ' . $user['last_name'],
             'iat' => time(),
-            'exp' => time() + 3600 // 1 hour
+            'exp' => time() + 1800 // 30 minutes
         ]);
 
         $base64Header = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
@@ -747,80 +761,48 @@ class AuthController
             
             $resetLink = $frontendUrl . '/reset-password?token=' . $resetToken;
             
-            // Send email with code
+            // Send email with code using Twig template
             $userName = $user['first_name'] . ' ' . $user['last_name'];
-            $subject = 'Password Reset Request';
+            $subject = 'Password Reset Request - FieldWire';
             
-            $htmlMessage = "
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <meta charset='UTF-8'>
-                <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-                <title>Password Reset</title>
-            </head>
-            <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;'>
-                <div style='background: #f8f9fa; padding: 30px; border-radius: 10px; border: 1px solid #e9ecef;'>
-                    <h2 style='color: #2c3e50; margin-bottom: 20px;'>Password Reset Request</h2>
-                    
-                    <p style='font-size: 16px; margin-bottom: 20px;'>Hello {$userName},</p>
-                    
-                    <p style='font-size: 16px; margin-bottom: 20px;'>You requested to reset your password. Click the button below to create a new password:</p>
-                    
-                    <div style='text-align: center; margin: 30px 0;'>
-                        <a href='{$resetLink}' style='display: inline-block; background-color: #3498db; color: #ffffff; text-decoration: none; padding: 15px 40px; border-radius: 5px; font-size: 16px; font-weight: bold;'>Reset Your Password</a>
-                    </div>
-                    
-                    <p style='font-size: 14px; color: #7f8c8d; margin-bottom: 20px;'>
-                        Or copy and paste this link into your browser:<br>
-                        <a href='{$resetLink}' style='color: #3498db; word-break: break-all;'>{$resetLink}</a>
-                    </p>
-                    
-                    <div style='background: #ffffff; padding: 20px; border-radius: 8px; border: 2px solid #3498db; text-align: center; margin: 20px 0;'>
-                        <p style='margin: 0 0 10px 0; font-size: 14px; color: #7f8c8d;'>Or enter this code manually:</p>
-                        <div style='font-size: 32px; font-weight: bold; color: #3498db; letter-spacing: 5px; font-family: monospace;'>{$code}</div>
-                    </div>
-                    
-                    <p style='font-size: 14px; color: #7f8c8d; margin-bottom: 20px;'>
-                        <strong>⏰ This link and code expire in 10 minutes</strong>
-                    </p>
-                    
-                    <div style='background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin: 20px 0;'>
-                        <p style='margin: 0; font-size: 14px; color: #856404;'>
-                            <strong>🔒 Security Notice:</strong> If you didn't request this password reset, please ignore this email. 
-                            Your account remains secure.
-                        </p>
-                    </div>
-                    
-                    <hr style='border: none; border-top: 1px solid #e9ecef; margin: 30px 0;'>
-                    
-                    <p style='font-size: 12px; color: #7f8c8d; text-align: center; margin: 0;'>
-                        This email was sent by FieldWire API<br>
-                        <a href='https://medicalcontractor.ca' style='color: #3498db; text-decoration: none;'>Medical Contractor</a> | 
-                        <a href='https://fieldwire.medicalcontractor.ca' style='color: #3498db; text-decoration: none;'>FieldWire</a>
-                    </p>
-                </div>
-            </body>
-            </html>";
-            
-            $textMessage = "Hello {$userName}!\n\n";
-            $textMessage .= "You requested to reset your password.\n\n";
-            $textMessage .= "Click this link to reset your password:\n";
-            $textMessage .= "{$resetLink}\n\n";
-            $textMessage .= "Or enter this code manually: {$code}\n\n";
-            $textMessage .= "This link and code expire in 10 minutes.\n\n";
-            $textMessage .= "Security Notice: If you didn't request this password reset, please ignore this email.\n\n";
-            $textMessage .= "Best regards,\nFieldWire Team\n";
-            $textMessage .= "https://medicalcontractor.ca | https://fieldwire.medicalcontractor.ca";
-            
-            // Send email using EmailService
-            $emailService = new \App\Services\EmailService($this->logger);
-            $emailSent = $emailService->sendEmail(
-                $email,
-                $subject,
-                $textMessage,
-                $htmlMessage
-            );
+            try {
+                // Initialize Twig
+                $loader = new \Twig\Loader\FilesystemLoader(__DIR__ . '/../Templates/Email');
+                $twig = new \Twig\Environment($loader);
+                
+                // Render HTML template
+                $htmlTemplate = $twig->load('password-reset.html.twig');
+                $htmlMessage = $htmlTemplate->render([
+                    'userName' => $userName,
+                    'code' => $code,
+                    'resetLink' => $resetLink,
+                    'emailTitle' => 'Password Reset - FieldWire'
+                ]);
+                
+                // Plain text version
+                $textMessage = "Hello {$userName}!\n\n";
+                $textMessage .= "Password Reset Request\n\n";
+                $textMessage .= "Reset link: {$resetLink}\n\n";
+                $textMessage .= "Or enter this code: {$code}\n\n";
+                $textMessage .= "This link and code expire in 10 minutes.\n\n";
+                $textMessage .= "Security Notice: If you didn't request this, ignore this email.\n\n";
+                $textMessage .= "Best regards,\nFieldWire Team";
+                
+                // Send email using EmailService
+                $emailService = new \App\Services\EmailService($this->logger);
+                $emailSent = $emailService->sendEmailWithTemplates(
+                    $email,
+                    $subject,
+                    $htmlMessage,
+                    $textMessage,
+                    $userName
+                );
+            } catch (\Exception $e) {
+                $this->logger->error('Failed to render password reset template', [
+                    'error' => $e->getMessage()
+                ]);
+                $emailSent = false;
+            }
             
             if (!$emailSent) {
                 throw new \Exception('Failed to send email');
@@ -1238,6 +1220,18 @@ class AuthController
             // Calculate session duration
             $sessionDuration = $this->calculateSessionDuration($user['id']);
 
+            // Revoke refresh token from database
+            if (isset($_COOKIE['refresh_token'])) {
+                $connection = Database::getConnection();
+                $connection->executeStatement(
+                    'UPDATE fw_refresh_tokens SET revoked = 1, revoked_at = ? WHERE token = ?',
+                    [time(), $_COOKIE['refresh_token']]
+                );
+            }
+            
+            // Delete refresh token cookie
+            $this->deleteRefreshTokenCookie();
+            
             // Log logout in audit
             $this->userAuditService->logLogout($user['id'], $sessionDuration);
 
@@ -1365,7 +1359,8 @@ class AuthController
     private function getUserFromToken(): ?array
     {
         try {
-            $authHeader = Flight::request()->getHeader('Authorization');
+            // Get Authorization header from request
+            $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? Flight::request()->headers['Authorization'] ?? null;
             
             if (!$authHeader || !str_starts_with($authHeader, 'Bearer ')) {
                 return null;
@@ -1373,15 +1368,10 @@ class AuthController
 
             $token = substr($authHeader, 7); // Remove 'Bearer ' prefix
             
-            // Decode token (simplified - in production use proper JWT library)
-            $payload = json_decode(base64_decode($token), true);
+            // Decode and verify JWT token
+            $payload = $this->decodeJWT($token);
             
-            if (!$payload || !isset($payload['user_id']) || !isset($payload['exp'])) {
-                return null;
-            }
-
-            // Check if token is expired
-            if ($payload['exp'] < time()) {
+            if (!$payload || !isset($payload['user_id'])) {
                 return null;
             }
 
@@ -1399,6 +1389,51 @@ class AuthController
 
         } catch (\Exception $e) {
             $this->logger->error('Token validation error', [
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Decode and verify JWT token
+     */
+    private function decodeJWT(string $token): ?array
+    {
+        try {
+            $parts = explode('.', $token);
+            
+            if (count($parts) !== 3) {
+                return null;
+            }
+
+            [$base64Header, $base64Payload, $base64Signature] = $parts;
+
+            // Decode payload
+            $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $base64Payload)), true);
+
+            if (!$payload) {
+                return null;
+            }
+
+            // Verify signature
+            $secret = $_ENV['JWT_SECRET'] ?? 'your-secret-key-change-in-production';
+            $expectedSignature = hash_hmac('sha256', $base64Header . '.' . $base64Payload, $secret, true);
+            $expectedBase64Signature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($expectedSignature));
+
+            if (!hash_equals($expectedBase64Signature, $base64Signature)) {
+                return null;
+            }
+
+            // Check expiry
+            if (isset($payload['exp']) && $payload['exp'] < time()) {
+                return null;
+            }
+
+            return $payload;
+
+        } catch (\Exception $e) {
+            $this->logger->error('JWT decode error', [
                 'error' => $e->getMessage()
             ]);
             return null;
@@ -1456,6 +1491,256 @@ class AuthController
                 'user_id' => $userId
             ]);
         }
+    }
+
+    /**
+     * Refresh access token using refresh token
+     * 
+     * @OA\Post(
+     *     path="/api/v1/auth/refresh-token",
+     *     summary="Refresh access token",
+     *     description="Get a new access token using refresh token from httpOnly cookie",
+     *     tags={"Authentication"},
+     *     @OA\Response(
+     *         response=200,
+     *         description="Token refreshed successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Token refreshed successfully"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="token", type="string", example="eyJ0eXAiOiJKV1Q..."),
+     *                 @OA\Property(property="expires_at", type="string", format="date-time")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Refresh token not found",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Refresh token not found")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Refresh token expired or invalid",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Refresh token expired or invalid")
+     *         )
+     *     )
+     * )
+     */
+    public function refreshToken(): void
+    {
+        try {
+            // Get refresh token from cookie
+            $refreshToken = $_COOKIE['refresh_token'] ?? null;
+            
+            if (!$refreshToken) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Refresh token not found',
+                    'data' => null
+                ], 400);
+                return;
+            }
+
+            // Verify refresh token
+            $connection = Database::getConnection();
+            $sql = "SELECT rt.*, u.id as user_id, u.email, u.first_name, u.last_name, u.archived_at 
+                    FROM fw_refresh_tokens rt
+                    INNER JOIN fw_users u ON rt.user_id = u.id
+                    WHERE rt.token = ? AND rt.revoked = 0
+                    LIMIT 1";
+            
+            $result = $connection->executeQuery($sql, [$refreshToken]);
+            $tokenData = $result->fetchAssociative();
+
+            if (!$tokenData) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Refresh token expired or invalid',
+                    'data' => null
+                ], 401);
+                return;
+            }
+
+            // Check if token is expired
+            if ($tokenData['expires_at'] < time()) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Refresh token expired or invalid',
+                    'data' => null
+                ], 401);
+                return;
+            }
+
+            // Check if user is archived
+            if ($tokenData['archived_at'] !== null) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'User account has been deleted',
+                    'data' => null
+                ], 401);
+                return;
+            }
+
+            // Update last_used_at
+            $connection->executeStatement(
+                'UPDATE fw_refresh_tokens SET last_used_at = ? WHERE token = ?',
+                [time(), $refreshToken]
+            );
+
+            // Generate new access token
+            $user = [
+                'id' => $tokenData['user_id'],
+                'email' => $tokenData['email'],
+                'first_name' => $tokenData['first_name'],
+                'last_name' => $tokenData['last_name']
+            ];
+            
+            $newToken = $this->generateToken($user);
+
+            $this->logger->info('Token refreshed', [
+                'user_id' => $user['id'],
+                'ip' => Flight::request()->ip
+            ]);
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Token refreshed successfully',
+                'data' => [
+                    'token' => $newToken,
+                    'expires_at' => date('c', time() + 1800) // 30 minutes
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Token refresh error', [
+                'error' => $e->getMessage()
+            ]);
+
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Create refresh token and set httpOnly cookie
+     */
+    private function createRefreshToken(int $userId): void
+    {
+        try {
+            $connection = Database::getConnection();
+            
+            // Generate secure random token
+            $refreshToken = bin2hex(random_bytes(32));
+            $expiresAt = time() + (30 * 24 * 60 * 60); // 30 days
+            
+            // Get user agent and IP
+            $userAgent = $_SERVER['HTTP_USER_AGENT'] ?? null;
+            $ipAddress = Flight::request()->ip ?? $_SERVER['REMOTE_ADDR'] ?? null;
+
+            // Store refresh token in database
+            $connection->executeStatement(
+                'INSERT INTO fw_refresh_tokens (user_id, token, expires_at, created_at, user_agent, ip_address) 
+                 VALUES (?, ?, ?, ?, ?, ?)',
+                [$userId, $refreshToken, $expiresAt, time(), $userAgent, $ipAddress]
+            );
+
+            // Set httpOnly cookie
+            $isSecure = ($_SERVER['HTTPS'] ?? 'off') === 'on';
+            $domain = $_ENV['COOKIE_DOMAIN'] ?? '';
+            
+            // For localhost, don't set domain
+            $cookieOptions = [
+                'expires' => $expiresAt,
+                'path' => '/',
+                'secure' => $isSecure,
+                'httponly' => true,
+                'samesite' => 'Lax'
+            ];
+            
+            // Only set domain if it's not empty (for production)
+            if (!empty($domain)) {
+                $cookieOptions['domain'] = $domain;
+            }
+            
+            setcookie('refresh_token', $refreshToken, $cookieOptions);
+
+            $this->logger->info('Refresh token created', [
+                'user_id' => $userId,
+                'expires_at' => date('Y-m-d H:i:s', $expiresAt)
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to create refresh token', [
+                'error' => $e->getMessage(),
+                'user_id' => $userId
+            ]);
+        }
+    }
+
+    /**
+     * Revoke refresh token (e.g., on password change)
+     */
+    private function revokeRefreshTokens(int $userId): void
+    {
+        try {
+            $connection = Database::getConnection();
+            
+            $connection->executeStatement(
+                'UPDATE fw_refresh_tokens SET revoked = 1, revoked_at = ? WHERE user_id = ? AND revoked = 0',
+                [time(), $userId]
+            );
+
+            $this->logger->info('Refresh tokens revoked', [
+                'user_id' => $userId
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to revoke refresh tokens', [
+                'error' => $e->getMessage(),
+                'user_id' => $userId
+            ]);
+        }
+    }
+
+    /**
+     * Delete refresh token cookie
+     */
+    private function deleteRefreshTokenCookie(): void
+    {
+        $domain = $_ENV['COOKIE_DOMAIN'] ?? '';
+        $isSecure = ($_SERVER['HTTPS'] ?? 'off') === 'on';
+        
+        $cookieOptions = [
+            'expires' => time() - 3600,
+            'path' => '/',
+            'secure' => $isSecure,
+            'httponly' => true,
+            'samesite' => 'Lax'
+        ];
+        
+        // Only set domain if it's not empty (for production)
+        if (!empty($domain)) {
+            $cookieOptions['domain'] = $domain;
+        }
+        
+        setcookie('refresh_token', '', $cookieOptions);
     }
 
 }

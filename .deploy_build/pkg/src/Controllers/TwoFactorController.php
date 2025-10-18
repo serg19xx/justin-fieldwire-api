@@ -341,7 +341,7 @@ class TwoFactorController
                     'phone' => $user['phone'],
                     'two_factor_enabled' => (bool)($user['two_factor_enabled'] ?? false)
                 ],
-                'expires_at' => date('c', time() + 3600)
+                'expires_at' => date('c', time() + 1800) // 30 minutes
             ]);
 
         } catch (\Exception $e) {
@@ -534,7 +534,7 @@ class TwoFactorController
             'email' => $user['email'],
             'name' => $user['first_name'] . ' ' . $user['last_name'],
             'iat' => time(),
-            'exp' => time() + 3600
+            'exp' => time() + 1800 // 30 minutes
         ]);
 
         $base64Header = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
