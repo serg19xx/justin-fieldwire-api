@@ -50,10 +50,6 @@ class PhysicianController
     public function getPhysicians()
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
@@ -126,10 +122,6 @@ class PhysicianController
     public function getPhysician($id = null)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([
@@ -182,10 +174,6 @@ class PhysicianController
     public function createPhysician()
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $data = Flight::request()->data;
 
@@ -248,10 +236,6 @@ class PhysicianController
     public function updatePhysician($id)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([
@@ -335,10 +319,6 @@ class PhysicianController
     public function deletePhysician($id)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([

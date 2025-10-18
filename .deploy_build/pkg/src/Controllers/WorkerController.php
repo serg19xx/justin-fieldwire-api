@@ -245,8 +245,10 @@ class WorkerController
             $offset = ($page - 1) * $limit;
 
             // Базовый SQL запрос - возвращаем все поля из fw_v_users
+            $params = [];
+            
             if ($projectId && is_numeric($projectId)) {
-                // Если указан project_id, делаем JOIN с таблицей участников проекта
+                // Если указан project_id, делаем JOIN с таблицей участников проекта (только участники)
                 $sql = "SELECT 
                             u.id, u.email, u.password_hash, u.first_name, u.last_name, u.phone, u.role_id, u.job_title, 
                             u.status, u.status_reason, u.status_details, u.additional_info, u.avatar_url,
@@ -254,26 +256,14 @@ class WorkerController
                             u.invitation_status, u.invitation_token, u.invitation_sent_at, u.invitation_expires_at, 
                             u.invited_by, u.registration_completed_at, u.invitation_attempts, u.last_reminder_sent_at,
                             u.archived_at, u.role_code, u.role_name, u.role_category, u.role_description,
-                            tm.role_in_project, tm.assigned_at
+                            tm.role_in_project, tm.assigned_at,
+                            true as is_project_member
                         FROM fw_v_users u
                         INNER JOIN fw_prj_team_members tm ON u.id = tm.user_id
                         WHERE tm.project_id = ?";
                 $params[] = (int)$projectId;
-            } elseif ($prjMngrId && is_numeric($prjMngrId)) {
-                // Если указан prj_mngr_id, делаем JOIN с таблицей проектов
-                $sql = "SELECT 
-                            u.id, u.email, u.password_hash, u.first_name, u.last_name, u.phone, u.role_id, u.job_title, 
-                            u.status, u.status_reason, u.status_details, u.additional_info, u.avatar_url,
-                            u.two_factor_enabled, u.two_factor_secret, u.last_login, u.status_changed_at, u.status_end_at, u.dob, u.gender, u.nationality, u.country_of_origin, u.workforce_group, u.emergency, u.created_at, u.updated_at,
-                            u.invitation_status, u.invitation_token, u.invitation_sent_at, u.invitation_expires_at, 
-                            u.invited_by, u.registration_completed_at, u.invitation_attempts, u.last_reminder_sent_at,
-                            u.archived_at, u.role_code, u.role_name, u.role_category, u.role_description
-                        FROM fw_v_users u
-                        INNER JOIN fw_projects p ON u.id = p.prj_manager
-                        WHERE p.prj_manager = ?";
-                $params[] = (int)$prjMngrId;
             } else {
-                // Обычный запрос для всех пользователей
+                // Обычный запрос для всех пользователей (параметр prj_mngr_id игнорируется)
                 $sql = "SELECT 
                             id, email, password_hash, first_name, last_name, phone, role_id, job_title, 
                             status, status_reason, status_details, additional_info, avatar_url,
@@ -283,11 +273,6 @@ class WorkerController
                             archived_at, role_code, role_name, role_category, role_description
                         FROM fw_v_users 
                         WHERE 1=1";
-            }
-
-            // Инициализируем параметры только если project_id и prj_mngr_id не указаны
-            if ((!$projectId || !is_numeric($projectId)) && (!$prjMngrId || !is_numeric($prjMngrId))) {
-                $params = [];
             }
 
             // Фильтр по ID (точное совпадение)
@@ -554,13 +539,14 @@ class WorkerController
      *         description="Invitation data",
      *         @OA\JsonContent(
      *             required={"email", "first_name", "last_name"},
-     *             @OA\Property(property="email", type="string", format="email", example="newworker@example.com"),
-     *             @OA\Property(property="first_name", type="string", example="John"),
-     *             @OA\Property(property="last_name", type="string", example="Doe"),
-     *             @OA\Property(property="", type="string", example="Employee"),
-     *             @OA\Property(property="job_title", type="string", example="Developer"),
-     *             @OA\Property(property="phone", type="string", example="+1234567890"),
-     *             @OA\Property(property="email_provider", type="string", example="sendgrid", description="Email provider: sendgrid, phpmailer, or auto")
+     *             @OA\Property(property="email", type="string", format="email", example="newworker@example.com", description="Worker's email address"),
+     *             @OA\Property(property="first_name", type="string", example="John", description="Worker's first name"),
+     *             @OA\Property(property="last_name", type="string", example="Doe", description="Worker's last name"),
+     *             @OA\Property(property="role_id", type="integer", example=11, description="Role ID from fw_glob_roles table (optional)"),
+     *             @OA\Property(property="user_type", type="string", example="architect", description="User type string (deprecated, use role_id instead)"),
+     *             @OA\Property(property="job_title", type="string", example="Senior Architect", description="Job title (optional)"),
+     *             @OA\Property(property="phone", type="string", example="+1234567890", description="Phone number (optional)"),
+     *             @OA\Property(property="email_provider", type="string", example="auto", description="Email provider: sendgrid, phpmailer, or auto (optional)")
      *         )
      *     ),
      *     @OA\Response(
@@ -611,10 +597,22 @@ class WorkerController
             $email = $data->email;
             $firstName = $data->first_name;
             $lastName = $data->last_name;
-            $userType = 'Employee';
+            $roleId = $data->role_id ?? null;
+            $userType = $data->user_type ?? 'Employee'; // Для обратной совместимости
             $jobTitle = $data->job_title ?? null;
             $phone = $data->phone ?? null;
             $emailProvider = $data->email_provider ?? 'auto';
+            
+            // Валидация role_id если передан
+            if ($roleId !== null && !is_numeric($roleId)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Field role_id must be a number',
+                    'data' => null
+                ], 400);
+                return;
+            }
 
             // Проверяем, не существует ли уже пользователь с таким email
             $connection = $this->database->getConnection();
@@ -660,29 +658,51 @@ class WorkerController
             try {
             if ($existingUser) {
                 // Обновляем существующего пользователя
-                $sql = "UPDATE fw_v_users SET 
-                            first_name = ?, last_name = ?,  = ?, job_title = ?, phone = ?,
-                            invitation_status = 'invited', invitation_token = ?, 
+                $sql = "UPDATE fw_users SET 
+                            first_name = ?, last_name = ?, job_title = ?, phone = ?,";
+                
+                if ($roleId !== null) {
+                    $sql .= " role_id = ?,";
+                }
+                
+                $sql .= " invitation_status = 'invited', invitation_token = ?, 
                                 invitation_sent_at = NOW(), invitation_expires_at = ?, invited_by = ?,
                                 password_hash = ?
                         WHERE email = ?";
                 
-                $connection->executeStatement($sql, [
-                    $firstName, $lastName, $userType, $jobTitle, $phone,
-                        $invitationToken, $expiresAt, $currentUserId, $tempPasswordHash, $email
-                ]);
+                $params = [$firstName, $lastName, $jobTitle, $phone];
+                if ($roleId !== null) {
+                    $params[] = $roleId;
+                }
+                $params = array_merge($params, [$invitationToken, $expiresAt, $currentUserId, $tempPasswordHash, $email]);
+                
+                $connection->executeStatement($sql, $params);
             } else {
                 // Создаем нового пользователя
-                $sql = "INSERT INTO fw_v_users (
-                            email, first_name, last_name, , job_title, phone,
-                            invitation_status, invitation_token, invitation_sent_at, 
-                                invitation_expires_at, invited_by, password_hash, created_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, 'invited', ?, NOW(), ?, ?, ?, NOW())";
+                $sql = "INSERT INTO fw_users (
+                            email, first_name, last_name, job_title, phone,";
                 
-                $connection->executeStatement($sql, [
-                    $email, $firstName, $lastName, $userType, $jobTitle, $phone,
-                        $invitationToken, $expiresAt, $currentUserId, $tempPasswordHash
-                ]);
+                if ($roleId !== null) {
+                    $sql .= " role_id,";
+                }
+                
+                $sql .= " invitation_status, invitation_token, invitation_sent_at, 
+                                invitation_expires_at, invited_by, password_hash, created_at
+                            ) VALUES (?, ?, ?, ?, ?,";
+                
+                if ($roleId !== null) {
+                    $sql .= " ?,";
+                }
+                
+                $sql .= " 'invited', ?, NOW(), ?, ?, ?, NOW())";
+                
+                $params = [$email, $firstName, $lastName, $jobTitle, $phone];
+                if ($roleId !== null) {
+                    $params[] = $roleId;
+                }
+                $params = array_merge($params, [$invitationToken, $expiresAt, $currentUserId, $tempPasswordHash]);
+                
+                $connection->executeStatement($sql, $params);
             }
 
             // Отправить email с приглашением

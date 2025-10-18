@@ -50,10 +50,6 @@ class PharmacistController
     public function getPharmacists()
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
@@ -120,10 +116,6 @@ class PharmacistController
     public function getPharmacist($id = null)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([
@@ -176,10 +168,6 @@ class PharmacistController
     public function createPharmacist()
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $data = Flight::request()->data;
 
@@ -242,10 +230,6 @@ class PharmacistController
     public function updatePharmacist($id)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([
@@ -329,10 +313,6 @@ class PharmacistController
     public function deletePharmacist($id)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([

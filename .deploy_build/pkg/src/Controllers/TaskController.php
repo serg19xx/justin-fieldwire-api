@@ -126,10 +126,6 @@ class TaskController
     public function getTasks(int $projectId): void
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $request = Flight::request();
             $status = $request->query['status'] ?? null;
@@ -289,10 +285,6 @@ class TaskController
     public function getTask(int $projectId, int $taskId): void
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $connection = $this->database->getConnection();
             
@@ -438,10 +430,6 @@ class TaskController
     public function createTask(int $projectId): void
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $request = Flight::request();
             $data = json_decode($request->getBody(), true);
@@ -618,10 +606,6 @@ class TaskController
     public function updateTask(int $projectId, int $taskId): void
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $request = Flight::request();
             $data = json_decode($request->getBody(), true);
@@ -826,10 +810,6 @@ class TaskController
     public function deleteTask(int $projectId, int $taskId): void
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $connection = $this->database->getConnection();
             
@@ -1170,10 +1150,6 @@ class TaskController
     public function checkTaskBounds(int $projectId): void
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $request = Flight::request();
             $startPlanned = $request->query['start_planned'] ?? null;

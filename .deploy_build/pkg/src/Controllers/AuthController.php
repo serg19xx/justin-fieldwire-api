@@ -203,6 +203,7 @@ class AuthController
                             'name' => ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''),
                             'phone' => $user['phone'] ?? null,
                             'job_title' => $user['job_title'] ?? null,
+                            'invitation_status' => $user['invitation_status'] ?? null,
                             'status' => $user['status'] ?? 'active',
                             'additional_info' => $user['additional_info'] ?? null,
                             'avatar_url' => $user['avatar_url'] ?? null,
@@ -247,6 +248,7 @@ class AuthController
                         'name' => ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''),
                         'phone' => $user['phone'] ?? null,
                         'job_title' => $user['job_title'] ?? null,
+                        'invitation_status' => $user['invitation_status'] ?? null,
                         'status' => $user['status'] ?? 'active',
                         'additional_info' => $user['additional_info'] ?? null,
                         'avatar_url' => $user['avatar_url'] ?? null,
@@ -609,6 +611,514 @@ class AuthController
      *     )
      * )
      */
+    
+    /**
+     * @OA\Post(
+     *     path="/api/v1/auth/forgot-password",
+     *     tags={"Authentication"},
+     *     summary="Request password reset",
+     *     description="Send a password reset code to user's email",
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"email"},
+     *             @OA\Property(property="email", type="string", format="email", example="user@example.com", description="User's email address")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Password reset code sent successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Password reset code sent to your email"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="email", type="string", example="user@example.com"),
+     *                 @OA\Property(property="expires_in", type="integer", example=600, description="Code expiration time in seconds")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="User not found",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=404),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="User not found"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Failed to send reset code"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     )
+     * )
+     */
+    public function forgotPassword(): void
+    {
+        try {
+            $data = json_decode(Flight::request()->getBody(), true);
+            
+            if (!$data || !isset($data['email'])) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Email is required',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            $email = trim($data['email']);
+            
+            // Validate email format
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Invalid email format',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            $connection = Database::getConnection();
+            
+            // Find user by email
+            $sql = "SELECT id, email, first_name, last_name FROM fw_v_users WHERE email = ?";
+            $result = $connection->executeQuery($sql, [$email]);
+            $user = $result->fetchAssociative();
+            
+            if (!$user) {
+                // Don't reveal that user doesn't exist (security best practice)
+                Flight::json([
+                    'error_code' => 0,
+                    'status' => 'success',
+                    'message' => 'If an account with that email exists, a password reset code has been sent',
+                    'data' => [
+                        'email' => $email,
+                        'expires_in' => 600
+                    ]
+                ], 200);
+                return;
+            }
+            
+            // Generate 6-digit code
+            $code = str_pad((string)random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
+            $expiresAt = time() + 600; // 10 minutes
+            
+            // Store code in database (reuse 2FA codes table)
+            $connection->executeStatement(
+                'INSERT INTO fw_2fa_codes (user_id, code, expires_at, created_at) VALUES (?, ?, ?, ?)',
+                [$user['id'], $code, $expiresAt, time()]
+            );
+            
+            // Generate reset token (JWT containing email and code)
+            $resetTokenPayload = [
+                'email' => $email,
+                'code' => $code,
+                'iat' => time(),
+                'exp' => $expiresAt
+            ];
+            
+            $header = json_encode(['typ' => 'JWT', 'alg' => 'HS256']);
+            $payload = json_encode($resetTokenPayload);
+            
+            $base64Header = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
+            $base64Payload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($payload));
+            
+            $secret = $_ENV['JWT_SECRET'] ?? 'your-secret-key-change-in-production';
+            $signature = hash_hmac('sha256', $base64Header . "." . $base64Payload, $secret, true);
+            $base64Signature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
+            
+            $resetToken = $base64Header . "." . $base64Payload . "." . $base64Signature;
+            
+            // Determine frontend URL based on environment
+            $appEnv = $_ENV['APP_ENV'] ?? 'development';
+            $frontendUrl = $appEnv === 'production' 
+                ? 'https://fieldwire.medicalcontractor.ca' 
+                : 'http://localhost:3000';
+            
+            $resetLink = $frontendUrl . '/reset-password?token=' . $resetToken;
+            
+            // Send email with code
+            $userName = $user['first_name'] . ' ' . $user['last_name'];
+            $subject = 'Password Reset Request';
+            
+            $htmlMessage = "
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset='UTF-8'>
+                <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+                <title>Password Reset</title>
+            </head>
+            <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;'>
+                <div style='background: #f8f9fa; padding: 30px; border-radius: 10px; border: 1px solid #e9ecef;'>
+                    <h2 style='color: #2c3e50; margin-bottom: 20px;'>Password Reset Request</h2>
+                    
+                    <p style='font-size: 16px; margin-bottom: 20px;'>Hello {$userName},</p>
+                    
+                    <p style='font-size: 16px; margin-bottom: 20px;'>You requested to reset your password. Click the button below to create a new password:</p>
+                    
+                    <div style='text-align: center; margin: 30px 0;'>
+                        <a href='{$resetLink}' style='display: inline-block; background-color: #3498db; color: #ffffff; text-decoration: none; padding: 15px 40px; border-radius: 5px; font-size: 16px; font-weight: bold;'>Reset Your Password</a>
+                    </div>
+                    
+                    <p style='font-size: 14px; color: #7f8c8d; margin-bottom: 20px;'>
+                        Or copy and paste this link into your browser:<br>
+                        <a href='{$resetLink}' style='color: #3498db; word-break: break-all;'>{$resetLink}</a>
+                    </p>
+                    
+                    <div style='background: #ffffff; padding: 20px; border-radius: 8px; border: 2px solid #3498db; text-align: center; margin: 20px 0;'>
+                        <p style='margin: 0 0 10px 0; font-size: 14px; color: #7f8c8d;'>Or enter this code manually:</p>
+                        <div style='font-size: 32px; font-weight: bold; color: #3498db; letter-spacing: 5px; font-family: monospace;'>{$code}</div>
+                    </div>
+                    
+                    <p style='font-size: 14px; color: #7f8c8d; margin-bottom: 20px;'>
+                        <strong>⏰ This link and code expire in 10 minutes</strong>
+                    </p>
+                    
+                    <div style='background: #fff3cd; border: 1px solid #ffeaa7; padding: 15px; border-radius: 5px; margin: 20px 0;'>
+                        <p style='margin: 0; font-size: 14px; color: #856404;'>
+                            <strong>🔒 Security Notice:</strong> If you didn't request this password reset, please ignore this email. 
+                            Your account remains secure.
+                        </p>
+                    </div>
+                    
+                    <hr style='border: none; border-top: 1px solid #e9ecef; margin: 30px 0;'>
+                    
+                    <p style='font-size: 12px; color: #7f8c8d; text-align: center; margin: 0;'>
+                        This email was sent by FieldWire API<br>
+                        <a href='https://medicalcontractor.ca' style='color: #3498db; text-decoration: none;'>Medical Contractor</a> | 
+                        <a href='https://fieldwire.medicalcontractor.ca' style='color: #3498db; text-decoration: none;'>FieldWire</a>
+                    </p>
+                </div>
+            </body>
+            </html>";
+            
+            $textMessage = "Hello {$userName}!\n\n";
+            $textMessage .= "You requested to reset your password.\n\n";
+            $textMessage .= "Click this link to reset your password:\n";
+            $textMessage .= "{$resetLink}\n\n";
+            $textMessage .= "Or enter this code manually: {$code}\n\n";
+            $textMessage .= "This link and code expire in 10 minutes.\n\n";
+            $textMessage .= "Security Notice: If you didn't request this password reset, please ignore this email.\n\n";
+            $textMessage .= "Best regards,\nFieldWire Team\n";
+            $textMessage .= "https://medicalcontractor.ca | https://fieldwire.medicalcontractor.ca";
+            
+            // Send email using EmailService
+            $emailService = new \App\Services\EmailService($this->logger);
+            $emailSent = $emailService->sendEmail(
+                $email,
+                $subject,
+                $textMessage,
+                $htmlMessage
+            );
+            
+            if (!$emailSent) {
+                throw new \Exception('Failed to send email');
+            }
+            
+            $this->logger->info('Password reset code sent', [
+                'user_id' => $user['id'],
+                'email' => $email
+            ]);
+            
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Password reset code sent to your email',
+                'data' => [
+                    'email' => $email,
+                    'expires_in' => 600
+                ]
+            ], 200);
+            
+        } catch (\Exception $e) {
+            $this->logger->error('Forgot password error', [
+                'error' => $e->getMessage()
+            ]);
+            
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Failed to send reset code',
+                'data' => null
+            ], 500);
+        }
+    }
+    
+    /**
+     * @OA\Post(
+     *     path="/api/v1/auth/reset-password",
+     *     tags={"Authentication"},
+     *     summary="Reset password with token",
+     *     description="Reset user password using the token from email link",
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"token", "new_password"},
+     *             @OA\Property(property="token", type="string", example="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...", description="Reset token from email link"),
+     *             @OA\Property(property="new_password", type="string", format="password", example="NewSecurePass123!", description="New password (min 8 characters)")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Password reset successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Password reset successfully"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="email", type="string", example="user@example.com")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Invalid or expired code",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid or expired reset code"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Failed to reset password"),
+     *             @OA\Property(property="data", type="null")
+     *         )
+     *     )
+     * )
+     */
+    public function resetPassword(): void
+    {
+        $this->logger->info('resetPassword called');
+        
+        try {
+            $data = json_decode(Flight::request()->getBody(), true);
+            $this->logger->info('Request data received', ['has_token' => isset($data['token']), 'has_password' => isset($data['new_password'])]);
+            
+            // Validate required fields
+            $requiredFields = ['token', 'new_password'];
+            foreach ($requiredFields as $field) {
+                if (!isset($data[$field]) || empty(trim($data[$field]))) {
+                    Flight::json([
+                        'error_code' => 400,
+                        'status' => 'error',
+                        'message' => ucfirst(str_replace('_', ' ', $field)) . ' is required',
+                        'data' => null
+                    ], 400);
+                    return;
+                }
+            }
+            
+            $token = trim($data['token']);
+            $newPassword = $data['new_password'];
+            
+            // Decode and verify JWT token
+            $parts = explode('.', $token);
+            if (count($parts) !== 3) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Invalid reset token',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            [$headerEncoded, $payloadEncoded, $signature] = $parts;
+            
+            // Verify signature
+            $secret = $_ENV['JWT_SECRET'] ?? 'your-secret-key-change-in-production';
+            $expectedSignature = hash_hmac('sha256', $headerEncoded . "." . $payloadEncoded, $secret, true);
+            $expectedSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($expectedSignature));
+            
+            if (!hash_equals($expectedSignature, $signature)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Invalid reset token signature',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            // Decode payload
+            $payload = str_replace(['-', '_'], ['+', '/'], $payloadEncoded);
+            $payload = str_pad($payload, strlen($payload) % 4, '=', STR_PAD_RIGHT);
+            $payloadData = json_decode(base64_decode($payload), true);
+            
+            if (!$payloadData || !isset($payloadData['email']) || !isset($payloadData['code'])) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Invalid reset token payload',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            // Check token expiration
+            $currentTime = time();
+            if (!isset($payloadData['exp']) || $payloadData['exp'] < $currentTime) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Reset token has expired',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            $email = $payloadData['email'];
+            $code = $payloadData['code'];
+            
+            // Validate email format
+            if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Invalid email format',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            // Validate password strength
+            if (strlen($newPassword) < 8) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Password must be at least 8 characters long',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            $connection = Database::getConnection();
+            
+            // Find user by email
+            $sql = "SELECT id, email FROM fw_v_users WHERE email = ?";
+            $result = $connection->executeQuery($sql, [$email]);
+            $user = $result->fetchAssociative();
+            
+            if (!$user) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => 'User not found',
+                    'data' => null
+                ], 404);
+                return;
+            }
+            
+            // Verify code from database
+            $currentTime = time();
+            $codeQuery = "SELECT id, expires_at, used FROM fw_2fa_codes 
+                         WHERE user_id = ? AND code = ? 
+                         ORDER BY created_at DESC LIMIT 1";
+            $codeResult = $connection->executeQuery($codeQuery, [$user['id'], $code]);
+            $codeRecord = $codeResult->fetchAssociative();
+            
+            if (!$codeRecord) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Invalid reset code',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            // Check if code is already used
+            if ($codeRecord['used']) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Reset code has already been used',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            // Check if code is expired
+            $expiresAt = (int)$codeRecord['expires_at'];
+            if ($currentTime > $expiresAt) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Reset code has expired',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            // Start transaction
+            $connection->beginTransaction();
+            
+            try {
+                // Update password
+                $hashedPassword = password_hash($newPassword, PASSWORD_BCRYPT);
+                $connection->executeStatement(
+                    'UPDATE fw_users SET password_hash = ? WHERE id = ?',
+                    [$hashedPassword, $user['id']]
+                );
+                
+                // Mark code as used
+                $connection->executeStatement(
+                    'UPDATE fw_2fa_codes SET used = 1 WHERE id = ?',
+                    [$codeRecord['id']]
+                );
+                
+                $connection->commit();
+                
+                $this->logger->info('Password reset successful', [
+                    'user_id' => $user['id'],
+                    'email' => $email
+                ]);
+                
+                Flight::json([
+                    'error_code' => 0,
+                    'status' => 'success',
+                    'message' => 'Password reset successfully',
+                    'data' => [
+                        'email' => $email
+                    ]
+                ], 200);
+                
+            } catch (\Exception $e) {
+                $connection->rollBack();
+                throw $e;
+            }
+            
+        } catch (\Exception $e) {
+            $this->logger->error('Reset password error', [
+                'error' => $e->getMessage()
+            ]);
+            
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Failed to reset password',
+                'data' => null
+            ], 500);
+        }
+    }
+    
     public function validateInvitationToken(): void
     {
         try {

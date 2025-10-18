@@ -1,0 +1,80 @@
+{% extends "base-layout.html.twig" %}
+
+{% block content %}
+    <div class="email-title">
+        Welcome to FieldWire! 🎉
+    </div>
+    
+    <div class="email-greeting">
+        Hello <strong>{{ firstName }} {{ lastName }}</strong>,
+    </div>
+    
+    <p style="color: #4b5563; margin-bottom: 25px;">
+        You've been invited to join our team {% if jobTitle %}as a <strong>{{ jobTitle }}</strong>{% endif %}. We're excited to have you on board!
+    </p>
+    
+    {% if attemptNumber > 1 %}
+    <div style="background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 100%); border: 2px solid #fca5a5; border-radius: 10px; padding: 20px; margin: 25px 0; text-align: center;">
+        <strong style="color: #dc2626; font-size: 15px;">📬 Reminder #{{ attemptNumber - 1 }}</strong><br>
+        <span style="color: #991b1b; font-size: 14px;">This is a friendly reminder about your invitation to join FieldWire.</span>
+    </div>
+    {% endif %}
+    
+    <div class="info-box">
+        <div class="info-box-title">Your Login Credentials</div>
+        <table style="width: 100%; border-collapse: collapse;">
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="padding: 12px 0; font-weight: 600; color: #64748b;">Email:</td>
+                <td style="padding: 12px 0; text-align: right; font-family: monospace; color: #1e293b;">{{ email }}</td>
+            </tr>
+            <tr>
+                <td style="padding: 12px 0; font-weight: 600; color: #64748b;">Temporary Password:</td>
+                <td style="padding: 12px 0; text-align: right; font-family: monospace; background-color: #fef3c7; padding: 8px; border-radius: 4px; color: #92400e; font-weight: 600;">{{ tempPassword }}</td>
+            </tr>
+        </table>
+    </div>
+    
+    <div class="button-container">
+        <a href="{{ loginUrl }}" class="button">Login to Your Account</a>
+    </div>
+    
+    <p style="text-align: center; color: #6b7280; font-size: 13px; margin: 15px 0;">
+        Or copy and paste this link:
+    </p>
+    <p style="word-break: break-all; background-color: #f3f4f6; padding: 10px; border-radius: 6px; font-size: 11px; font-family: monospace; color: #374151; text-align: center;">
+        {{ loginUrl }}
+    </p>
+    
+    <div class="steps-box">
+        <div class="steps-title">🚀 Getting Started:</div>
+        <ol>
+            <li>Click the <strong>"Login to Your Account"</strong> button above</li>
+            <li>Use your <strong>email</strong> and <strong>temporary password</strong> to sign in</li>
+            <li>Create your own <strong>secure password</strong></li>
+            <li>Complete your profile setup</li>
+            <li>Start exploring the platform</li>
+        </ol>
+    </div>
+    
+    <div class="warning-box">
+        <div class="warning-icon">⏰</div>
+        <strong>Important: This invitation expires in {{ expiryHours }} hours</strong><br>
+        <span style="font-size: 13px; color: #78350f;">Expiry Date: {{ expiryDate }}</span>
+    </div>
+    
+    <div class="divider"></div>
+    
+    <div style="background-color: #f0fdf4; border-left: 4px solid #10b981; border-radius: 8px; padding: 20px; margin: 25px 0;">
+        <p style="color: #065f46; margin: 0; font-size: 15px;">
+            <strong>💬 Need Help?</strong><br>
+            <span style="color: #047857;">If you have any questions or need assistance getting started, our support team is here to help!</span>
+        </p>
+    </div>
+    
+    <div class="security-notice">
+        <div class="security-notice-title">Security Notice</div>
+        <p>This invitation was sent to <strong>{{ email }}</strong>.</p>
+        <p style="margin-top: 8px;">If you didn't expect this invitation, please ignore this email or contact our support team.</p>
+    </div>
+{% endblock %}
+

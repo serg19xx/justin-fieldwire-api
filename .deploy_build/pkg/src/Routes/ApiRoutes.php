@@ -109,10 +109,13 @@ class ApiRoutes
                                 'auth_check_session' => 'POST /api/v1/auth/check-session',
                                 'auth_validate_invitation' => 'GET /api/v1/auth/validate-invitation-token',
                                 'auth_change_password' => 'POST /api/v1/auth/change-password',
+                                'auth_forgot_password' => 'POST /api/v1/auth/forgot-password',
+                                'auth_reset_password' => 'POST /api/v1/auth/reset-password',
                                 'profile_get' => 'GET /api/v1/profile',
                                 'profile_update' => 'PUT /api/v1/profile',
                                 'profile_avatar' => 'POST /api/v1/profile/avatar',
                                 '2fa_toggle' => 'POST /api/v1/2fa/toggle',
+                                'roles_get' => 'GET /api/v1/roles',
                                 'event_rules' => 'GET /api/v1/event-rules',
                                 'event_logs_get' => 'GET /api/v1/event-logs',
                                 'event_logs_get_by_id' => 'GET /api/v1/event-logs/{id}',
@@ -178,6 +181,8 @@ class ApiRoutes
         Flight::route('POST /api/v1/auth/check-session', [new AuthController($this->logger), 'checkSession']);
         Flight::route('GET /api/v1/auth/validate-invitation-token', [new AuthController($this->logger), 'validateInvitationToken']);
         Flight::route('POST /api/v1/auth/change-password', [new AuthController($this->logger), 'changePassword']);
+        Flight::route('POST /api/v1/auth/forgot-password', [new AuthController($this->logger), 'forgotPassword']);
+        Flight::route('POST /api/v1/auth/reset-password', [new AuthController($this->logger), 'resetPassword']);
         
         // Legacy auth route for backward compatibility
         Flight::route('POST /auth/login', [new AuthController($this->logger), 'login']);
@@ -681,6 +686,14 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $medicalClinicController = new \App\Controllers\MedicalClinicController($this->logger);
                 $medicalClinicController->deleteMedicalClinic($id);
+            }
+        });
+
+        // Role routes v1 (protected)
+        Flight::route('GET /api/v1/roles', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $roleController = new \App\Controllers\RoleController($this->logger);
+                $roleController->getRoles();
             }
         });
 

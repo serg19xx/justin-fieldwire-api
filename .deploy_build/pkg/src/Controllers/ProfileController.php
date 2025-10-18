@@ -106,10 +106,6 @@ class ProfileController
     public function getProfile(): void
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $user = Flight::get('current_user');
             
@@ -257,10 +253,6 @@ class ProfileController
     public function updateProfile(): void
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $user = Flight::get('current_user');
 
@@ -358,10 +350,6 @@ class ProfileController
     public function uploadAvatar(): void
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $this->logger->info('Avatar upload request started');
             
@@ -596,10 +584,6 @@ class ProfileController
         file_put_contents('logs/app.log', date('Y-m-d H:i:s') . ' - updateWorkStatus() called' . PHP_EOL, FILE_APPEND);
         
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $user = Flight::get('current_user');
 
@@ -663,10 +647,6 @@ class ProfileController
     public function changePassword(): void
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $user = Flight::get('current_user');
 
@@ -884,10 +864,6 @@ class ProfileController
     public function getFullImage(): void
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $user = Flight::get('current_user');
             $connection = Database::getConnection();
@@ -1484,10 +1460,6 @@ class ProfileController
      */
     public function getEmergencyContact(): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $user = Flight::get('current_user');
             $connection = Database::getConnection();
@@ -1596,10 +1568,6 @@ class ProfileController
      */
     public function updateEmergencyContact(): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $user = Flight::get('current_user');
             $requestBody = Flight::request()->getBody();
@@ -1739,10 +1707,6 @@ class ProfileController
      */
     public function getProfessionalData(): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $user = Flight::get('current_user');
             $connection = Database::getConnection();
@@ -1870,10 +1834,6 @@ class ProfileController
      */
     public function updateProfessionalData(): void
     {
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $user = Flight::get('current_user');
             $requestBody = Flight::request()->getBody();

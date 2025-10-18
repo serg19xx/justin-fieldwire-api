@@ -50,10 +50,6 @@ class DriverController
     public function getDrivers()
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->province ?? null;
@@ -120,10 +116,6 @@ class DriverController
     public function getDriver($id = null)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([
@@ -176,10 +168,6 @@ class DriverController
     public function createDriver()
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             $data = Flight::request()->data;
 
@@ -242,10 +230,6 @@ class DriverController
     public function updateDriver($id)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([
@@ -329,10 +313,6 @@ class DriverController
     public function deleteDriver($id)
     {
         // Проверка токена
-        if (!$this->checkAuth()) {
-            return;
-        }
-
         try {
             if (!$id) {
                 Flight::json([
