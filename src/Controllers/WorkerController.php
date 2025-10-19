@@ -884,10 +884,25 @@ class WorkerController
         $token = $matches[1];
         
         try {
-            $decoded = base64_decode($token);
-            $payload = json_decode($decoded, true);
+            // Правильная JWT проверка
+            $parts = explode('.', $token);
             
-            if (!$payload || !isset($payload['user_id'])) {
+            if (count($parts) !== 3) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Invalid token format',
+                    'data' => null
+                ], 401);
+                return false;
+            }
+
+            [$base64Header, $base64Payload, $base64Signature] = $parts;
+
+            // Декодируем payload
+            $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $base64Payload)), true);
+
+            if (!$payload || !isset($payload['user_id']) || !isset($payload['exp'])) {
                 Flight::json([
                     'error_code' => 401,
                     'status' => 'error',
@@ -897,8 +912,23 @@ class WorkerController
                 return false;
             }
 
-            // Проверяем, не истек ли токен
-            if (isset($payload['exp']) && $payload['exp'] < time()) {
+            // Проверяем подпись
+            $secret = $_ENV['JWT_SECRET'] ?? 'your-secret-key-change-in-production';
+            $expectedSignature = hash_hmac('sha256', $base64Header . '.' . $base64Payload, $secret, true);
+            $expectedBase64Signature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($expectedSignature));
+
+            if (!hash_equals($expectedBase64Signature, $base64Signature)) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Invalid token signature',
+                    'data' => null
+                ], 401);
+                return false;
+            }
+
+            // Проверяем срок действия
+            if ($payload['exp'] < time()) {
                 Flight::json([
                     'error_code' => 401,
                     'status' => 'error',

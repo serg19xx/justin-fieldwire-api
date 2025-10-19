@@ -221,6 +221,8 @@ class WorkerController
     public function getWorkers(): void
     {
         $this->logger->info('WorkerController::getWorkers called');
+
+        
         
         try {
             $request = Flight::request();
@@ -250,28 +252,32 @@ class WorkerController
             if ($projectId && is_numeric($projectId)) {
                 // Если указан project_id, делаем JOIN с таблицей участников проекта (только участники)
                 $sql = "SELECT 
-                            u.id, u.email, u.password_hash, u.first_name, u.last_name, u.phone, u.role_id, u.job_title, 
-                            u.status, u.status_reason, u.status_details, u.additional_info, u.avatar_url,
-                            u.two_factor_enabled, u.two_factor_secret, u.last_login, u.status_changed_at, u.status_end_at, u.dob, u.gender, u.nationality, u.country_of_origin, u.workforce_group, u.emergency, u.created_at, u.updated_at,
-                            u.invitation_status, u.invitation_token, u.invitation_sent_at, u.invitation_expires_at, 
-                            u.invited_by, u.registration_completed_at, u.invitation_attempts, u.last_reminder_sent_at,
-                            u.archived_at, u.role_code, u.role_name, u.role_category, u.role_description,
+                            u.id, u.email, u.first_name, u.last_name, u.dob, u.gender, u.nationality, u.country_of_origin, 
+                            u.workforce_group, u.phone, u.role_id, u.job_title, u.city, u.status, u.emergency, 
+                            u.status_changed_at, u.status_end_at, u.status_reason, u.status_details, u.additional_info, 
+                            u.full_img_url, u.avatar_url, u.created_at, u.updated_at, u.invitation_status, 
+                            u.invitation_sent_at, u.invitation_expires_at, u.invited_by, u.registration_completed_at, 
+                            u.invitation_attempts, u.last_reminder_sent_at, u.archived_at,
+                            r.id as role_id, r.code as role_code, r.name as role_name, r.category as role_category, r.description as role_description,
                             tm.role_in_project, tm.assigned_at,
                             true as is_project_member
-                        FROM fw_v_users u
+                        FROM fw_users u
+                        LEFT JOIN fw_glob_roles r ON u.role_id = r.id
                         INNER JOIN fw_prj_team_members tm ON u.id = tm.user_id
                         WHERE tm.project_id = ?";
                 $params[] = (int)$projectId;
             } else {
                 // Обычный запрос для всех пользователей (параметр prj_mngr_id игнорируется)
                 $sql = "SELECT 
-                            id, email, password_hash, first_name, last_name, phone, role_id, job_title, 
-                            status, status_reason, status_details, additional_info, avatar_url,
-                            two_factor_enabled, two_factor_secret, last_login, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, emergency, created_at, updated_at,
-                            invitation_status, invitation_token, invitation_sent_at, invitation_expires_at, 
-                            invited_by, registration_completed_at, invitation_attempts, last_reminder_sent_at,
-                            archived_at, role_code, role_name, role_category, role_description
-                        FROM fw_v_users 
+                            u.id, u.email, u.first_name, u.last_name, u.dob, u.gender, u.nationality, u.country_of_origin, 
+                            u.workforce_group, u.phone, u.role_id, u.job_title, u.city, u.status, u.emergency, 
+                            u.status_changed_at, u.status_end_at, u.status_reason, u.status_details, u.additional_info, 
+                            u.full_img_url, u.avatar_url, u.created_at, u.updated_at, u.invitation_status, 
+                            u.invitation_sent_at, u.invitation_expires_at, u.invited_by, u.registration_completed_at, 
+                            u.invitation_attempts, u.last_reminder_sent_at, u.archived_at,
+                            r.id as role_id, r.code as role_code, r.name as role_name, r.category as role_category, r.description as role_description
+                        FROM fw_users u
+                        LEFT JOIN fw_glob_roles r ON u.role_id = r.id
                         WHERE 1=1";
             }
 
@@ -348,18 +354,18 @@ class WorkerController
             // Подсчет общего количества с теми же фильтрами
             if ($projectId && is_numeric($projectId)) {
                 $countSql = "SELECT COUNT(*) as total 
-                            FROM fw_v_users u
+                            FROM fw_users u
                             INNER JOIN fw_prj_team_members tm ON u.id = tm.user_id
                             WHERE tm.project_id = ?";
                 $countParams = [(int)$projectId];
             } elseif ($prjMngrId && is_numeric($prjMngrId)) {
                 $countSql = "SELECT COUNT(*) as total 
-                            FROM fw_v_users u
+                            FROM fw_users u
                             INNER JOIN fw_projects p ON u.id = p.prj_manager
                             WHERE p.prj_manager = ?";
                 $countParams = [(int)$prjMngrId];
             } else {
-                $countSql = "SELECT COUNT(*) as total FROM fw_v_users WHERE 1=1";
+                $countSql = "SELECT COUNT(*) as total FROM fw_users WHERE 1=1";
                 $countParams = [];
             }
             
@@ -440,37 +446,45 @@ class WorkerController
             $result = $connection->executeQuery($sql, $params);
             $workers = $result->fetchAllAssociative();
 
-            // Форматируем данные - возвращаем все поля из fw_v_users
+            // Форматируем данные с вложенными объектами
             $formattedWorkers = array_map(function($worker) {
+                $workerId = (int)$worker['id'];
+                
+                // Получаем профессиональные данные
+                $professionalData = $this->getProfessionalData($workerId);
+                
+                // Получаем проекты пользователя
+                $projects = $this->getUserProjects($workerId);
+                
+                // Получаем языки пользователя
+                $languages = $this->getUserLanguages($workerId);
+                
                 return [
-                    'id' => (int)$worker['id'],
+                    'id' => $workerId,
                     'email' => $worker['email'],
-                    //'password_hash' => $worker['password_hash'],
                     'first_name' => $worker['first_name'],
                     'last_name' => $worker['last_name'],
-                    'phone' => $worker['phone'],
-                    'role_id' => $worker['role_id'] ? (int)$worker['role_id'] : null,
-                    'job_title' => $worker['job_title'],
-                    'status' => (int)$worker['status'],
-                    'status_reason' => $worker['status_reason'],
-                    'status_details' => $worker['status_details'],
-                    'additional_info' => $worker['additional_info'],
-                    'avatar_url' => $worker['avatar_url'],
-                    'two_factor_enabled' => (bool)$worker['two_factor_enabled'],
-                    //'two_factor_secret' => $worker['two_factor_secret'],
-                    'last_login' => $worker['last_login'],
-                    'status_changed_at' => $worker['status_changed_at'],
-                    'status_end_at' => $worker['status_end_at'],
                     'dob' => $worker['dob'],
                     'gender' => $worker['gender'],
                     'nationality' => $worker['nationality'],
                     'country_of_origin' => $worker['country_of_origin'],
                     'workforce_group' => $worker['workforce_group'],
-                    'emergency' => $this->getEmergencyData($worker['id']),
+                    'phone' => $worker['phone'],
+                    'role_id' => $worker['role_id'] ? (int)$worker['role_id'] : null,
+                    'job_title' => $worker['job_title'],
+                    'city' => $worker['city'],
+                    'status' => (int)$worker['status'],
+                    'emergency' => $this->getEmergencyData($workerId),
+                    'status_changed_at' => $worker['status_changed_at'],
+                    'status_end_at' => $worker['status_end_at'],
+                    'status_reason' => $worker['status_reason'],
+                    'status_details' => $worker['status_details'],
+                    'additional_info' => $worker['additional_info'],
+                    'full_img_url' => $worker['full_img_url'],
+                    'avatar_url' => $worker['avatar_url'],
                     'created_at' => $worker['created_at'],
                     'updated_at' => $worker['updated_at'],
                     'invitation_status' => $worker['invitation_status'],
-                    //'invitation_token' => $worker['invitation_token'],
                     'invitation_sent_at' => $worker['invitation_sent_at'],
                     'invitation_expires_at' => $worker['invitation_expires_at'],
                     'invited_by' => $worker['invited_by'] ? (int)$worker['invited_by'] : null,
@@ -478,13 +492,19 @@ class WorkerController
                     'invitation_attempts' => (int)$worker['invitation_attempts'],
                     'last_reminder_sent_at' => $worker['last_reminder_sent_at'],
                     'archived_at' => $worker['archived_at'],
-                    'role_code' => $worker['role_code'],
-                    'role_name' => $worker['role_name'],
-                    'role_category' => $worker['role_category'],
-                    'role_description' => $worker['role_description'],
-                    // Поля проекта (если указан project_id)
-                    'role_in_project' => $worker['role_in_project'] ?? null,
-                    'assigned_at' => $worker['assigned_at'] ?? null
+                    'code' => $worker['role_code'],
+                    'name' => $worker['role_name'],
+                    'category' => $worker['role_category'],
+                    'description' => $worker['role_description'],
+                    'role' => [
+                        'id' => $worker['role_id'] ? (int)$worker['role_id'] : null,
+                        'code' => $worker['role_code'],
+                        'name' => $worker['role_name'],
+                        'category' => $worker['role_category']
+                    ],
+                    'professional_data' => $professionalData,
+                    'projects' => $projects,
+                    'languages' => $languages
                 ];
             }, $workers);
 
@@ -956,7 +976,7 @@ class WorkerController
     {
         try {
             $connection = Database::getConnection();
-            $sql = "SELECT emergency FROM fw_v_users WHERE id = ?";
+            $sql = "SELECT emergency FROM fw_users WHERE id = ?";
             $result = $connection->executeQuery($sql, [$userId]);
             $row = $result->fetchAssociative();
             
@@ -971,6 +991,111 @@ class WorkerController
                 'error' => $e->getMessage()
             ]);
             return null;
+        }
+    }
+
+    /**
+     * Get professional data for user
+     */
+    private function getProfessionalData(int $userId): array
+    {
+        try {
+            $connection = Database::getConnection();
+            $sql = "SELECT * FROM fw_user_professional WHERE user_id = ?";
+            $result = $connection->executeQuery($sql, [$userId]);
+            $professional = $result->fetchAllAssociative();
+            
+            return $professional ?: [];
+        } catch (Exception $e) {
+            $this->logger->error('Error fetching professional data', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Get projects for user
+     */
+    private function getUserProjects(int $userId): array
+    {
+        try {
+            $connection = Database::getConnection();
+            $sql = "SELECT p.id, p.prj_name, p.address, p.date_start, p.date_end, p.priority, p.status, 
+                           p.prj_manager, p.created_at, p.updated_at, tm.role_in_project, tm.assigned_at,
+                           m.first_name as manager_first_name, m.last_name as manager_last_name, m.email as manager_email, m.phone as manager_phone,
+                           m.avatar_url as manager_avatar_url, m.full_img_url as manager_full_img_url
+                    FROM fw_projects p
+                    INNER JOIN fw_prj_team_members tm ON p.id = tm.project_id
+                    LEFT JOIN fw_users m ON p.prj_manager = m.id
+                    WHERE tm.user_id = ?";
+            
+            $result = $connection->executeQuery($sql, [$userId]);
+            $projects = $result->fetchAllAssociative();
+            
+            return array_map(function($project) {
+                return [
+                    'id' => (int)$project['id'],
+                    'name' => $project['prj_name'],
+                    'address' => $project['address'],
+                    'date_start' => $project['date_start'],
+                    'date_end' => $project['date_end'],
+                    'priority' => $project['priority'],
+                    'status' => $project['status'],
+                    'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
+                    'manager' => [
+                        'id' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
+                        'first_name' => $project['manager_first_name'],
+                        'last_name' => $project['manager_last_name'],
+                        'email' => $project['manager_email'],
+                        'phone' => $project['manager_phone'],
+                        'avatar_url' => $project['manager_avatar_url'],
+                        'full_img_url' => $project['manager_full_img_url']
+                    ],
+                    'created_at' => $project['created_at'],
+                    'updated_at' => $project['updated_at'],
+                    'role_in_project' => $project['role_in_project'],
+                    'assigned_at' => $project['assigned_at']
+                ];
+            }, $projects);
+        } catch (Exception $e) {
+            $this->logger->error('Error fetching user projects', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
+            return [];
+        }
+    }
+
+    /**
+     * Get languages for user
+     */
+    private function getUserLanguages(int $userId): array
+    {
+        try {
+            $connection = Database::getConnection();
+            $sql = "SELECT l.id, l.name, ul.prof_level
+                    FROM fw_languages l
+                    INNER JOIN fw_user_languages ul ON l.id = ul.language_id
+                    WHERE ul.worker_id = ?";
+            
+            $result = $connection->executeQuery($sql, [$userId]);
+            $languages = $result->fetchAllAssociative();
+            
+            return array_map(function($language) {
+                return [
+                    'id' => (int)$language['id'],
+                    'name' => $language['name'],
+                    'prof_level' => $language['prof_level']
+                ];
+            }, $languages);
+        } catch (Exception $e) {
+            $this->logger->error('Error fetching user languages', [
+                'user_id' => $userId,
+                'error' => $e->getMessage()
+            ]);
+            return [];
         }
     }
 
