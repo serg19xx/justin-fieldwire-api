@@ -81,6 +81,7 @@ class TaskController
      *             @OA\Property(property="data", type="object",
      *                 @OA\Property(property="tasks", type="array", @OA\Items(
      *                     @OA\Property(property="id", type="integer", example=1),
+     *                     @OA\Property(property="task_order", type="integer", example=1),
      *                     @OA\Property(property="project_id", type="integer", example=1),
      *                     @OA\Property(property="wbs_path", type="string", example="1.1.1"),
      *                     @OA\Property(property="name", type="string", example="Design Phase"),
@@ -93,21 +94,26 @@ class TaskController
      *                     @OA\Property(property="task_lead_id", type="integer", example=47),
      *                     @OA\Property(property="team_members", type="array", @OA\Items(type="integer"), example={23, 45, 67}),
      *                     @OA\Property(property="resources", type="array", @OA\Items(type="string")),
-     *                     @OA\Property(property="dependencies", type="array", 
-     *                         @OA\Items(type="object",
-     *                             @OA\Property(property="predecessor_id", type="integer", example=4),
-     *                             @OA\Property(property="type", type="string", example="FS"),
-     *                             @OA\Property(property="lag_days", type="integer", example=1)
-     *                         )
-     *                     ),
      *                     @OA\Property(property="baseline_start", type="string", format="date", nullable=true),
      *                     @OA\Property(property="baseline_end", type="string", format="date", nullable=true),
-      *                    @OA\Property(property="actual_start", type="string", format="date", nullable=true),
+     *                     @OA\Property(property="actual_start", type="string", format="date", nullable=true),
      *                     @OA\Property(property="actual_end", type="string", format="date", nullable=true),
      *                     @OA\Property(property="slack_days", type="integer", nullable=true),
      *                     @OA\Property(property="created_at", type="string", format="date-time"),
      *                     @OA\Property(property="updated_at", type="string", format="date-time")
      *                 )),
+     *                 @OA\Property(property="dependencies", type="array", @OA\Items(
+     *                     @OA\Property(property="id", type="integer", example=1),
+     *                     @OA\Property(property="project_id", type="integer", example=1),
+     *                     @OA\Property(property="from_task_id", type="integer", example=1),
+     *                     @OA\Property(property="to_task_id", type="integer", example=2),
+     *                     @OA\Property(property="dependency_type", type="string", example="FS"),
+     *                     @OA\Property(property="lag_days", type="integer", example=0),
+     *                     @OA\Property(property="priority", type="integer", example=1),
+     *                     @OA\Property(property="created_by", type="integer", example=47),
+     *                     @OA\Property(property="created_at", type="string", format="date-time"),
+     *                     @OA\Property(property="updated_at", type="string", format="date-time")
+     *                 ))
      *             )
      *         )
      *     ),
@@ -150,7 +156,7 @@ class TaskController
             }
 
             // Базовый SQL запрос
-            $sql = "SELECT id, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE project_id = ?";
+            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE project_id = ?";
             $params = [$projectId];
 
             // Фильтр по статусу
@@ -173,15 +179,39 @@ class TaskController
 
             // Подсчет общего количества
             // Добавляем сортировку
-            $sql .= " ORDER BY start_planned ASC";
+            $sql .= " ORDER BY task_order ASC, start_planned ASC";
 
             $result = $connection->executeQuery($sql, $params);
             $tasks = $result->fetchAllAssociative();
 
-            // Форматируем данные
+            // Получаем зависимости из отдельной таблицы
+            $dependenciesResult = $connection->executeQuery(
+                "SELECT id, project_id, from_task_id, to_task_id, dependency_type, lag_days, priority, created_by, created_at, updated_at FROM fw_prj_task_dependencies WHERE project_id = ?",
+                [$projectId]
+            );
+            $dependencies = $dependenciesResult->fetchAllAssociative();
+
+            // Форматируем зависимости
+            $formattedDependencies = array_map(function($dep) {
+                return [
+                    'id' => (int)$dep['id'],
+                    'project_id' => (int)$dep['project_id'],
+                    'from_task_id' => (int)$dep['from_task_id'],
+                    'to_task_id' => (int)$dep['to_task_id'],
+                    'dependency_type' => $dep['dependency_type'],
+                    'lag_days' => (int)$dep['lag_days'],
+                    'priority' => (int)$dep['priority'],
+                    'created_by' => (int)$dep['created_by'],
+                    'created_at' => $dep['created_at'],
+                    'updated_at' => $dep['updated_at']
+                ];
+            }, $dependencies);
+
+            // Форматируем данные задач
             $formattedTasks = array_map(function($task) {
                 return [
                     'id' => (int)$task['id'],
+                    'task_order' => (int)$task['task_order'],
                     'project_id' => (int)$task['project_id'],
                     'wbs_path' => $task['wbs_path'] ? json_decode($task['wbs_path'], true) : null,
                     'name' => $task['name'],
@@ -194,7 +224,6 @@ class TaskController
                     'task_lead_id' => isset($task['task_lead_id']) && $task['task_lead_id'] ? (int)$task['task_lead_id'] : null,
                     'team_members' => isset($task['team_members']) && $task['team_members'] ? json_decode($task['team_members'], true) : null,
                     'resources' => $task['resources'] ? json_decode($task['resources'], true) : null,
-                    'dependencies' => $task['dependencies'] ? json_decode($task['dependencies'], true) : null,
                     'baseline_start' => $task['baseline_start'],
                     'baseline_end' => $task['baseline_end'],
                     'actual_start' => $task['actual_start'],
@@ -210,7 +239,8 @@ class TaskController
                 'status' => 'success',
                 'message' => 'Tasks retrieved successfully',
                 'data' => [
-                    'tasks' => $formattedTasks
+                    'tasks' => $formattedTasks,
+                    'dependencies' => $formattedDependencies
                 ]
             ]);
 
@@ -288,7 +318,7 @@ class TaskController
         try {
             $connection = $this->database->getConnection();
             
-            $sql = "SELECT id, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ? AND project_id = ?";
+            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ? AND project_id = ?";
             $result = $connection->executeQuery($sql, [$taskId, $projectId]);
             $task = $result->fetchAssociative();
 
@@ -304,6 +334,7 @@ class TaskController
 
             $formattedTask = [
                 'id' => (int)$task['id'],
+                'task_order' => (int)$task['task_order'],
                 'project_id' => (int)$task['project_id'],
                 'wbs_path' => $task['wbs_path'] ? json_decode($task['wbs_path'], true) : null,
                 'name' => $task['name'],
@@ -464,10 +495,18 @@ class TaskController
                 return;
             }
             
-            $sql = "INSERT INTO fw_prj_tasks (project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            // Получаем следующий порядковый номер для проекта
+            $nextOrderResult = $connection->executeQuery(
+                "SELECT COALESCE(MAX(task_order), 0) + 1 as next_order FROM fw_prj_tasks WHERE project_id = ?",
+                [$projectId]
+            );
+            $nextOrder = (int)$nextOrderResult->fetchOne();
+            
+            $sql = "INSERT INTO fw_prj_tasks (task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             
             $params = [
+                $nextOrder,
                 $projectId,
                 isset($data['wbs_path']) && $data['wbs_path'] ? json_encode($data['wbs_path']) : null,
                 $data['name'],
@@ -493,7 +532,7 @@ class TaskController
 
             // Получаем созданную задачу
             $result = $connection->executeQuery(
-                "SELECT id, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
+                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
                 [$taskId]
             );
             $task = $result->fetchAssociative();
@@ -731,7 +770,7 @@ class TaskController
 
             // Получаем обновленную задачу
             $result = $connection->executeQuery(
-                "SELECT id, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
+                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
                 [$taskId]
             );
             $task = $result->fetchAssociative();
@@ -1077,6 +1116,7 @@ class TaskController
     {
         return [
             'id' => (int)$task['id'],
+            'task_order' => (int)$task['task_order'],
             'project_id' => (int)$task['project_id'],
             'wbs_path' => $task['wbs_path'] ? json_decode($task['wbs_path'], true) : null,
             'name' => $task['name'],
@@ -1098,6 +1138,732 @@ class TaskController
             'created_at' => $task['created_at'],
             'updated_at' => $task['updated_at']
         ];
+    }
+
+    /**
+     * Обновить порядок задач проекта
+     * PUT /api/v1/projects/{project_id}/tasks/reorder
+     *
+     * @OA\Put(
+     *     path="/api/v1/projects/{project_id}/tasks/reorder",
+     *     summary="Reorder project tasks",
+     *     description="Update the order of tasks in a project",
+     *     tags={"Tasks"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="project_id",
+     *         in="path",
+     *         description="Project ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"order"},
+     *             @OA\Property(property="projectId", type="integer", example=10),
+     *             @OA\Property(
+     *                 property="order",
+     *                 type="array",
+     *                 @OA\Items(type="integer"),
+     *                 example={1, 5, 12, 4, 2}
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Tasks reordered successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Tasks reordered successfully"),
+     *             @OA\Property(property="data", type="object")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Invalid request data",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid request data"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Project not found",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=404),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Project not found"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     )
+     * )
+     */
+    public function reorderTasks(int $projectId): void
+    {
+        $request = Flight::request();
+        $data = json_decode($request->getBody(), true);
+        $order = $data['order'];
+
+        $connection = $this->database->getConnection();
+        $connection->beginTransaction();
+
+        try {
+            // Просто обновляем task_order для каждой задачи из массива
+            foreach ($order as $newOrder => $taskId) {
+                $connection->executeStatement(
+                    "UPDATE fw_prj_tasks SET task_order = ? WHERE id = ? AND project_id = ?",
+                    [$newOrder + 1, (int)$taskId, $projectId]
+                );
+            }
+
+            $connection->commit();
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Tasks reordered successfully',
+                'data' => [
+                    'reordered_count' => count($order)
+                ]
+            ]);
+
+        } catch (Exception $e) {
+            $connection->rollBack();
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Создать зависимость между задачами
+     * POST /api/v1/projects/{project_id}/dependencies
+     *
+     * @OA\Post(
+     *     path="/api/v1/projects/{project_id}/dependencies",
+     *     summary="Create task dependency",
+     *     tags={"Dependencies"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="project_id",
+     *         in="path",
+     *         required=true,
+     *         description="Project ID",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"from_task_id", "to_task_id", "dependency_type"},
+     *             @OA\Property(property="from_task_id", type="integer", description="Source task ID"),
+     *             @OA\Property(property="to_task_id", type="integer", description="Target task ID"),
+     *             @OA\Property(property="dependency_type", type="string", enum={"FS", "SS", "FF", "SF"}, description="Dependency type"),
+     *             @OA\Property(property="lag_days", type="integer", description="Lag days", default=0),
+     *             @OA\Property(property="priority", type="integer", description="Priority", default=1)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Dependency created successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Dependency created successfully"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="dependency_id", type="integer")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid or expired token"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Internal server error"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     )
+     * )
+     */
+    public function createDependency(int $projectId): void
+    {
+        $request = Flight::request();
+        $data = json_decode($request->getBody(), true);
+
+        $connection = $this->database->getConnection();
+        $connection->beginTransaction();
+
+        try {
+            $sql = "INSERT INTO fw_prj_task_dependencies (project_id, from_task_id, to_task_id, dependency_type, lag_days, priority, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)";
+            
+            $params = [
+                $projectId,
+                $data['from_task_id'],
+                $data['to_task_id'],
+                $data['dependency_type'],
+                $data['lag_days'] ?? 0,
+                $data['priority'] ?? 1,
+                $data['created_by'] ?? 47 // TODO: получить из токена
+            ];
+
+            $connection->executeStatement($sql, $params);
+            $dependencyId = $connection->lastInsertId();
+
+            $connection->commit();
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Dependency created successfully',
+                'data' => [
+                    'dependency_id' => $dependencyId
+                ]
+            ]);
+
+        } catch (Exception $e) {
+            $connection->rollBack();
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Обновить зависимость
+     * PUT /api/v1/dependencies/{id}
+     *
+     * @OA\Put(
+     *     path="/api/v1/dependencies/{dependency_id}",
+     *     summary="Update task dependency",
+     *     tags={"Dependencies"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="dependency_id",
+     *         in="path",
+     *         required=true,
+     *         description="Dependency ID",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             @OA\Property(property="dependency_type", type="string", enum={"FS", "SS", "FF", "SF"}, description="Dependency type"),
+     *             @OA\Property(property="lag_days", type="integer", description="Lag days"),
+     *             @OA\Property(property="priority", type="integer", description="Priority")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Dependency updated successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Dependency updated successfully"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Bad request",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=400),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="No fields to update"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid or expired token"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Internal server error"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     )
+     * )
+     */
+    public function updateDependency(int $dependencyId): void
+    {
+        $request = Flight::request();
+        $data = json_decode($request->getBody(), true);
+
+        $connection = $this->database->getConnection();
+        $connection->beginTransaction();
+
+        try {
+            $updateFields = [];
+            $params = [];
+
+            if (isset($data['dependency_type'])) {
+                $updateFields[] = 'dependency_type = ?';
+                $params[] = $data['dependency_type'];
+            }
+
+            if (isset($data['lag_days'])) {
+                $updateFields[] = 'lag_days = ?';
+                $params[] = $data['lag_days'];
+            }
+
+            if (isset($data['priority'])) {
+                $updateFields[] = 'priority = ?';
+                $params[] = $data['priority'];
+            }
+
+            if (empty($updateFields)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'No fields to update',
+                    'data' => null
+                ], 400);
+                return;
+            }
+
+            $params[] = $dependencyId;
+            $sql = "UPDATE fw_prj_task_dependencies SET " . implode(', ', $updateFields) . " WHERE id = ?";
+            $connection->executeStatement($sql, $params);
+
+            $connection->commit();
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Dependency updated successfully',
+                'data' => null
+            ]);
+
+        } catch (Exception $e) {
+            $connection->rollBack();
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Удалить зависимость
+     * DELETE /api/v1/dependencies/{id}
+     *
+     * @OA\Delete(
+     *     path="/api/v1/dependencies/{dependency_id}",
+     *     summary="Delete task dependency",
+     *     tags={"Dependencies"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="dependency_id",
+     *         in="path",
+     *         required=true,
+     *         description="Dependency ID",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Dependency deleted successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Dependency deleted successfully"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid or expired token"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Internal server error"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     )
+     * )
+     */
+    public function deleteDependency(int $dependencyId): void
+    {
+        $connection = $this->database->getConnection();
+        $connection->beginTransaction();
+
+        try {
+            $connection->executeStatement(
+                "DELETE FROM fw_prj_task_dependencies WHERE id = ?",
+                [$dependencyId]
+            );
+
+            $connection->commit();
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Dependency deleted successfully',
+                'data' => null
+            ]);
+
+        } catch (Exception $e) {
+            $connection->rollBack();
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Получить все зависимости проекта
+     * GET /api/v1/projects/{project_id}/dependencies
+     *
+     * @OA\Get(
+     *     path="/api/v1/projects/{project_id}/dependencies",
+     *     summary="Get project dependencies",
+     *     tags={"Dependencies"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="project_id",
+     *         in="path",
+     *         required=true,
+     *         description="Project ID",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Project dependencies retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Project dependencies retrieved successfully"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="dependencies", type="array",
+     *                     @OA\Items(
+     *                         @OA\Property(property="id", type="integer"),
+     *                         @OA\Property(property="project_id", type="integer"),
+     *                         @OA\Property(property="from_task_id", type="integer"),
+     *                         @OA\Property(property="to_task_id", type="integer"),
+     *                         @OA\Property(property="dependency_type", type="string"),
+     *                         @OA\Property(property="lag_days", type="integer"),
+     *                         @OA\Property(property="priority", type="integer"),
+     *                         @OA\Property(property="created_by", type="integer"),
+     *                         @OA\Property(property="created_at", type="string", format="date-time"),
+     *                         @OA\Property(property="updated_at", type="string", format="date-time")
+     *                     )
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid or expired token"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Internal server error"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     )
+     * )
+     */
+    public function getProjectDependencies(int $projectId): void
+    {
+        try {
+            $connection = $this->database->getConnection();
+            
+            $result = $connection->executeQuery(
+                "SELECT id, project_id, from_task_id, to_task_id, dependency_type, lag_days, priority, created_by, created_at, updated_at FROM fw_prj_task_dependencies WHERE project_id = ? ORDER BY id ASC",
+                [$projectId]
+            );
+            $dependencies = $result->fetchAllAssociative();
+
+            // Форматируем зависимости
+            $formattedDependencies = array_map(function($dep) {
+                return [
+                    'id' => (int)$dep['id'],
+                    'project_id' => (int)$dep['project_id'],
+                    'from_task_id' => (int)$dep['from_task_id'],
+                    'to_task_id' => (int)$dep['to_task_id'],
+                    'dependency_type' => $dep['dependency_type'],
+                    'lag_days' => (int)$dep['lag_days'],
+                    'priority' => (int)$dep['priority'],
+                    'created_by' => (int)$dep['created_by'],
+                    'created_at' => $dep['created_at'],
+                    'updated_at' => $dep['updated_at']
+                ];
+            }, $dependencies);
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Project dependencies retrieved successfully',
+                'data' => [
+                    'dependencies' => $formattedDependencies
+                ]
+            ]);
+
+        } catch (Exception $e) {
+            $this->logger->error('Failed to retrieve project dependencies', [
+                'project_id' => $projectId,
+                'error' => $e->getMessage()
+            ]);
+
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Получить зависимости конкретной задачи
+     * GET /api/v1/tasks/{task_id}/dependencies
+     *
+     * @OA\Get(
+     *     path="/api/v1/tasks/{task_id}/dependencies",
+     *     summary="Get task dependencies",
+     *     tags={"Dependencies"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="task_id",
+     *         in="path",
+     *         required=true,
+     *         description="Task ID",
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Task dependencies retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Task dependencies retrieved successfully"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="dependencies", type="array",
+     *                     @OA\Items(
+     *                         @OA\Property(property="id", type="integer"),
+     *                         @OA\Property(property="project_id", type="integer"),
+     *                         @OA\Property(property="from_task_id", type="integer"),
+     *                         @OA\Property(property="to_task_id", type="integer"),
+     *                         @OA\Property(property="dependency_type", type="string"),
+     *                         @OA\Property(property="lag_days", type="integer"),
+     *                         @OA\Property(property="priority", type="integer"),
+     *                         @OA\Property(property="created_by", type="integer"),
+     *                         @OA\Property(property="created_at", type="string", format="date-time"),
+     *                         @OA\Property(property="updated_at", type="string", format="date-time")
+     *                     )
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid or expired token"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Internal server error"),
+     *             @OA\Property(property="data", type="object", nullable=true)
+     *         )
+     *     )
+     * )
+     */
+    public function getTaskDependencies(int $taskId): void
+    {
+        try {
+            $connection = $this->database->getConnection();
+            
+            $result = $connection->executeQuery(
+                "SELECT id, project_id, from_task_id, to_task_id, dependency_type, lag_days, priority, created_by, created_at, updated_at FROM fw_prj_task_dependencies WHERE from_task_id = ? OR to_task_id = ? ORDER BY id ASC",
+                [$taskId, $taskId]
+            );
+            $dependencies = $result->fetchAllAssociative();
+
+            // Форматируем зависимости
+            $formattedDependencies = array_map(function($dep) {
+                return [
+                    'id' => (int)$dep['id'],
+                    'project_id' => (int)$dep['project_id'],
+                    'from_task_id' => (int)$dep['from_task_id'],
+                    'to_task_id' => (int)$dep['to_task_id'],
+                    'dependency_type' => $dep['dependency_type'],
+                    'lag_days' => (int)$dep['lag_days'],
+                    'priority' => (int)$dep['priority'],
+                    'created_by' => (int)$dep['created_by'],
+                    'created_at' => $dep['created_at'],
+                    'updated_at' => $dep['updated_at']
+                ];
+            }, $dependencies);
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Task dependencies retrieved successfully',
+                'data' => [
+                    'dependencies' => $formattedDependencies
+                ]
+            ]);
+
+        } catch (Exception $e) {
+            $this->logger->error('Failed to retrieve task dependencies', [
+                'task_id' => $taskId,
+                'error' => $e->getMessage()
+            ]);
+
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * Нормализовать порядок всех задач в проекте
+     * PUT /api/v1/projects/{project_id}/tasks/normalize-order
+     */
+    public function normalizeTaskOrder(int $projectId): void
+    {
+        try {
+            $connection = $this->database->getConnection();
+            
+            // Проверяем, существует ли проект
+            $projectCheck = $connection->executeQuery(
+                "SELECT id FROM fw_projects WHERE id = ?",
+                [$projectId]
+            );
+            
+            if (!$projectCheck->fetchOne()) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => 'Project not found',
+                    'data' => null
+                ], 404);
+                return;
+            }
+
+            // Начинаем транзакцию
+            $connection->beginTransaction();
+
+            try {
+                // Сначала сбрасываем ВСЕ task_order в 0
+                $connection->executeStatement(
+                    "UPDATE fw_prj_tasks SET task_order = 0 WHERE project_id = ?",
+                    [$projectId]
+                );
+                
+                // Получаем все задачи проекта
+                $allTasksResult = $connection->executeQuery(
+                    "SELECT id FROM fw_prj_tasks WHERE project_id = ? ORDER BY id ASC",
+                    [$projectId]
+                );
+                $allTasks = $allTasksResult->fetchFirstColumn();
+                
+                // Устанавливаем правильный порядок 1, 2, 3, 4, 5...
+                foreach ($allTasks as $index => $taskId) {
+                    $connection->executeStatement(
+                        "UPDATE fw_prj_tasks SET task_order = ? WHERE id = ? AND project_id = ?",
+                        [$index + 1, (int)$taskId, $projectId]
+                    );
+                }
+
+                // Подтверждаем транзакцию
+                $connection->commit();
+
+                Flight::json([
+                    'error_code' => 0,
+                    'status' => 'success',
+                    'message' => 'Task order normalized successfully',
+                    'data' => [
+                        'normalized_count' => count($allTasks)
+                    ]
+                ]);
+
+            } catch (Exception $e) {
+                // Откатываем транзакцию в случае ошибки
+                $connection->rollBack();
+                throw $e;
+            }
+
+        } catch (Exception $e) {
+            $this->logger->error('Failed to normalize task order', [
+                'project_id' => $projectId,
+                'error' => $e->getMessage()
+            ]);
+
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null
+            ], 500);
+        }
     }
 
     /**
