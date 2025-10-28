@@ -101,10 +101,6 @@ class ProjectTeamController
     public function getTeamMembers($projectId)
     {
         try {
-            if (!$this->checkAuth()) {
-                return $this->errorResponse('Unauthorized', 401);
-            }
-
             if (!$this->checkProjectExists($projectId)) {
                 return $this->errorResponse('Project not found', 404);
             }
@@ -122,30 +118,67 @@ class ProjectTeamController
                 JOIN fw_v_users u ON tm.user_id = u.id
                 WHERE tm.project_id = ? 
                   AND u.archived_at IS NULL 
-                  AND u.role_name NOT IN ('System Administrator', 'Project Manager')
+                  AND u.role_code NOT IN ('admin', 'project_manager')
             ";
             $countResult = $connection->executeQuery($countSql, [$projectId]);
             $total = $countResult->fetchOne();
 
-            // Get team members with user data (exclude System Administrator and Project Manager)
+            // Get team members with all user data (exclude System Administrator and Project Manager)
             $sql = "
                 SELECT 
-                    tm.id,
+                    -- Fields from fw_prj_team_members
+                    tm.id as team_member_id,
                     tm.project_id,
-                    tm.user_id,
                     tm.role_in_project as role,
                     tm.assigned_at as added_at,
+                    
+                    -- All fields from fw_v_users
+                    u.id,
+                    u.email,
+                    u.password_hash,
                     u.first_name,
                     u.last_name,
-                    u.email,
-                    u.role_name,
+                    u.phone,
+                    u.role_id,
                     u.job_title,
-                    u.status
+                    u.status,
+                    u.status_reason,
+                    u.status_details,
+                    u.additional_info,
+                    u.full_img_url,
+                    u.avatar_url,
+                    u.two_factor_enabled,
+                    u.two_factor_secret,
+                    u.last_login,
+                    u.status_changed_at,
+                    u.status_end_at,
+                    u.dob,
+                    u.gender,
+                    u.nationality,
+                    u.country_of_origin,
+                    u.workforce_group,
+                    u.city,
+                    u.emergency,
+                    u.created_at,
+                    u.updated_at,
+                    u.invitation_status,
+                    u.invitation_token,
+                    u.invitation_sent_at,
+                    u.invitation_expires_at,
+                    u.invited_by,
+                    u.registration_completed_at,
+                    u.invitation_attempts,
+                    u.last_reminder_sent_at,
+                    u.archived_at,
+                    u.role_code,
+                    u.role_name,
+                    u.role_category,
+                    u.role_description
                 FROM fw_prj_team_members tm
                 JOIN fw_v_users u ON tm.user_id = u.id
                 WHERE tm.project_id = ? 
                   AND u.archived_at IS NULL 
-                  AND u.role_name NOT IN ('System Administrator', 'Project Manager')
+                  AND u.role_name NOT IN ('admin', 'project_manager')
                 ORDER BY tm.assigned_at DESC
                 LIMIT " . (int)$limit . " OFFSET " . (int)$offset . "
             ";
@@ -240,9 +273,6 @@ class ProjectTeamController
     public function getAvailableUsers($projectId)
     {
         try {
-            if (!$this->checkAuth()) {
-                return $this->errorResponse('Unauthorized', 401);
-            }
 
             if (!$this->checkProjectExists($projectId)) {
                 return $this->errorResponse('Project not found', 404);
@@ -254,13 +284,48 @@ class ProjectTeamController
             // Get users that can be added to team (exclude System Administrator and Project Manager)
             $sql = "
                 SELECT 
+                    -- All fields from fw_v_users
                     u.id,
+                    u.email,
+                    u.password_hash,
                     u.first_name,
                     u.last_name,
-                    u.email,
-                    u.role_name,
+                    u.phone,
+                    u.role_id,
                     u.job_title,
-                    u.status
+                    u.status,
+                    u.status_reason,
+                    u.status_details,
+                    u.additional_info,
+                    u.full_img_url,
+                    u.avatar_url,
+                    u.two_factor_enabled,
+                    u.two_factor_secret,
+                    u.last_login,
+                    u.status_changed_at,
+                    u.status_end_at,
+                    u.dob,
+                    u.gender,
+                    u.nationality,
+                    u.country_of_origin,
+                    u.workforce_group,
+                    u.city,
+                    u.emergency,
+                    u.created_at,
+                    u.updated_at,
+                    u.invitation_status,
+                    u.invitation_token,
+                    u.invitation_sent_at,
+                    u.invitation_expires_at,
+                    u.invited_by,
+                    u.registration_completed_at,
+                    u.invitation_attempts,
+                    u.last_reminder_sent_at,
+                    u.archived_at,
+                    u.role_code,
+                    u.role_name,
+                    u.role_category,
+                    u.role_description
                 FROM fw_v_users u
                 WHERE u.archived_at IS NULL 
                   AND u.role_name NOT IN ('System Administrator', 'Project Manager')
@@ -364,9 +429,6 @@ class ProjectTeamController
     public function addTeamMember($projectId)
     {
         try {
-            if (!$this->checkAuth()) {
-                return $this->errorResponse('Unauthorized', 401);
-            }
 
             if (!$this->checkProjectExists($projectId)) {
                 return $this->errorResponse('Project not found', 404);
@@ -490,9 +552,6 @@ class ProjectTeamController
     public function updateTeamMember($projectId, $teamMemberId)
     {
         try {
-            if (!$this->checkAuth()) {
-                return $this->errorResponse('Unauthorized', 401);
-            }
 
             $input = json_decode(file_get_contents('php://input'), true);
             
@@ -582,9 +641,6 @@ class ProjectTeamController
     public function removeTeamMember($projectId, $teamMemberId)
     {
         try {
-            if (!$this->checkAuth()) {
-                return $this->errorResponse('Unauthorized', 401);
-            }
 
             $connection = $this->database->getConnection();
 
@@ -630,17 +686,36 @@ class ProjectTeamController
         $token = $matches[1];
         
         try {
-            $decoded = base64_decode($token);
-            $payload = json_decode($decoded, true);
+            // Правильная JWT проверка
+            $parts = explode('.', $token);
             
+            if (count($parts) !== 3) {
+                return false;
+            }
+
+            [$base64Header, $base64Payload, $base64Signature] = $parts;
+
+            // Декодируем payload
+            $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $base64Payload)), true);
+
             if (!$payload || !isset($payload['user_id']) || !isset($payload['exp'])) {
                 return false;
             }
-            
+
+            // Проверяем подпись
+            $secret = $_ENV['JWT_SECRET'] ?? 'your-secret-key-change-in-production';
+            $expectedSignature = hash_hmac('sha256', $base64Header . '.' . $base64Payload, $secret, true);
+            $expectedBase64Signature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($expectedSignature));
+
+            if (!hash_equals($expectedBase64Signature, $base64Signature)) {
+                return false;
+            }
+
+            // Проверяем срок действия
             if ($payload['exp'] < time()) {
                 return false;
             }
-            
+
             return true;
         } catch (Exception $e) {
             return false;
@@ -670,17 +745,116 @@ class ProjectTeamController
     private function formatTeamMember($member): array
     {
         return [
-            'id' => (int) $member['id'],
+            // Team member specific fields
+            'team_member_id' => (int) $member['team_member_id'],
             'project_id' => (int) $member['project_id'],
-            'user_id' => (int) $member['user_id'],
-            'role' => $member['role'],
+            'project_role' => $member['role'],
             'added_at' => $member['added_at'],
-            'added_by' => null, // This field doesn't exist in current schema
-            'name' => trim($member['first_name'] . ' ' . $member['last_name']),
+            
+            // User basic info
+            'id' => (int) $member['id'],
             'email' => $member['email'],
-            'role_name' => $member['role_name'],
+            'first_name' => $member['first_name'],
+            'last_name' => $member['last_name'],
+            'full_name' => trim($member['first_name'] . ' ' . $member['last_name']),
+            'phone' => $member['phone'],
             'job_title' => $member['job_title'],
-            'status' => (int) $member['status']
+            'status' => (int) $member['status'],
+            'status_reason' => $member['status_reason'],
+            'status_details' => $member['status_details'],
+            'additional_info' => $member['additional_info'],
+            
+            // Images
+            'full_img_url' => $member['full_img_url'],
+            'avatar_url' => $member['avatar_url'],
+            
+            // Personal info
+            'dob' => $member['dob'],
+            'gender' => $member['gender'],
+            'nationality' => $member['nationality'],
+            'country_of_origin' => $member['country_of_origin'],
+            'workforce_group' => $member['workforce_group'],
+            'city' => $member['city'],
+            'emergency' => $member['emergency'],
+            
+            // Timestamps
+            'created_at' => $member['created_at'],
+            'updated_at' => $member['updated_at'],
+            
+            // Invitation info
+            'invitation_status' => $member['invitation_status'],
+            'invitation_sent_at' => $member['invitation_sent_at'],
+            'invitation_expires_at' => $member['invitation_expires_at'],
+            'invited_by' => $member['invited_by'] ? (int) $member['invited_by'] : null,
+            'registration_completed_at' => $member['registration_completed_at'],
+            'invitation_attempts' => (int) $member['invitation_attempts'],
+            'last_reminder_sent_at' => $member['last_reminder_sent_at'],
+            
+            // Role info
+            'role_id' => (int) $member['role_id'],
+            'role_code' => $member['role_code'],
+            'role_name' => $member['role_name'],
+            'role_category' => $member['role_category'],
+            'role_description' => $member['role_description']
+        ];
+    }
+
+    private function formatAvailableUser($user): array
+    {
+        return [
+            // User basic info
+            'id' => (int) $user['id'],
+            'email' => $user['email'],
+            'first_name' => $user['first_name'],
+            'last_name' => $user['last_name'],
+            'name' => trim($user['first_name'] . ' ' . $user['last_name']),
+            'phone' => $user['phone'],
+            'job_title' => $user['job_title'],
+            'status' => (int) $user['status'],
+            'status_reason' => $user['status_reason'],
+            'status_details' => $user['status_details'],
+            'additional_info' => $user['additional_info'],
+            
+            // Images
+            'full_img_url' => $user['full_img_url'],
+            'avatar_url' => $user['avatar_url'],
+            
+            // 2FA
+            'two_factor_enabled' => (bool) $user['two_factor_enabled'],
+            
+            // Login info
+            'last_login' => $user['last_login'],
+            'status_changed_at' => $user['status_changed_at'],
+            'status_end_at' => $user['status_end_at'],
+            
+            // Personal info
+            'dob' => $user['dob'],
+            'gender' => $user['gender'],
+            'nationality' => $user['nationality'],
+            'country_of_origin' => $user['country_of_origin'],
+            'workforce_group' => $user['workforce_group'],
+            'city' => $user['city'],
+            'emergency' => $user['emergency'],
+            
+            // Timestamps
+            'created_at' => $user['created_at'],
+            'updated_at' => $user['updated_at'],
+            
+            // Invitation info
+            'invitation_status' => $user['invitation_status'],
+            'invitation_sent_at' => $user['invitation_sent_at'],
+            'invitation_expires_at' => $user['invitation_expires_at'],
+            'invited_by' => $user['invited_by'] ? (int) $user['invited_by'] : null,
+            'registration_completed_at' => $user['registration_completed_at'],
+            'invitation_attempts' => (int) $user['invitation_attempts'],
+            'last_reminder_sent_at' => $user['last_reminder_sent_at'],
+            
+            // Role info
+            'role_id' => (int) $user['role_id'],
+            'role_code' => $user['role_code'],
+            'role_name' => $user['role_name'],
+            'role_category' => $user['role_category'],
+            'role_description' => $user['role_description']
         ];
     }
 

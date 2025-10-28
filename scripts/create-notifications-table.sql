@@ -1,0 +1,35 @@
+-- Таблица для уведомлений системы
+-- Date: 2025-10-26
+
+CREATE TABLE `fw_notifications` (
+  `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+  `recipient_id` bigint(20) unsigned NOT NULL,
+  `sender_id` bigint(20) unsigned DEFAULT NULL,
+  `type` varchar(50) NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `message` text NOT NULL,
+  `data` json DEFAULT NULL,
+  `status` enum('pending','sent','delivered','failed') NOT NULL DEFAULT 'pending',
+  `channel` enum('email','dashboard','sms','push') NOT NULL DEFAULT 'email',
+  `priority` enum('low','medium','high','urgent') NOT NULL DEFAULT 'medium',
+  `scheduled_at` timestamp NULL DEFAULT NULL,
+  `sent_at` timestamp NULL DEFAULT NULL,
+  `delivered_at` timestamp NULL DEFAULT NULL,
+  `failed_at` timestamp NULL DEFAULT NULL,
+  `failure_reason` text DEFAULT NULL,
+  `retry_count` int(11) NOT NULL DEFAULT 0,
+  `max_retries` int(11) NOT NULL DEFAULT 3,
+  `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
+  `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
+  PRIMARY KEY (`id`),
+  KEY `idx_recipient_id` (`recipient_id`),
+  KEY `idx_sender_id` (`sender_id`),
+  KEY `idx_type` (`type`),
+  KEY `idx_status` (`status`),
+  KEY `idx_channel` (`channel`),
+  KEY `idx_priority` (`priority`),
+  KEY `idx_scheduled_at` (`scheduled_at`),
+  KEY `idx_created_at` (`created_at`),
+  CONSTRAINT `fk_notifications_recipient` FOREIGN KEY (`recipient_id`) REFERENCES `fw_users` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `fk_notifications_sender` FOREIGN KEY (`sender_id`) REFERENCES `fw_users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

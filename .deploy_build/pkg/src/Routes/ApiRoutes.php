@@ -123,7 +123,14 @@ class ApiRoutes
                                 'worker_languages_get' => 'GET /api/v1/workers/{workerId}/languages',
                                 'worker_languages_add' => 'POST /api/v1/workers/{workerId}/languages',
                                 'worker_languages_update' => 'PUT /api/v1/workers/{workerId}/languages/{languageId}',
-                                'worker_languages_remove' => 'DELETE /api/v1/workers/{workerId}/languages/{languageId}'
+                                'worker_languages_remove' => 'DELETE /api/v1/workers/{workerId}/languages/{languageId}',
+                                'tasks_reorder' => 'PUT /api/v1/projects/{project_id}/tasks/reorder',
+                                'tasks_normalize_order' => 'PUT /api/v1/projects/{project_id}/tasks/normalize-order',
+                                'dependencies_create' => 'POST /api/v1/projects/{project_id}/dependencies',
+                                'dependencies_update' => 'PUT /api/v1/dependencies/{dependency_id}',
+                                'dependencies_delete' => 'DELETE /api/v1/dependencies/{dependency_id}',
+                                'dependencies_project' => 'GET /api/v1/projects/{project_id}/dependencies',
+                                'dependencies_task' => 'GET /api/v1/tasks/{task_id}/dependencies'
                             ]
                         ]
                     ]
@@ -787,6 +794,65 @@ class ApiRoutes
             }
         });
 
+        // Специальные маршруты задач (должны быть ПЕРЕД общими маршрутами с @task_id)
+        Flight::route('GET /api/v1/projects/@project_id/tasks/check-bounds', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->checkTaskBounds((int)$project_id);
+            }
+        });
+
+        Flight::route('PUT /api/v1/projects/@project_id/tasks/reorder', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->reorderTasks((int)$project_id);
+            }
+        });
+
+        Flight::route('PUT /api/v1/projects/@project_id/tasks/normalize-order', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->normalizeTaskOrder((int)$project_id);
+            }
+        });
+
+        // Маршруты для зависимостей
+        Flight::route('POST /api/v1/projects/@project_id/dependencies', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->createDependency((int)$project_id);
+            }
+        });
+
+        Flight::route('PUT /api/v1/dependencies/@dependency_id', function($dependency_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->updateDependency((int)$dependency_id);
+            }
+        });
+
+        Flight::route('DELETE /api/v1/dependencies/@dependency_id', function($dependency_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->deleteDependency((int)$dependency_id);
+            }
+        });
+
+        Flight::route('GET /api/v1/projects/@project_id/dependencies', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getProjectDependencies((int)$project_id);
+            }
+        });
+
+        Flight::route('GET /api/v1/tasks/@task_id/dependencies', function($task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getTaskDependencies((int)$task_id);
+            }
+        });
+
+        // Общие маршруты задач
         Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id', function($project_id, $task_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
                 $taskController = new \App\Controllers\TaskController($this->logger);
@@ -812,13 +878,6 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $taskController = new \App\Controllers\TaskController($this->logger);
                 $taskController->deleteTask((int)$project_id, (int)$task_id);
-            }
-        });
-
-        Flight::route('GET /api/v1/projects/@project_id/tasks/check-bounds', function($project_id) use ($authMiddleware) {
-            if ($authMiddleware->handle()) {
-                $taskController = new \App\Controllers\TaskController($this->logger);
-                $taskController->checkTaskBounds((int)$project_id);
             }
         });
 

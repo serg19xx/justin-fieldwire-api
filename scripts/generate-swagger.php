@@ -8,6 +8,8 @@ use OpenApi\Generator;
 require_once __DIR__ . '/../src/Controllers/ProjectController.php';
 require_once __DIR__ . '/../src/Controllers/TaskController.php';
 require_once __DIR__ . '/../src/Controllers/ProjectTeamController.php';
+require_once __DIR__ . '/../src/Controllers/EventRulesController.php';
+require_once __DIR__ . '/../src/Swagger/OpenApiSpec.php';
 
 // Настройка для генерации документации
 $openapi = Generator::scan([
