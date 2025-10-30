@@ -328,7 +328,7 @@ class MessageTemplatesController
                     $data['name'],
                     $data['type'],
                     $data['category'] ?? 'custom',
-                    $data['event_type'],
+                    $data['event_type'] ?? '',
                     $data['subject'] ?? null,
                     $data['body'],
                     isset($data['variables']) && $data['variables'] ? json_encode($data['variables'], JSON_UNESCAPED_UNICODE) : null,
@@ -779,12 +779,6 @@ class MessageTemplatesController
                 $errors[] = 'Template type is required';
             } elseif (!in_array($data['type'], ['sms', 'email'])) {
                 $errors[] = 'Template type must be either "sms" or "email"';
-            }
-            
-            if (empty($data['event_type'])) {
-                $errors[] = 'Event type is required';
-            } elseif (!preg_match('/^[A-Z_]+$/', $data['event_type'])) {
-                $errors[] = 'Event type must contain only uppercase letters and underscores';
             }
         }
         
