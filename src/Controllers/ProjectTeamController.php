@@ -328,7 +328,7 @@ class ProjectTeamController
                     u.role_description
                 FROM fw_v_users u
                 WHERE u.archived_at IS NULL 
-                  AND u.role_name NOT IN ('System Administrator', 'Project Manager')
+                  AND u.role_code NOT IN ('admin', 'project_manager')
                   AND u.id NOT IN (
                       SELECT tm.user_id 
                       FROM fw_prj_team_members tm 
@@ -443,7 +443,7 @@ class ProjectTeamController
             $connection = $this->database->getConnection();
 
             // Check if user exists, is not archived, and is not System Administrator or Project Manager
-            $userSql = "SELECT id, email, first_name, last_name, role_name, status, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency FROM fw_v_users WHERE id = ? AND archived_at IS NULL";
+            $userSql = "SELECT id, email, first_name, last_name, role_code, role_name, status, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency FROM fw_v_users WHERE id = ? AND archived_at IS NULL";
             $userResult = $connection->executeQuery($userSql, [$input['user_id']]);
             $user = $userResult->fetchAssociative();
             
@@ -451,7 +451,8 @@ class ProjectTeamController
                 return $this->errorResponse('User not found', 404);
             }
             
-            if (isset($user['role_name']) && in_array($user['role_name'], ['System Administrator', 'Project Manager'], true)) {
+            // Check by role_code (more reliable than role_name)
+            if (isset($user['role_code']) && in_array($user['role_code'], ['admin', 'project_manager'], true)) {
                 return $this->errorResponse('Cannot add System Administrator or Project Manager to team', 400);
             }
 
