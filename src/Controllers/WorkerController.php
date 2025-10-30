@@ -762,6 +762,45 @@ class WorkerController
                 'expires_at' => $expiresAt
             ]);
 
+                // Log system event to database (audit)
+                try {
+                    $userIdForLog = null;
+                    if ($existingUser && isset($existingUser['id'])) {
+                        $userIdForLog = (int)$existingUser['id'];
+                    } else {
+                        // Best-effort fetch of the created user ID by email
+                        $row = $connection->executeQuery('SELECT id FROM fw_users WHERE email = ?', [$email])->fetchAssociative();
+                        if ($row && isset($row['id'])) {
+                            $userIdForLog = (int)$row['id'];
+                        }
+                    }
+
+                    $eventLogger = new \App\Services\EventLoggingService($this->logger);
+                    $eventLogger->logSimple(
+                        'user',
+                        $userIdForLog,
+                        'WORKER_INVITED',
+                        [
+                            'email' => $email,
+                            'first_name' => $firstName,
+                            'last_name' => $lastName,
+                            'role_id' => $roleId,
+                            'job_title' => $jobTitle,
+                            'phone' => $phone,
+                            'invitation_expires_at' => $expiresAt
+                        ],
+                        [
+                            'actor_type' => 'user',
+                            'actor_id' => $currentUserId,
+                            'changed_fields' => ['invitation_status', 'invitation_token', 'invitation_expires_at', 'invited_by'],
+                            'comment' => 'Invitation sent to worker'
+                        ]
+                    );
+                } catch (\Throwable $t) {
+                    // Do not break the primary flow on logging errors
+                    $this->logger->warning('Failed to log WORKER_INVITED event', ['error' => $t->getMessage()]);
+                }
+
             Flight::json([
                 'error_code' => 0,
                 'status' => 'success',

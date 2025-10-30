@@ -45,7 +45,7 @@ class MessageTemplatesController
      *     @OA\Parameter(
      *         name="event_type",
      *         in="query",
-     *         description="Filter by event type",
+     *         description="Deprecated. No longer supported.",
      *         required=false,
      *         @OA\Schema(type="string")
      *     ),
@@ -73,7 +73,8 @@ class MessageTemplatesController
             // Получаем параметры фильтрации
             $category = Flight::request()->query['category'] ?? null;
             $type = Flight::request()->query['type'] ?? null;
-            $eventType = Flight::request()->query['event_type'] ?? null;
+            // Deprecated: event_type is no longer part of schema
+            $eventType = null;
             
             $whereConditions = [];
             $params = [];
@@ -88,20 +89,17 @@ class MessageTemplatesController
                 $params[] = $type;
             }
             
-            if ($eventType) {
-                $whereConditions[] = "event_type = ?";
-                $params[] = $eventType;
-            }
+            // event_type removed from schema — ignore filter if provided
             
             $whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
             
             $result = $connection->executeQuery(
-                "SELECT id, name, type, category, event_type, subject, body, variables, 
+                "SELECT id, name, type, category, subject, body, variables, 
                         COALESCE(is_editable, TRUE) as is_editable, 
                         is_active, created_by, created_at, updated_at 
                  FROM fw_message_templates 
                  {$whereClause}
-                 ORDER BY category ASC, event_type ASC, type ASC, name ASC",
+                 ORDER BY category ASC, type ASC, name ASC",
                 $params
             );
             
@@ -112,7 +110,7 @@ class MessageTemplatesController
                     'name' => $row['name'],
                     'type' => $row['type'],
                     'category' => $row['category'],
-                    'event_type' => $row['event_type'],
+                    // 'event_type' removed
                     'subject' => $row['subject'],
                     'body' => $row['body'],
                     'variables' => $row['variables'] ? json_decode($row['variables'], true) : null,
@@ -194,7 +192,7 @@ class MessageTemplatesController
             $connection = $this->database->getConnection();
             
             $result = $connection->executeQuery(
-                "SELECT id, name, type, category, event_type, subject, body, variables, is_active, created_by, created_at, updated_at 
+                "SELECT id, name, type, category, subject, body, variables, is_active, created_by, created_at, updated_at 
                  FROM fw_message_templates 
                  WHERE id = ?",
                 [$id]
@@ -222,7 +220,7 @@ class MessageTemplatesController
                         'name' => $template['name'],
                         'type' => $template['type'],
                         'category' => $template['category'],
-                        'event_type' => $template['event_type'],
+                        // 'event_type' removed
                         'subject' => $template['subject'],
                         'body' => $template['body'],
                         'variables' => $template['variables'] ? json_decode($template['variables'], true) : null,
@@ -322,16 +320,15 @@ class MessageTemplatesController
             $userId = $this->getCurrentUserId();
             
             $connection->executeStatement(
-                "INSERT INTO fw_message_templates (name, type, category, event_type, subject, body, variables, is_active, created_by) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO fw_message_templates (name, type, category, subject, body, variables, is_active, created_by) 
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     $data['name'],
                     $data['type'],
                     $data['category'] ?? 'custom',
-                    $data['event_type'],
                     $data['subject'] ?? null,
                     $data['body'],
-                    isset($data['variables']) && $data['variables'] ? json_encode($data['variables'], JSON_UNESCAPED_UNICODE) : null,
+                    array_key_exists('variables', $data) ? json_encode($data['variables'] ?? null, JSON_UNESCAPED_UNICODE) : null,
                     $data['is_active'] ?? true,
                     $userId
                 ]
@@ -339,7 +336,7 @@ class MessageTemplatesController
             
             // Получаем созданный шаблон
             $result = $connection->executeQuery(
-                "SELECT id, name, type, category, event_type, subject, body, variables, is_active, created_by, created_at, updated_at 
+                "SELECT id, name, type, category, subject, body, variables, is_active, created_by, created_at, updated_at 
                  FROM fw_message_templates 
                  WHERE id = LAST_INSERT_ID()"
             );
@@ -356,7 +353,7 @@ class MessageTemplatesController
                         'name' => $template['name'],
                         'type' => $template['type'],
                         'category' => $template['category'],
-                        'event_type' => $template['event_type'],
+                        // 'event_type' removed
                         'subject' => $template['subject'],
                         'body' => $template['body'],
                         'variables' => $template['variables'] ? json_decode($template['variables'], true) : null,
@@ -495,9 +492,9 @@ class MessageTemplatesController
                 $params[] = $data['body'];
             }
             
-            if (isset($data['variables'])) {
+            if (array_key_exists('variables', $data)) {
                 $updateFields[] = "variables = ?";
-                $params[] = isset($data['variables']) && $data['variables'] ? json_encode($data['variables'], JSON_UNESCAPED_UNICODE) : null;
+                $params[] = json_encode($data['variables'] ?? null, JSON_UNESCAPED_UNICODE);
             }
             
             if (isset($data['is_active'])) {
@@ -526,7 +523,7 @@ class MessageTemplatesController
             
             // Получаем обновленный шаблон
             $result = $connection->executeQuery(
-                "SELECT id, name, type, category, event_type, subject, body, variables, is_active, created_by, created_at, updated_at 
+                "SELECT id, name, type, category, subject, body, variables, is_active, created_by, created_at, updated_at 
                  FROM fw_message_templates 
                  WHERE id = ?",
                 [$id]
@@ -544,7 +541,7 @@ class MessageTemplatesController
                         'name' => $template['name'],
                         'type' => $template['type'],
                         'category' => $template['category'],
-                        'event_type' => $template['event_type'],
+                        // 'event_type' removed
                         'subject' => $template['subject'],
                         'body' => $template['body'],
                         'variables' => $template['variables'] ? json_decode($template['variables'], true) : null,
@@ -679,7 +676,7 @@ class MessageTemplatesController
      * 
      * @OA\Get(
      *     path="/api/v1/admin/message-templates/by-event/{event_type}",
-     *     summary="Get templates by event type",
+     *     summary="Deprecated: Get templates by event type",
      *     tags={"Message Templates"},
      *     security={{"bearerAuth": {}}},
      *     @OA\Parameter(
@@ -705,60 +702,13 @@ class MessageTemplatesController
      */
     public function getTemplatesByEvent(string $eventType): void
     {
-        $this->logger->info('MessageTemplatesController::getTemplatesByEvent called', ['event_type' => $eventType]);
-        
-        try {
-            $connection = $this->database->getConnection();
-            
-            $result = $connection->executeQuery(
-                "SELECT id, name, type, category, event_type, subject, body, variables, is_active, created_by, created_at, updated_at 
-                 FROM fw_message_templates 
-                 WHERE event_type = ? AND is_active = 1
-                 ORDER BY category ASC, type ASC, name ASC",
-                [$eventType]
-            );
-            
-            $templates = [];
-            while ($row = $result->fetchAssociative()) {
-                $templates[] = [
-                    'id' => (int)$row['id'],
-                    'name' => $row['name'],
-                    'type' => $row['type'],
-                    'category' => $row['category'],
-                    'event_type' => $row['event_type'],
-                    'subject' => $row['subject'],
-                    'body' => $row['body'],
-                    'variables' => $row['variables'] ? json_decode($row['variables'], true) : null,
-                    'is_editable' => (bool)$row['is_editable'],
-                    'is_active' => (bool)$row['is_active'],
-                    'created_by' => $row['created_by'] ? (int)$row['created_by'] : null,
-                    'created_at' => $row['created_at'],
-                    'updated_at' => $row['updated_at']
-                ];
-            }
-            
-            Flight::json([
-                'error_code' => 0,
-                'status' => 'success',
-                'message' => 'Templates retrieved successfully',
-                'data' => [
-                    'templates' => $templates
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            $this->logger->error('Failed to get templates by event', [
-                'event_type' => $eventType,
-                'error' => $e->getMessage()
-            ]);
-
-            Flight::json([
-                'error_code' => 500,
-                'status' => 'error',
-                'message' => 'Failed to retrieve templates',
-                'data' => null
-            ], 500);
-        }
+        $this->logger->info('MessageTemplatesController::getTemplatesByEvent called (deprecated)', ['event_type' => $eventType]);
+        Flight::json([
+            'error_code' => 410,
+            'status' => 'error',
+            'message' => 'Endpoint deprecated. Use /api/v1/admin/message-templates?type={sms|email}',
+            'data' => null
+        ], 410);
     }
 
     /**
@@ -779,12 +729,6 @@ class MessageTemplatesController
                 $errors[] = 'Template type is required';
             } elseif (!in_array($data['type'], ['sms', 'email'])) {
                 $errors[] = 'Template type must be either "sms" or "email"';
-            }
-            
-            if (empty($data['event_type'])) {
-                $errors[] = 'Event type is required';
-            } elseif (!preg_match('/^[A-Z_]+$/', $data['event_type'])) {
-                $errors[] = 'Event type must contain only uppercase letters and underscores';
             }
         }
         

@@ -18,6 +18,59 @@ class EventLoggingService
     }
 
     /**
+     * Log a simple audit event directly to fw_event_log without requiring a rule.
+     * No outbox/actions processing — purely DB audit record.
+     */
+    public function logSimple(
+        string $entityType,
+        ?int $entityId,
+        string $eventType,
+        array $afterData = [],
+        array $options = []
+    ): ?int {
+        try {
+            $logData = [
+                'tenant_id' => $options['tenant_id'] ?? null,
+                'entity_type' => $entityType,
+                'entity_id' => $entityId,
+                'entity_version' => $options['entity_version'] ?? null,
+                'event_type' => $eventType,
+                'severity' => $options['severity'] ?? 'important',
+                'actor_type' => $options['actor_type'] ?? 'system',
+                'actor_id' => $options['actor_id'] ?? null,
+                'correlation_id' => $options['correlation_id'] ?? $this->generateCorrelationId(),
+                'changed_fields' => json_encode($options['changed_fields'] ?? [], JSON_UNESCAPED_UNICODE),
+                'before_data' => !empty($options['before_data'] ?? []) ? json_encode($options['before_data'], JSON_UNESCAPED_UNICODE) : null,
+                'after_data' => !empty($afterData) ? json_encode($afterData, JSON_UNESCAPED_UNICODE) : null,
+                'comment' => $options['comment'] ?? null,
+                'ip' => $options['ip'] ?? $this->getClientIp(),
+                'user_agent' => $options['user_agent'] ?? $this->getUserAgent(),
+            ];
+
+            $eventLogId = $this->insertEventLog($logData);
+
+            if ($eventLogId) {
+                $this->logger->info('Simple event logged', [
+                    'event_log_id' => $eventLogId,
+                    'event_type' => $eventType,
+                    'entity_type' => $entityType,
+                    'entity_id' => $entityId
+                ]);
+            }
+
+            return $eventLogId;
+        } catch (Exception $e) {
+            $this->logger->error('Failed to log simple event', [
+                'error' => $e->getMessage(),
+                'event_type' => $eventType,
+                'entity_type' => $entityType,
+                'entity_id' => $entityId
+            ]);
+            return null;
+        }
+    }
+
+    /**
      * Log a database change event
      *
      * @param string $entityType Type of entity (e.g., 'task', 'project', 'user')
