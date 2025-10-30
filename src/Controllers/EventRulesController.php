@@ -397,10 +397,41 @@ class EventRulesController
         
         try {
             $request = Flight::request();
-            $data = json_decode($request->getBody(), true);
-            
-            // Валидация (event_type не обновляется)
-            $errors = $this->validateRuleDataWithConflicts($data, false);
+            $data = json_decode($request->getBody(), true) ?? [];
+
+            $connection = $this->database->getConnection();
+
+            // Текущее правило (для частичных обновлений)
+            $existingStmt = $connection->executeQuery(
+                "SELECT event_type, enabled, actions, severity, conditions, comment, execution_location FROM fw_event_rules WHERE event_type = ?",
+                [$eventType]
+            );
+            $existing = $existingStmt->fetchAssociative();
+
+            if (!$existing) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => 'Event rule not found',
+                    'data' => null
+                ], 404);
+                return;
+            }
+
+            // Сборка merged данных: если поле не пришло — берем из существующего
+            $merged = [
+                'enabled' => array_key_exists('enabled', $data) ? (bool)$data['enabled'] : (bool)$existing['enabled'],
+                'actions' => array_key_exists('actions', $data) ? $data['actions'] : json_decode($existing['actions'] ?? '[]', true),
+                'severity' => $data['severity'] ?? $existing['severity'],
+                'conditions' => array_key_exists('conditions', $data)
+                    ? ($data['conditions'] ?? null)
+                    : ($existing['conditions'] ? json_decode($existing['conditions'], true) : null),
+                'comment' => array_key_exists('comment', $data) ? ($data['comment'] ?? '') : ($existing['comment'] ?? ''),
+                'execution_location' => array_key_exists('execution_location', $data) ? ($data['execution_location'] ?? null) : ($existing['execution_location'] ?? null)
+            ];
+
+            // Валидация (event_type не обязателен в теле); валидируем merged
+            $errors = $this->validateRuleDataWithConflicts($merged, false);
             if (!empty($errors)) {
                 Flight::json([
                     'error_code' => 400,
@@ -410,8 +441,6 @@ class EventRulesController
                 ], 400);
                 return;
             }
-            
-            $connection = $this->database->getConnection();
             
             // Проверяем, существует ли правило
             $exists = $connection->executeQuery(
@@ -432,17 +461,45 @@ class EventRulesController
             // Получаем ID текущего пользователя из токена
             $userId = $this->getCurrentUserId();
             
+            // Если приходит новый event_type — переименовываем с проверками
+            $newEventType = $data['event_type'] ?? $eventType;
+            if ($newEventType !== $eventType) {
+                if (!is_string($newEventType) || !preg_match('/^[A-Z_]+$/', $newEventType)) {
+                    Flight::json([
+                        'error_code' => 400,
+                        'status' => 'error',
+                        'message' => 'Validation failed',
+                        'data' => ['errors' => ['New event_type must contain only uppercase letters and underscores']]
+                    ], 400);
+                    return;
+                }
+                $existsNew = $connection->executeQuery(
+                    "SELECT COUNT(*) FROM fw_event_rules WHERE event_type = ?",
+                    [$newEventType]
+                )->fetchOne();
+                if ($existsNew) {
+                    Flight::json([
+                        'error_code' => 400,
+                        'status' => 'error',
+                        'message' => 'Validation failed',
+                        'data' => ['errors' => ["Event type '{$newEventType}' already exists"]]
+                    ], 400);
+                    return;
+                }
+            }
+
             $connection->executeStatement(
                 "UPDATE fw_event_rules 
-                 SET enabled = ?, actions = ?, severity = ?, conditions = ?, comment = ?, execution_location = ?, updated_by = ?
+                 SET event_type = ?, enabled = ?, actions = ?, severity = ?, conditions = ?, comment = ?, execution_location = ?, updated_by = ?
                  WHERE event_type = ?",
                 [
-                    $data['enabled'] ? 1 : 0,
-                    json_encode($data['actions'], JSON_UNESCAPED_UNICODE),
-                    $data['severity'],
-                    isset($data['conditions']) && $data['conditions'] ? json_encode($data['conditions'], JSON_UNESCAPED_UNICODE) : null,
-                    $data['comment'],
-                    $data['execution_location'] ?? null,
+                    $newEventType,
+                    $merged['enabled'] ? 1 : 0,
+                    json_encode($merged['actions'], JSON_UNESCAPED_UNICODE),
+                    $merged['severity'],
+                    isset($merged['conditions']) && $merged['conditions'] ? json_encode($merged['conditions'], JSON_UNESCAPED_UNICODE) : null,
+                    $merged['comment'],
+                    $merged['execution_location'] ?? null,
                     $userId,
                     $eventType
                 ]
@@ -453,7 +510,7 @@ class EventRulesController
                 "SELECT event_type, enabled, actions, severity, conditions, comment, execution_location, updated_at, updated_by 
                  FROM fw_event_rules 
                  WHERE event_type = ?",
-                [$eventType]
+                [$newEventType]
             );
             
             $rule = $result->fetchAssociative();
@@ -597,20 +654,24 @@ class EventRulesController
         $errors = [];
         $conditions = $data['conditions'];
         
-        // Проверка обязательных условий для действия notify
-        if (isset($data['actions']) && in_array('notify', $data['actions'])) {
-            if (!isset($conditions['notify_roles']) || empty($conditions['notify_roles'])) {
-                $errors[] = "Action 'notify' requires 'notify_roles' condition to specify who to notify";
+        // Проверка обязательных условий для действия notify (поддержка новой структуры actions как объектов)
+        if (isset($data['actions']) && is_array($data['actions'])) {
+            $hasNotifyAction = false;
+            foreach ($data['actions'] as $action) {
+                if ((is_string($action) && $action === 'notify') || (is_array($action) && ($action['type'] ?? null) === 'notify')) {
+                    $hasNotifyAction = true;
+                    break;
+                }
+            }
+
+            if ($hasNotifyAction) {
+                $notifyRoles = $conditions['notify_roles']['value'] ?? ($conditions['notify_roles'] ?? null);
+                if (!is_array($notifyRoles) || count($notifyRoles) === 0) {
+                    $errors[] = "Action 'notify' requires 'notify_roles' condition to specify who to notify";
+                }
             }
         }
         
-        // Конфликт notify_roles и exclude_roles
-        if (isset($conditions['notify_roles']) && isset($conditions['exclude_roles'])) {
-            $conflictingRoles = array_intersect($conditions['notify_roles'], $conditions['exclude_roles']);
-            if (!empty($conflictingRoles)) {
-                $errors[] = "Cannot notify roles that are excluded: " . implode(', ', $conflictingRoles);
-            }
-        }
         
         return $errors;
     }
@@ -644,12 +705,48 @@ class EventRulesController
             $allowedActions = array_keys($availableActions);
             
             foreach ($data['actions'] as $action) {
-                if (!is_string($action) || empty($action)) {
-                    $errors[] = 'Each action must be a non-empty string';
-                    break;
+                // Поддержка старого формата: массив строк
+                if (is_string($action)) {
+                    if (!in_array($action, $allowedActions)) {
+                        $errors[] = "Action '{$action}' is not allowed. Allowed actions: " . implode(', ', $allowedActions);
+                    }
+                    continue;
                 }
-                if (!in_array($action, $allowedActions)) {
-                    $errors[] = "Action '{$action}' is not allowed. Allowed actions: " . implode(', ', $allowedActions);
+
+                // Новый формат: объект действия
+                if (!is_array($action)) {
+                    $errors[] = 'Each action must be a string or an object';
+                    continue;
+                }
+
+                $type = $action['type'] ?? null;
+                if (!$type || !is_string($type)) {
+                    $errors[] = 'Action.type is required and must be a string';
+                    continue;
+                }
+                if (!in_array($type, $allowedActions)) {
+                    $errors[] = "Action '{$type}' is not allowed. Allowed actions: " . implode(', ', $allowedActions);
+                    continue;
+                }
+
+                // Специфическая валидация для типа notify
+                if ($type === 'notify') {
+                    if (empty($action['channels']) || !is_array($action['channels'])) {
+                        $errors[] = "Action 'notify' requires 'channels' as a non-empty array";
+                    } else {
+                        // Валидация channel_templates соответствия email/sms
+                        $channelTemplates = $action['channel_templates'] ?? [];
+                        if (!is_array($channelTemplates)) {
+                            $errors[] = "Action 'notify' field 'channel_templates' must be an object";
+                        } else {
+                            if (in_array('email', $action['channels'] ?? [], true) && isset($channelTemplates['email']) && !is_numeric($channelTemplates['email'])) {
+                                $errors[] = "Action 'notify' channel_templates.email must be a numeric template id";
+                            }
+                            if (in_array('sms', $action['channels'] ?? [], true) && isset($channelTemplates['sms']) && !is_numeric($channelTemplates['sms'])) {
+                                $errors[] = "Action 'notify' channel_templates.sms must be a numeric template id";
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -668,8 +765,8 @@ class EventRulesController
             $errors[] = 'Comment must not exceed 255 characters';
         }
         
-        if (isset($data['execution_location']) && !in_array($data['execution_location'], ['server', 'auto'])) {
-            $errors[] = 'Execution location must be either "server" or "auto"';
+        if (isset($data['execution_location']) && $data['execution_location'] !== null && !in_array($data['execution_location'], ['server', 'auto'])) {
+            $errors[] = 'Execution location must be either "server", "auto", or null';
         }
         
         if (isset($data['execution_location']) && strlen($data['execution_location']) > 20) {

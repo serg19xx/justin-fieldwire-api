@@ -262,7 +262,7 @@ class AuthController
                     ],
                     'requires_2fa' => false,
                     'token' => $token,
-                    'expires_at' => date('c', time() + 1800) // 30 minutes from now
+                    'expires_at' => date('c', time() + 3600) // 1 hour from now
                 ]
             ]);
             
@@ -567,7 +567,7 @@ class AuthController
             'email' => $user['email'],
             'name' => $user['first_name'] . ' ' . $user['last_name'],
             'iat' => time(),
-            'exp' => time() + 1800 // 30 minutes
+            'exp' => time() + 3600 // 1 hour
         ]);
 
         $base64Header = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
@@ -1620,7 +1620,7 @@ class AuthController
                 'message' => 'Token refreshed successfully',
                 'data' => [
                     'token' => $newToken,
-                    'expires_at' => date('c', time() + 1800) // 30 minutes
+                    'expires_at' => date('c', time() + 3600) // 1 hour
                 ]
             ]);
 
