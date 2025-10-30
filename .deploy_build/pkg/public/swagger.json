@@ -1,24 +1,5 @@
 {
     "openapi": "3.0.0",
-    "info": {
-        "title": "FieldWire API",
-        "description": "REST API for FieldWire application - Construction project management system",
-        "contact": {
-            "name": "FieldWire Support",
-            "email": "support@fieldwire.com"
-        },
-        "version": "1.0.0"
-    },
-    "servers": [
-        {
-            "url": "http://localhost:8000",
-            "description": "Development server"
-        },
-        {
-            "url": "https://fieldwire.medicalcontractor.ca",
-            "description": "Production server"
-        }
-    ],
     "paths": {
         "/api/v1/auth/login": {
             "post": {
@@ -310,29 +291,38 @@
                 }
             }
         },
-        "/api/v1/auth/validate-invitation-token": {
-            "get": {
+        "/api/v1/auth/forgot-password": {
+            "post": {
                 "tags": [
                     "Authentication"
                 ],
-                "summary": "Validate invitation token",
-                "description": "Check if invitation token is valid and not expired. Returns only validation status without user data.",
-                "operationId": "b522031e939b0bb7aa50fc7cfec06bd4",
-                "parameters": [
-                    {
-                        "name": "token",
-                        "in": "query",
-                        "description": "Invitation token from email",
-                        "required": true,
-                        "schema": {
-                            "type": "string",
-                            "example": "abc123def456"
+                "summary": "Request password reset",
+                "description": "Send a password reset code to user's email",
+                "operationId": "63788dae56f48acea542c9028ff6ddb9",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "email"
+                                ],
+                                "properties": {
+                                    "email": {
+                                        "description": "User's email address",
+                                        "type": "string",
+                                        "format": "email",
+                                        "example": "user@example.com"
+                                    }
+                                },
+                                "type": "object"
+                            }
                         }
                     }
-                ],
+                },
                 "responses": {
                     "200": {
-                        "description": "Token is valid",
+                        "description": "Password reset code sent successfully",
                         "content": {
                             "application/json": {
                                 "schema": {
@@ -347,10 +337,21 @@
                                         },
                                         "message": {
                                             "type": "string",
-                                            "example": "Token is valid"
+                                            "example": "Password reset code sent to your email"
                                         },
                                         "data": {
-                                            "type": "null"
+                                            "properties": {
+                                                "email": {
+                                                    "type": "string",
+                                                    "example": "user@example.com"
+                                                },
+                                                "expires_in": {
+                                                    "description": "Code expiration time in seconds",
+                                                    "type": "integer",
+                                                    "example": 600
+                                                }
+                                            },
+                                            "type": "object"
                                         }
                                     },
                                     "type": "object"
@@ -358,15 +359,15 @@
                             }
                         }
                     },
-                    "400": {
-                        "description": "Invalid or expired token",
+                    "404": {
+                        "description": "User not found",
                         "content": {
                             "application/json": {
                                 "schema": {
                                     "properties": {
                                         "error_code": {
                                             "type": "integer",
-                                            "example": 400
+                                            "example": 404
                                         },
                                         "status": {
                                             "type": "string",
@@ -374,7 +375,7 @@
                                         },
                                         "message": {
                                             "type": "string",
-                                            "example": "Invalid invitation token"
+                                            "example": "User not found"
                                         },
                                         "data": {
                                             "type": "null"
@@ -401,7 +402,133 @@
                                         },
                                         "message": {
                                             "type": "string",
-                                            "example": "Internal server error"
+                                            "example": "Failed to send reset code"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/api/v1/auth/reset-password": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Reset password with token",
+                "description": "Reset user password using the token from email link",
+                "operationId": "dd2a255468603bcf441b11765aeb0064",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "token",
+                                    "new_password"
+                                ],
+                                "properties": {
+                                    "token": {
+                                        "description": "Reset token from email link",
+                                        "type": "string",
+                                        "example": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+                                    },
+                                    "new_password": {
+                                        "description": "New password (min 8 characters)",
+                                        "type": "string",
+                                        "format": "password",
+                                        "example": "NewSecurePass123!"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Password reset successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Password reset successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "email": {
+                                                    "type": "string",
+                                                    "example": "user@example.com"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid or expired code",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid or expired reset code"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Failed to reset password"
                                         },
                                         "data": {
                                             "type": "null"
@@ -568,6 +695,103 @@
                         "bearerAuth": []
                     }
                 ]
+            }
+        },
+        "/api/v1/auth/refresh-token": {
+            "post": {
+                "tags": [
+                    "Authentication"
+                ],
+                "summary": "Refresh access token",
+                "description": "Get a new access token using refresh token from httpOnly cookie",
+                "operationId": "9d04b372bf48757f23a0b2bb33cc7c8e",
+                "responses": {
+                    "200": {
+                        "description": "Token refreshed successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Token refreshed successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "token": {
+                                                    "type": "string",
+                                                    "example": "eyJ0eXAiOiJKV1Q..."
+                                                },
+                                                "expires_at": {
+                                                    "type": "string",
+                                                    "format": "date-time"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Refresh token not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Refresh token not found"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Refresh token expired or invalid",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Refresh token expired or invalid"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         },
         "/api/v1/database/tables": {
@@ -1117,6 +1341,521 @@
                     },
                     "401": {
                         "description": "Unauthorized - Invalid or missing token"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/events/process": {
+            "post": {
+                "tags": [
+                    "Event Processing"
+                ],
+                "summary": "Process pending events",
+                "description": "Process all pending events from the outbox queue",
+                "operationId": "94fce47d98689aa541b51d1795539a66",
+                "parameters": [
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "description": "Maximum number of events to process",
+                        "required": false,
+                        "schema": {
+                            "type": "integer",
+                            "default": 100,
+                            "maximum": 1000,
+                            "minimum": 1
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Events processed successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Events processed successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "processed_count": {
+                                                    "type": "integer",
+                                                    "example": 5
+                                                },
+                                                "success_count": {
+                                                    "type": "integer",
+                                                    "example": 4
+                                                },
+                                                "error_count": {
+                                                    "type": "integer",
+                                                    "example": 1
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/reports/daily": {
+            "post": {
+                "tags": [
+                    "Event Processing"
+                ],
+                "summary": "Generate daily project report",
+                "description": "Generate and send daily project report",
+                "operationId": "3b27388afb7d740819a6d5d239447106",
+                "parameters": [
+                    {
+                        "name": "date",
+                        "in": "query",
+                        "description": "Report date (YYYY-MM-DD). Defaults to today",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "format": "date",
+                            "example": "2025-10-26"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Daily report generated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Daily report generated successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "report_date": {
+                                                    "type": "string",
+                                                    "format": "date",
+                                                    "example": "2025-10-26"
+                                                },
+                                                "total_projects": {
+                                                    "type": "integer",
+                                                    "example": 5
+                                                },
+                                                "report_sent": {
+                                                    "type": "boolean",
+                                                    "example": true
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/events/stats": {
+            "get": {
+                "tags": [
+                    "Event Processing"
+                ],
+                "summary": "Get event statistics",
+                "description": "Get statistics about events and notifications",
+                "operationId": "549d547e7e5846f69554d4c59ee4cf08",
+                "responses": {
+                    "200": {
+                        "description": "Event statistics retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Event statistics retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "pending_events": {
+                                                    "type": "integer",
+                                                    "example": 5
+                                                },
+                                                "total_events_today": {
+                                                    "type": "integer",
+                                                    "example": 25
+                                                },
+                                                "failed_events": {
+                                                    "type": "integer",
+                                                    "example": 2
+                                                },
+                                                "last_processed": {
+                                                    "type": "string",
+                                                    "format": "date-time",
+                                                    "example": "2025-10-26T10:30:00Z"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/admin/event-rules/conditions": {
+            "get": {
+                "tags": [
+                    "Event Rules Management"
+                ],
+                "summary": "Get available condition types",
+                "description": "Get list of available condition types for event rules",
+                "operationId": "b7af1856f400b71acbaecec9bd72fcdc",
+                "responses": {
+                    "200": {
+                        "description": "Available conditions retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "conditions": {
+                                                    "type": "object"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/admin/event-rules": {
+            "get": {
+                "tags": [
+                    "Event Rules Management"
+                ],
+                "summary": "Get all event rules",
+                "description": "Retrieve all event rules with their configuration",
+                "operationId": "ccc07f7834677d8dff4e7a7216f75a06",
+                "responses": {
+                    "200": {
+                        "description": "Event rules retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "rules": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "event_type": {
+                                                                "type": "string",
+                                                                "example": "TASK_CREATED"
+                                                            },
+                                                            "enabled": {
+                                                                "type": "boolean",
+                                                                "example": true
+                                                            },
+                                                            "actions": {
+                                                                "type": "array",
+                                                                "items": {
+                                                                    "type": "string"
+                                                                }
+                                                            },
+                                                            "severity": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "critical",
+                                                                    "important"
+                                                                ]
+                                                            },
+                                                            "comment": {
+                                                                "type": "string"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Event Rules Management"
+                ],
+                "summary": "Create new event rule",
+                "operationId": "4db7239c4a6469ac40d6087e0bd3ff60",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {}
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Created"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/admin/event-rules/{event_type}": {
+            "get": {
+                "tags": [
+                    "Event Rules Management"
+                ],
+                "summary": "Get specific event rule",
+                "description": "Retrieve a specific event rule by event type",
+                "operationId": "3f24d4b67e52a769d0d8cca3dba5d66b",
+                "parameters": [
+                    {
+                        "name": "event_type",
+                        "in": "path",
+                        "description": "Event type identifier",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "example": "TASK_CREATED"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Event rule retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Event Rules Management"
+                ],
+                "summary": "Update event rule",
+                "operationId": "70893ec830d26382ddcb3d02412df1b1",
+                "parameters": [
+                    {
+                        "name": "event_type",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {}
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Updated"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Event Rules Management"
+                ],
+                "summary": "Delete event rule",
+                "description": "Delete an event rule",
+                "operationId": "fefd47b59848556dafd13d26d06105bf",
+                "parameters": [
+                    {
+                        "name": "event_type",
+                        "in": "path",
+                        "description": "Event type identifier",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "example": "TASK_CREATED"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Event rule deleted successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
                     }
                 },
                 "security": [
@@ -2031,6 +2770,577 @@
                                         "message": {
                                             "type": "string",
                                             "example": "Language name already exists"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/admin/message-templates": {
+            "get": {
+                "tags": [
+                    "Message Templates"
+                ],
+                "summary": "Get all message templates",
+                "description": "\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0432\u0441\u0435 \u0448\u0430\u0431\u043b\u043e\u043d\u044b \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0439",
+                "operationId": "faa6487bf809da57703f5da47a687a4d",
+                "parameters": [
+                    {
+                        "name": "category",
+                        "in": "query",
+                        "description": "Filter by category (system, custom)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "system",
+                                "custom"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "type",
+                        "in": "query",
+                        "description": "Filter by type (sms, email)",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "sms",
+                                "email"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "event_type",
+                        "in": "query",
+                        "description": "Filter by event type",
+                        "required": false,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Message templates retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "templates": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "$ref": "#/components/schemas/MessageTemplate"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Message Templates"
+                ],
+                "summary": "Create message template",
+                "description": "\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u043d\u043e\u0432\u044b\u0439 \u0448\u0430\u0431\u043b\u043e\u043d",
+                "operationId": "ccb8cf6f577b302ee930b6e4184a01c0",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Custom Project Notification"
+                                    },
+                                    "type": {
+                                        "type": "string",
+                                        "enum": [
+                                            "sms",
+                                            "email"
+                                        ],
+                                        "example": "email"
+                                    },
+                                    "category": {
+                                        "type": "string",
+                                        "enum": [
+                                            "system",
+                                            "custom"
+                                        ],
+                                        "example": "custom"
+                                    },
+                                    "event_type": {
+                                        "type": "string",
+                                        "example": "PROJECT_CREATED"
+                                    },
+                                    "subject": {
+                                        "type": "string",
+                                        "example": "New Project: {{project_name}}"
+                                    },
+                                    "body": {
+                                        "type": "string",
+                                        "example": "<h2>New Project</h2><p>{{project_name}}</p>"
+                                    },
+                                    "variables": {
+                                        "type": "object",
+                                        "example": {
+                                            "project_name": "Project name"
+                                        }
+                                    },
+                                    "is_active": {
+                                        "type": "boolean",
+                                        "example": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Template created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Message template created successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "template": {
+                                                    "$ref": "#/components/schemas/MessageTemplate"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Validation failed",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Validation failed"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "errors": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/admin/message-templates/{id}": {
+            "get": {
+                "tags": [
+                    "Message Templates"
+                ],
+                "summary": "Get message template by ID",
+                "description": "\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u043a\u043e\u043d\u043a\u0440\u0435\u0442\u043d\u044b\u0439 \u0448\u0430\u0431\u043b\u043e\u043d",
+                "operationId": "343c75b58b3746a9560d5e6976f00868",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Template ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Message template retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "template": {
+                                                    "$ref": "#/components/schemas/MessageTemplate"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Template not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Message template not found"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Message Templates"
+                ],
+                "summary": "Update message template",
+                "description": "\u041e\u0431\u043d\u043e\u0432\u0438\u0442\u044c \u0448\u0430\u0431\u043b\u043e\u043d",
+                "operationId": "6f702e96d4da46bec0be78c4efa06913",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Template ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "name": {
+                                        "type": "string",
+                                        "example": "Updated Template"
+                                    },
+                                    "subject": {
+                                        "type": "string",
+                                        "example": "Updated Subject"
+                                    },
+                                    "body": {
+                                        "type": "string",
+                                        "example": "Updated body content"
+                                    },
+                                    "variables": {
+                                        "type": "object"
+                                    },
+                                    "is_active": {
+                                        "type": "boolean",
+                                        "example": true
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Template updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Message template updated successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "template": {
+                                                    "$ref": "#/components/schemas/MessageTemplate"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Template not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Message template not found"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Message Templates"
+                ],
+                "summary": "Delete message template",
+                "description": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0448\u0430\u0431\u043b\u043e\u043d",
+                "operationId": "1751bf72510b0c5c2727ad82cdabab14",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "description": "Template ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Template deleted successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Message template deleted successfully"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Template not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Message template not found"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/admin/message-templates/by-event/{event_type}": {
+            "get": {
+                "tags": [
+                    "Message Templates"
+                ],
+                "summary": "Get templates by event type",
+                "description": "\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0448\u0430\u0431\u043b\u043e\u043d\u044b \u043f\u043e \u0442\u0438\u043f\u0443 \u0441\u043e\u0431\u044b\u0442\u0438\u044f",
+                "operationId": "65288e4e6cd599dea08c4825d7fb2543",
+                "parameters": [
+                    {
+                        "name": "event_type",
+                        "in": "path",
+                        "description": "Event type",
+                        "required": true,
+                        "schema": {
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Success",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Templates retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "templates": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "$ref": "#/components/schemas/MessageTemplate"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
                                         }
                                     },
                                     "type": "object"
@@ -4372,6 +5682,16 @@
                                                                 "example": 1,
                                                                 "nullable": true
                                                             },
+                                                            "created_by": {
+                                                                "type": "integer",
+                                                                "example": 47,
+                                                                "nullable": true
+                                                            },
+                                                            "created_by_name": {
+                                                                "type": "string",
+                                                                "example": "John Doe",
+                                                                "nullable": true
+                                                            },
                                                             "created_at": {
                                                                 "type": "string",
                                                                 "format": "date-time"
@@ -4465,7 +5785,8 @@
                                     "address",
                                     "date_start",
                                     "date_end",
-                                    "priority"
+                                    "priority",
+                                    "created_by"
                                 ],
                                 "properties": {
                                     "prj_name": {
@@ -4497,6 +5818,10 @@
                                     "prj_manager": {
                                         "type": "integer",
                                         "example": 1
+                                    },
+                                    "created_by": {
+                                        "type": "integer",
+                                        "example": 47
                                     }
                                 },
                                 "type": "object"
@@ -4560,6 +5885,16 @@
                                                         "prj_manager": {
                                                             "type": "integer",
                                                             "example": 1,
+                                                            "nullable": true
+                                                        },
+                                                        "created_by": {
+                                                            "type": "integer",
+                                                            "example": 47,
+                                                            "nullable": true
+                                                        },
+                                                        "created_by_name": {
+                                                            "type": "string",
+                                                            "example": "John Doe",
                                                             "nullable": true
                                                         },
                                                         "created_at": {
@@ -4694,6 +6029,16 @@
                                                             "example": 1,
                                                             "nullable": true
                                                         },
+                                                        "created_by": {
+                                                            "type": "integer",
+                                                            "example": 47,
+                                                            "nullable": true
+                                                        },
+                                                        "created_by_name": {
+                                                            "type": "string",
+                                                            "example": "John Doe",
+                                                            "nullable": true
+                                                        },
                                                         "manager_name": {
                                                             "type": "string",
                                                             "example": "John Doe",
@@ -4806,6 +6151,10 @@
                                     "prj_manager": {
                                         "type": "integer",
                                         "example": 1
+                                    },
+                                    "created_by": {
+                                        "type": "integer",
+                                        "example": 47
                                     }
                                 },
                                 "type": "object"
@@ -4869,6 +6218,16 @@
                                                         "prj_manager": {
                                                             "type": "integer",
                                                             "example": 1,
+                                                            "nullable": true
+                                                        },
+                                                        "created_by": {
+                                                            "type": "integer",
+                                                            "example": 47,
+                                                            "nullable": true
+                                                        },
+                                                        "created_by_name": {
+                                                            "type": "string",
+                                                            "example": "John Doe",
                                                             "nullable": true
                                                         },
                                                         "created_at": {
@@ -5773,6 +7132,145 @@
                 }
             }
         },
+        "/api/v1/roles": {
+            "get": {
+                "tags": [
+                    "Roles"
+                ],
+                "summary": "Get all roles",
+                "description": "Retrieve a list of all available roles",
+                "operationId": "f7626383edc4db476d9a6a03e888669a",
+                "parameters": [
+                    {
+                        "name": "category",
+                        "in": "query",
+                        "description": "Filter by role category",
+                        "required": false,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "global",
+                                "project",
+                                "task"
+                            ]
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Roles retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Roles retrieved successfully"
+                                        },
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "properties": {
+                                                    "id": {
+                                                        "type": "integer",
+                                                        "example": 1
+                                                    },
+                                                    "code": {
+                                                        "type": "string",
+                                                        "example": "admin"
+                                                    },
+                                                    "name": {
+                                                        "type": "string",
+                                                        "example": "Administrator"
+                                                    },
+                                                    "category": {
+                                                        "type": "string",
+                                                        "example": "global"
+                                                    },
+                                                    "description": {
+                                                        "type": "string",
+                                                        "example": "Full system access"
+                                                    }
+                                                },
+                                                "type": "object"
+                                            }
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Failed to retrieve roles"
+                                        },
+                                        "data": {
+                                            "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/projects/{project_id}/tasks": {
             "get": {
                 "tags": [
@@ -5855,6 +7353,10 @@
                                                                 "type": "integer",
                                                                 "example": 1
                                                             },
+                                                            "task_order": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
                                                             "project_id": {
                                                                 "type": "integer",
                                                                 "example": 1
@@ -5914,26 +7416,6 @@
                                                                     "type": "string"
                                                                 }
                                                             },
-                                                            "dependencies": {
-                                                                "type": "array",
-                                                                "items": {
-                                                                    "properties": {
-                                                                        "predecessor_id": {
-                                                                            "type": "integer",
-                                                                            "example": 4
-                                                                        },
-                                                                        "type": {
-                                                                            "type": "string",
-                                                                            "example": "FS"
-                                                                        },
-                                                                        "lag_days": {
-                                                                            "type": "integer",
-                                                                            "example": 1
-                                                                        }
-                                                                    },
-                                                                    "type": "object"
-                                                                }
-                                                            },
                                                             "baseline_start": {
                                                                 "type": "string",
                                                                 "format": "date",
@@ -5957,6 +7439,54 @@
                                                             "slack_days": {
                                                                 "type": "integer",
                                                                 "nullable": true
+                                                            },
+                                                            "created_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            },
+                                                            "updated_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                },
+                                                "dependencies": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "project_id": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "from_task_id": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "to_task_id": {
+                                                                "type": "integer",
+                                                                "example": 2
+                                                            },
+                                                            "dependency_type": {
+                                                                "type": "string",
+                                                                "example": "FS"
+                                                            },
+                                                            "lag_days": {
+                                                                "type": "integer",
+                                                                "example": 0
+                                                            },
+                                                            "priority": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "created_by": {
+                                                                "type": "integer",
+                                                                "example": 47
                                                             },
                                                             "created_at": {
                                                                 "type": "string",
@@ -6719,6 +8249,894 @@
                                         },
                                         "data": {
                                             "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/projects/{project_id}/tasks/reorder": {
+            "put": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "Reorder project tasks",
+                "description": "Update the order of tasks in a project",
+                "operationId": "a7c0c693f8a634d59cc5328666fa7b58",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "order"
+                                ],
+                                "properties": {
+                                    "projectId": {
+                                        "type": "integer",
+                                        "example": 10
+                                    },
+                                    "order": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "integer"
+                                        },
+                                        "example": [
+                                            1,
+                                            5,
+                                            12,
+                                            4,
+                                            2
+                                        ]
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Tasks reordered successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Tasks reordered successfully"
+                                        },
+                                        "data": {
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request data",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid request data"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Project not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 404
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Project not found"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/projects/{project_id}/dependencies": {
+            "get": {
+                "tags": [
+                    "Dependencies"
+                ],
+                "summary": "Get project dependencies",
+                "description": "\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0432\u0441\u0435 \u0437\u0430\u0432\u0438\u0441\u0438\u043c\u043e\u0441\u0442\u0438 \u043f\u0440\u043e\u0435\u043a\u0442\u0430\nGET /api/v1/projects/{project_id}/dependencies",
+                "operationId": "4414ad2ab0cbf2b90e3e59175e15febb",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Project dependencies retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Project dependencies retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "dependencies": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "integer"
+                                                            },
+                                                            "project_id": {
+                                                                "type": "integer"
+                                                            },
+                                                            "from_task_id": {
+                                                                "type": "integer"
+                                                            },
+                                                            "to_task_id": {
+                                                                "type": "integer"
+                                                            },
+                                                            "dependency_type": {
+                                                                "type": "string"
+                                                            },
+                                                            "lag_days": {
+                                                                "type": "integer"
+                                                            },
+                                                            "priority": {
+                                                                "type": "integer"
+                                                            },
+                                                            "created_by": {
+                                                                "type": "integer"
+                                                            },
+                                                            "created_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            },
+                                                            "updated_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid or expired token"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Internal server error"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Dependencies"
+                ],
+                "summary": "Create task dependency",
+                "description": "\u0421\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u0432\u0438\u0441\u0438\u043c\u043e\u0441\u0442\u044c \u043c\u0435\u0436\u0434\u0443 \u0437\u0430\u0434\u0430\u0447\u0430\u043c\u0438\nPOST /api/v1/projects/{project_id}/dependencies",
+                "operationId": "963cda42959d4826d42a9d0d2b967b20",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "description": "Project ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "from_task_id",
+                                    "to_task_id",
+                                    "dependency_type"
+                                ],
+                                "properties": {
+                                    "from_task_id": {
+                                        "description": "Source task ID",
+                                        "type": "integer"
+                                    },
+                                    "to_task_id": {
+                                        "description": "Target task ID",
+                                        "type": "integer"
+                                    },
+                                    "dependency_type": {
+                                        "description": "Dependency type",
+                                        "type": "string",
+                                        "enum": [
+                                            "FS",
+                                            "SS",
+                                            "FF",
+                                            "SF"
+                                        ]
+                                    },
+                                    "lag_days": {
+                                        "description": "Lag days",
+                                        "type": "integer",
+                                        "default": 0
+                                    },
+                                    "priority": {
+                                        "description": "Priority",
+                                        "type": "integer",
+                                        "default": 1
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Dependency created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Dependency created successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "dependency_id": {
+                                                    "type": "integer"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid or expired token"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Internal server error"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/dependencies/{dependency_id}": {
+            "put": {
+                "tags": [
+                    "Dependencies"
+                ],
+                "summary": "Update task dependency",
+                "description": "\u041e\u0431\u043d\u043e\u0432\u0438\u0442\u044c \u0437\u0430\u0432\u0438\u0441\u0438\u043c\u043e\u0441\u0442\u044c\nPUT /api/v1/dependencies/{id}",
+                "operationId": "6abf283e9e3df7a2ba11ff0071c92866",
+                "parameters": [
+                    {
+                        "name": "dependency_id",
+                        "in": "path",
+                        "description": "Dependency ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "dependency_type": {
+                                        "description": "Dependency type",
+                                        "type": "string",
+                                        "enum": [
+                                            "FS",
+                                            "SS",
+                                            "FF",
+                                            "SF"
+                                        ]
+                                    },
+                                    "lag_days": {
+                                        "description": "Lag days",
+                                        "type": "integer"
+                                    },
+                                    "priority": {
+                                        "description": "Priority",
+                                        "type": "integer"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Dependency updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Dependency updated successfully"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad request",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 400
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "No fields to update"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid or expired token"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Internal server error"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Dependencies"
+                ],
+                "summary": "Delete task dependency",
+                "description": "\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0437\u0430\u0432\u0438\u0441\u0438\u043c\u043e\u0441\u0442\u044c\nDELETE /api/v1/dependencies/{id}",
+                "operationId": "db93615bb9f71946ceaa152fde2df64a",
+                "parameters": [
+                    {
+                        "name": "dependency_id",
+                        "in": "path",
+                        "description": "Dependency ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Dependency deleted successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Dependency deleted successfully"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid or expired token"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Internal server error"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/tasks/{task_id}/dependencies": {
+            "get": {
+                "tags": [
+                    "Dependencies"
+                ],
+                "summary": "Get task dependencies",
+                "description": "\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0437\u0430\u0432\u0438\u0441\u0438\u043c\u043e\u0441\u0442\u0438 \u043a\u043e\u043d\u043a\u0440\u0435\u0442\u043d\u043e\u0439 \u0437\u0430\u0434\u0430\u0447\u0438\nGET /api/v1/tasks/{task_id}/dependencies",
+                "operationId": "790fa8145fc47342388bdee3249d3b14",
+                "parameters": [
+                    {
+                        "name": "task_id",
+                        "in": "path",
+                        "description": "Task ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Task dependencies retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task dependencies retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "dependencies": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "integer"
+                                                            },
+                                                            "project_id": {
+                                                                "type": "integer"
+                                                            },
+                                                            "from_task_id": {
+                                                                "type": "integer"
+                                                            },
+                                                            "to_task_id": {
+                                                                "type": "integer"
+                                                            },
+                                                            "dependency_type": {
+                                                                "type": "string"
+                                                            },
+                                                            "lag_days": {
+                                                                "type": "integer"
+                                                            },
+                                                            "priority": {
+                                                                "type": "integer"
+                                                            },
+                                                            "created_by": {
+                                                                "type": "integer"
+                                                            },
+                                                            "created_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            },
+                                                            "updated_at": {
+                                                                "type": "string",
+                                                                "format": "date-time"
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid or expired token"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Internal server error"
+                                        },
+                                        "data": {
+                                            "type": "object",
+                                            "nullable": true
                                         }
                                     },
                                     "type": "object"
@@ -7613,34 +10031,45 @@
                                 ],
                                 "properties": {
                                     "email": {
+                                        "description": "Worker's email address",
                                         "type": "string",
                                         "format": "email",
                                         "example": "newworker@example.com"
                                     },
                                     "first_name": {
+                                        "description": "Worker's first name",
                                         "type": "string",
                                         "example": "John"
                                     },
                                     "last_name": {
+                                        "description": "Worker's last name",
                                         "type": "string",
                                         "example": "Doe"
                                     },
-                                    "": {
+                                    "role_id": {
+                                        "description": "Role ID from fw_glob_roles table (optional)",
+                                        "type": "integer",
+                                        "example": 11
+                                    },
+                                    "user_type": {
+                                        "description": "User type string (deprecated, use role_id instead)",
                                         "type": "string",
-                                        "example": "Employee"
+                                        "example": "architect"
                                     },
                                     "job_title": {
+                                        "description": "Job title (optional)",
                                         "type": "string",
-                                        "example": "Developer"
+                                        "example": "Senior Architect"
                                     },
                                     "phone": {
+                                        "description": "Phone number (optional)",
                                         "type": "string",
                                         "example": "+1234567890"
                                     },
                                     "email_provider": {
-                                        "description": "Email provider: sendgrid, phpmailer, or auto",
+                                        "description": "Email provider: sendgrid, phpmailer, or auto (optional)",
                                         "type": "string",
-                                        "example": "sendgrid"
+                                        "example": "auto"
                                     }
                                 },
                                 "type": "object"
@@ -7806,221 +10235,72 @@
     },
     "components": {
         "schemas": {
-            "EmergencyContact": {
+            "MessageTemplate": {
                 "properties": {
-                    "primary_contact_name": {
+                    "id": {
+                        "type": "integer",
+                        "example": 1
+                    },
+                    "name": {
                         "type": "string",
-                        "example": "John Smith"
+                        "example": "Project Created Notification"
                     },
-                    "primary_contact_phone": {
+                    "type": {
                         "type": "string",
-                        "example": "(555) 123-4567"
+                        "enum": [
+                            "sms",
+                            "email"
+                        ],
+                        "example": "email"
                     },
-                    "primary_contact_relationship": {
+                    "category": {
                         "type": "string",
-                        "example": "Wife"
+                        "enum": [
+                            "system",
+                            "custom"
+                        ],
+                        "example": "system"
                     },
-                    "secondary_contact_name": {
+                    "event_type": {
                         "type": "string",
-                        "example": "Jane Doe"
+                        "example": "PROJECT_CREATED"
                     },
-                    "secondary_contact_phone": {
+                    "subject": {
                         "type": "string",
-                        "example": "(555) 987-6543"
+                        "example": "New Project: {{project_name}}",
+                        "nullable": true
                     },
-                    "secondary_contact_relationship": {
+                    "body": {
                         "type": "string",
-                        "example": "Sister"
+                        "example": "<h2>New Project</h2><p>{{project_name}}</p>"
                     },
-                    "blood_type": {
+                    "variables": {
+                        "type": "object",
+                        "example": {
+                            "project_name": "Project name"
+                        },
+                        "nullable": true
+                    },
+                    "is_editable": {
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "is_active": {
+                        "type": "boolean",
+                        "example": true
+                    },
+                    "created_by": {
+                        "type": "integer",
+                        "example": 1,
+                        "nullable": true
+                    },
+                    "created_at": {
                         "type": "string",
-                        "example": "A+"
+                        "format": "date-time"
                     },
-                    "allergies": {
+                    "updated_at": {
                         "type": "string",
-                        "example": "Penicillin, dust"
-                    },
-                    "medical_conditions": {
-                        "type": "string",
-                        "example": "Diabetes, asthma"
-                    },
-                    "medications": {
-                        "type": "string",
-                        "example": "Insulin, inhaler"
-                    },
-                    "medical_notes": {
-                        "type": "string",
-                        "example": "Patient has severe allergies to shellfish"
-                    },
-                    "insurance_company": {
-                        "type": "string",
-                        "example": "Blue Cross Blue Shield"
-                    },
-                    "policy_number": {
-                        "type": "string",
-                        "example": "BC123456789"
-                    },
-                    "insurance_emergency_contact": {
-                        "type": "string",
-                        "example": "(555) 800-HELP"
-                    }
-                },
-                "type": "object"
-            },
-            "ProfessionalData": {
-                "properties": {
-                    "work_experience": {
-                        "type": "array",
-                        "items": {
-                            "properties": {
-                                "company": {
-                                    "type": "string",
-                                    "example": "ABC Construction"
-                                },
-                                "position": {
-                                    "type": "string",
-                                    "example": "Senior Project Manager"
-                                },
-                                "start_date": {
-                                    "type": "string",
-                                    "format": "date",
-                                    "example": "2020-01-15"
-                                },
-                                "end_date": {
-                                    "type": "string",
-                                    "format": "date",
-                                    "example": "2023-12-31"
-                                },
-                                "description": {
-                                    "type": "string",
-                                    "example": "Managed large construction projects"
-                                }
-                            },
-                            "type": "object"
-                        }
-                    },
-                    "education": {
-                        "type": "array",
-                        "items": {
-                            "properties": {
-                                "institution": {
-                                    "type": "string",
-                                    "example": "University of Toronto"
-                                },
-                                "degree": {
-                                    "type": "string",
-                                    "example": "Bachelor of Engineering"
-                                },
-                                "field": {
-                                    "type": "string",
-                                    "example": "Civil Engineering"
-                                },
-                                "graduation_year": {
-                                    "type": "integer",
-                                    "example": 2018
-                                }
-                            },
-                            "type": "object"
-                        }
-                    },
-                    "certifications": {
-                        "type": "array",
-                        "items": {
-                            "properties": {
-                                "name": {
-                                    "type": "string",
-                                    "example": "PMP Certification"
-                                },
-                                "issuer": {
-                                    "type": "string",
-                                    "example": "PMI"
-                                },
-                                "issue_date": {
-                                    "type": "string",
-                                    "format": "date",
-                                    "example": "2022-06-15"
-                                },
-                                "expiry_date": {
-                                    "type": "string",
-                                    "format": "date",
-                                    "example": "2025-06-15"
-                                }
-                            },
-                            "type": "object"
-                        }
-                    },
-                    "safety_certifications": {
-                        "type": "array",
-                        "items": {
-                            "properties": {
-                                "name": {
-                                    "type": "string",
-                                    "example": "OSHA 30-Hour Construction"
-                                },
-                                "issuer": {
-                                    "type": "string",
-                                    "example": "OSHA"
-                                },
-                                "issue_date": {
-                                    "type": "string",
-                                    "format": "date",
-                                    "example": "2023-01-10"
-                                },
-                                "expiry_date": {
-                                    "type": "string",
-                                    "format": "date",
-                                    "example": "2026-01-10"
-                                }
-                            },
-                            "type": "object"
-                        }
-                    },
-                    "skills": {
-                        "type": "array",
-                        "items": {
-                            "properties": {
-                                "category": {
-                                    "type": "string",
-                                    "example": "Technical"
-                                },
-                                "skills": {
-                                    "type": "array",
-                                    "items": {
-                                        "type": "string"
-                                    },
-                                    "example": [
-                                        "Project Management",
-                                        "AutoCAD",
-                                        "Budget Planning"
-                                    ]
-                                }
-                            },
-                            "type": "object"
-                        }
-                    },
-                    "equipment": {
-                        "type": "array",
-                        "items": {
-                            "properties": {
-                                "name": {
-                                    "type": "string",
-                                    "example": "Personal Protective Equipment"
-                                },
-                                "type": {
-                                    "type": "string",
-                                    "example": "Safety"
-                                },
-                                "certification_required": {
-                                    "type": "boolean",
-                                    "example": true
-                                }
-                            },
-                            "type": "object"
-                        }
-                    },
-                    "professional_summary": {
-                        "type": "string",
-                        "example": "Experienced construction project manager with 10+ years in the industry"
+                        "format": "date-time"
                     }
                 },
                 "type": "object"
@@ -8029,16 +10309,36 @@
     },
     "tags": [
         {
-            "name": "Health",
-            "description": "API health and status endpoints"
-        },
-        {
             "name": "Authentication",
             "description": "User authentication and authorization endpoints"
         },
         {
-            "name": "Workers",
-            "description": "Worker management and invitation system endpoints"
+            "name": "Database",
+            "description": "Database operations"
+        },
+        {
+            "name": "Event Logs",
+            "description": "Event logging and audit trail management endpoints"
+        },
+        {
+            "name": "Event Processing",
+            "description": "Event processing and notification endpoints"
+        },
+        {
+            "name": "Event Rules Management",
+            "description": "Event rules and permissions management endpoints"
+        },
+        {
+            "name": "Health",
+            "description": "API health and status endpoints"
+        },
+        {
+            "name": "N8N Integration",
+            "description": "Endpoints for n8n workflow integration"
+        },
+        {
+            "name": "Plans",
+            "description": "Folders and files management for plans"
         },
         {
             "name": "Profile",
@@ -8049,44 +10349,44 @@
             "description": "Project management endpoints"
         },
         {
-            "name": "Tasks",
-            "description": "Project tasks management endpoints"
-        },
-        {
             "name": "Project Team",
             "description": "Project team management endpoints"
         },
         {
-            "name": "Event Logs",
-            "description": "Event logging and audit trail management endpoints"
+            "name": "Registration",
+            "description": "User registration and invitation system endpoints"
         },
         {
-            "name": "N8N Integration",
-            "description": "Endpoints for n8n workflow integration"
+            "name": "Roles",
+            "description": "Role management endpoints"
+        },
+        {
+            "name": "Tasks",
+            "description": "Project tasks management endpoints"
+        },
+        {
+            "name": "Workers",
+            "description": "Worker management and invitation system endpoints"
         },
         {
             "name": "Languages",
-            "description": "Language management endpoints"
+            "description": "Languages"
         },
         {
             "name": "Worker Languages",
-            "description": "Worker language proficiency management endpoints"
+            "description": "Worker Languages"
+        },
+        {
+            "name": "Message Templates",
+            "description": "Message Templates"
+        },
+        {
+            "name": "Dependencies",
+            "description": "Dependencies"
         },
         {
             "name": "Two-Factor",
-            "description": "Two-factor authentication endpoints for SMS and email verification"
-        },
-        {
-            "name": "Database",
-            "description": "Database operations"
-        },
-        {
-            "name": "Plans",
-            "description": "Folders and files management for plans"
-        },
-        {
-            "name": "Registration",
-            "description": "User registration and invitation system endpoints"
+            "description": "Two-Factor"
         }
     ]
 }

@@ -14,6 +14,9 @@ use App\Controllers\ProjectTeamController;
 use App\Controllers\EventLogController;
 use App\Controllers\N8nIntegrationController;
 use App\Controllers\LanguageController;
+use App\Controllers\EventRulesController;
+use App\Controllers\MessageTemplatesController;
+use App\Database\Database;
 use Flight;
 use Monolog\Logger;
 use OpenApi\Annotations as OA;
@@ -21,10 +24,12 @@ use OpenApi\Annotations as OA;
 class ApiRoutes
 {
     private Logger $logger;
+    private Database $database;
 
-    public function __construct(Logger $logger)
+    public function __construct(Logger $logger, Database $database)
     {
         $this->logger = $logger;
+        $this->database = $database;
         $this->register();
     }
 
@@ -106,7 +111,19 @@ class ApiRoutes
                                 'profile_avatar' => 'POST /api/v1/profile/avatar',
                                 '2fa_toggle' => 'POST /api/v1/2fa/toggle',
                                 'roles_get' => 'GET /api/v1/roles',
-                                'event_rules' => 'GET /api/v1/event-rules',
+                                'event_rules_get' => 'GET /api/v1/admin/event-rules',
+                                'event_rules_get_by_type' => 'GET /api/v1/admin/event-rules/{event_type}',
+                                'event_rules_create' => 'POST /api/v1/admin/event-rules',
+                                'event_rules_update' => 'PUT /api/v1/admin/event-rules/{event_type}',
+                                'event_rules_delete' => 'DELETE /api/v1/admin/event-rules/{event_type}',
+                                'event_rules_conditions' => 'GET /api/v1/admin/event-rules/conditions',
+                                'event_rules_actions' => 'GET /api/v1/admin/event-rules/actions',
+                                'message_templates_get' => 'GET /api/v1/admin/message-templates',
+                                'message_templates_get_by_id' => 'GET /api/v1/admin/message-templates/{id}',
+                                'message_templates_create' => 'POST /api/v1/admin/message-templates',
+                                'message_templates_update' => 'PUT /api/v1/admin/message-templates/{id}',
+                                'message_templates_delete' => 'DELETE /api/v1/admin/message-templates/{id}',
+                                'message_templates_by_event' => 'GET /api/v1/admin/message-templates/by-event/{event_type}',
                                 'event_logs_get' => 'GET /api/v1/event-logs',
                                 'event_logs_get_by_id' => 'GET /api/v1/event-logs/{id}',
                                 'event_logs_create' => 'POST /api/v1/event-logs',
@@ -1068,6 +1085,121 @@ class ApiRoutes
         Flight::route('DELETE /api/v1/workers/@workerId/languages/@languageId', function($workerId, $languageId) use ($languageController, $authMiddleware) {
             if ($authMiddleware->handle()) {
                 $languageController->removeWorkerLanguage((int)$workerId, (int)$languageId);
+            }
+        });
+
+        // Маршруты для обработки событий и уведомлений
+        Flight::route('POST /api/v1/events/process', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $eventController = new \App\Controllers\EventProcessingController($this->logger);
+                $eventController->processEvents();
+            }
+        });
+
+        Flight::route('POST /api/v1/reports/daily', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $eventController = new \App\Controllers\EventProcessingController($this->logger);
+                $eventController->generateDailyReport();
+            }
+        });
+
+        Flight::route('GET /api/v1/events/stats', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $eventController = new \App\Controllers\EventProcessingController($this->logger);
+                $eventController->getEventStats();
+            }
+        });
+
+        // Маршруты для управления правилами событий
+        Flight::route('GET /api/v1/admin/event-rules/conditions', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $rulesController = new \App\Controllers\EventRulesController($this->logger);
+                $rulesController->getAvailableConditions();
+            }
+        });
+
+        Flight::route('GET /api/v1/admin/event-rules/actions', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $rulesController = new \App\Controllers\EventRulesController($this->logger);
+                $rulesController->getAvailableActions();
+            }
+        });
+
+        Flight::route('GET /api/v1/admin/event-rules', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $rulesController = new \App\Controllers\EventRulesController($this->logger);
+                $rulesController->getAllRules();
+            }
+        });
+
+        Flight::route('GET /api/v1/admin/event-rules/@event_type', function($event_type) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $rulesController = new \App\Controllers\EventRulesController($this->logger);
+                $rulesController->getRule($event_type);
+            }
+        });
+
+        Flight::route('POST /api/v1/admin/event-rules', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $rulesController = new \App\Controllers\EventRulesController($this->logger);
+                $rulesController->createRule();
+            }
+        });
+
+        Flight::route('PUT /api/v1/admin/event-rules/@event_type', function($event_type) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $rulesController = new \App\Controllers\EventRulesController($this->logger);
+                $rulesController->updateRule($event_type);
+            }
+        });
+
+        Flight::route('DELETE /api/v1/admin/event-rules/@event_type', function($event_type) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $rulesController = new \App\Controllers\EventRulesController($this->logger);
+                $rulesController->deleteRule($event_type);
+            }
+        });
+
+        // Маршруты для управления шаблонами сообщений
+        Flight::route('GET /api/v1/admin/message-templates', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $templatesController = new MessageTemplatesController($this->database, $this->logger);
+                $templatesController->getAllTemplates();
+            }
+        });
+
+        Flight::route('GET /api/v1/admin/message-templates/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $templatesController = new MessageTemplatesController($this->database, $this->logger);
+                $templatesController->getTemplate((int)$id);
+            }
+        });
+
+        Flight::route('POST /api/v1/admin/message-templates', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $templatesController = new MessageTemplatesController($this->database, $this->logger);
+                $templatesController->createTemplate();
+            }
+        });
+
+        Flight::route('PUT /api/v1/admin/message-templates/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $templatesController = new MessageTemplatesController($this->database, $this->logger);
+                $templatesController->updateTemplate((int)$id);
+            }
+        });
+
+        Flight::route('DELETE /api/v1/admin/message-templates/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $templatesController = new MessageTemplatesController($this->database, $this->logger);
+                $templatesController->deleteTemplate((int)$id);
+            }
+        });
+
+        Flight::route('GET /api/v1/admin/message-templates/by-event/@event_type', function($event_type) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $templatesController = new MessageTemplatesController($this->database, $this->logger);
+                $templatesController->getTemplatesByEvent($event_type);
             }
         });
     }

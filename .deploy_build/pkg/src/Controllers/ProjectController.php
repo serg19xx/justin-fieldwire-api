@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\EventLoggingService;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
@@ -18,6 +19,7 @@ class ProjectController
 {
     private Logger $logger;
     private Database $database;
+    private EventLoggingService $eventLoggingService;
 
     public function __construct(Logger $logger)
     {
@@ -25,6 +27,7 @@ class ProjectController
         
         try {
             $this->database = new Database();
+            $this->eventLoggingService = new EventLoggingService($this->logger);
         } catch (\Exception $e) {
             $this->logger->error('Failed to initialize ProjectController', [
                 'error' => $e->getMessage()
@@ -102,6 +105,8 @@ class ProjectController
      *                     @OA\Property(property="priority", type="string", example="High"),
      *                     @OA\Property(property="status", type="string", example="Active"),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
+     *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
+     *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
      *                     @OA\Property(property="created_at", type="string", format="date-time"),
      *                     @OA\Property(property="updated_at", type="string", format="date-time")
      *                 )),
@@ -144,10 +149,12 @@ class ProjectController
             // Базовый SQL запрос
             $sql = "SELECT 
                         p.id, p.prj_name, p.address, p.date_start, p.date_end, 
-                        p.priority, p.status, p.prj_manager, p.created_at, p.updated_at,
-                        u.first_name, u.last_name
+                        p.priority, p.status, p.prj_manager, p.created_by, p.created_at, p.updated_at,
+                        u.first_name, u.last_name,
+                        creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
                     FROM fw_projects p
                     LEFT JOIN fw_v_users u ON p.prj_manager = u.id
+                    LEFT JOIN fw_v_users creator ON p.created_by = creator.id
                     WHERE 1=1";
 
             $params = [];
@@ -225,6 +232,10 @@ class ProjectController
                     'priority' => $project['priority'],
                     'status' => $project['status'],
                     'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
+                    'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
+                    'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
+                        ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name'] 
+                        : null,
                     'manager_name' => $project['first_name'] && $project['last_name'] 
                         ? $project['first_name'] . ' ' . $project['last_name'] 
                         : null,
@@ -298,6 +309,8 @@ class ProjectController
      *                     @OA\Property(property="priority", type="string", example="High"),
      *                     @OA\Property(property="status", type="string", example="Active"),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
+     *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
+     *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
      *                     @OA\Property(property="manager_name", type="string", nullable=true, example="John Doe"),
      *                     @OA\Property(property="created_at", type="string", format="date-time"),
      *                     @OA\Property(property="updated_at", type="string", format="date-time")
@@ -326,10 +339,12 @@ class ProjectController
             
             $sql = "SELECT 
                         p.id, p.prj_name, p.address, p.date_start, p.date_end, 
-                        p.priority, p.status, p.prj_manager, p.created_at, p.updated_at,
-                        u.first_name, u.last_name
+                        p.priority, p.status, p.prj_manager, p.created_by, p.created_at, p.updated_at,
+                        u.first_name, u.last_name,
+                        creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
                     FROM fw_projects p
                     LEFT JOIN fw_v_users u ON p.prj_manager = u.id
+                    LEFT JOIN fw_v_users creator ON p.created_by = creator.id
                     WHERE p.id = ?";
             
             $result = $connection->executeQuery($sql, [$id]);
@@ -354,6 +369,10 @@ class ProjectController
                 'priority' => $project['priority'],
                 'status' => $project['status'],
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
+                'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
+                'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
+                    ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name'] 
+                    : null,
                 'manager_name' => $project['first_name'] && $project['last_name'] 
                     ? $project['first_name'] . ' ' . $project['last_name'] 
                     : null,
@@ -398,14 +417,15 @@ class ProjectController
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
-     *             required={"prj_name", "address", "date_start", "date_end", "priority"},
+     *             required={"prj_name", "address", "date_start", "date_end", "priority", "created_by"},
      *             @OA\Property(property="prj_name", type="string", example="Office Building Construction"),
      *             @OA\Property(property="address", type="string", example="123 Main St, City, State"),
      *             @OA\Property(property="date_start", type="string", format="date", example="2025-01-01"),
      *             @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *             @OA\Property(property="priority", type="string", example="High"),
      *             @OA\Property(property="status", type="string", example="Active"),
-     *             @OA\Property(property="prj_manager", type="integer", example=1)
+     *             @OA\Property(property="prj_manager", type="integer", example=1),
+     *             @OA\Property(property="created_by", type="integer", example=47)
      *         )
      *     ),
      *     @OA\Response(
@@ -425,6 +445,8 @@ class ProjectController
      *                     @OA\Property(property="priority", type="string", example="High"),
      *                     @OA\Property(property="status", type="string", example="Active"),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
+     *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
+     *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
      *                     @OA\Property(property="created_at", type="string", format="date-time"),
      *                     @OA\Property(property="updated_at", type="string", format="date-time")
      *                 )
@@ -465,8 +487,8 @@ class ProjectController
 
             $connection = $this->database->getConnection();
             
-            $sql = "INSERT INTO fw_projects (prj_name, address, date_start, date_end, priority, status, prj_manager) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO fw_projects (prj_name, address, date_start, date_end, priority, status, prj_manager, created_by) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
             
             $params = [
                 $data['prj_name'],
@@ -475,18 +497,30 @@ class ProjectController
                 $data['date_end'],
                 $data['priority'],
                 $data['status'] ?? null,
-                $data['prj_manager'] ?? null
+                $data['prj_manager'] ?? null,
+                $data['created_by'] ?? null
             ];
 
             $connection->executeStatement($sql, $params);
             $projectId = $connection->lastInsertId();
 
-            // Получаем созданный проект
+            // Получаем созданный проект с информацией о создателе
             $result = $connection->executeQuery(
-                "SELECT * FROM fw_projects WHERE id = ?",
+                "SELECT p.*, creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
+                 FROM fw_projects p
+                 LEFT JOIN fw_v_users creator ON p.created_by = creator.id
+                 WHERE p.id = ?",
                 [$projectId]
             );
             $project = $result->fetchAssociative();
+
+            // Копируем стандартную структуру папок из проекта-образца (project_id = 0) в новый проект
+            $this->logger->info('About to copy default folder structure', ['project_id' => $projectId]);
+            $this->copyDefaultFolderStructure($projectId, $connection);
+            $this->logger->info('Finished copying default folder structure', ['project_id' => $projectId]);
+
+            // Логируем событие создания проекта
+            $this->logProjectCreationEvent($project, $data);
 
             Flight::json([
                 'error_code' => 0,
@@ -502,6 +536,10 @@ class ProjectController
                         'priority' => $project['priority'],
                         'status' => $project['status'],
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
+                        'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
+                        'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
+                            ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name'] 
+                            : null,
                         'created_at' => $project['created_at'],
                         'updated_at' => $project['updated_at']
                     ]
@@ -548,7 +586,8 @@ class ProjectController
      *             @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *             @OA\Property(property="priority", type="string", example="High"),
      *             @OA\Property(property="status", type="string", example="Active"),
-     *             @OA\Property(property="prj_manager", type="integer", example=1)
+     *             @OA\Property(property="prj_manager", type="integer", example=1),
+     *             @OA\Property(property="created_by", type="integer", example=47)
      *         )
      *     ),
      *     @OA\Response(
@@ -568,6 +607,8 @@ class ProjectController
      *                     @OA\Property(property="priority", type="string", example="High"),
      *                     @OA\Property(property="status", type="string", example="Active"),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
+     *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
+     *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
      *                     @OA\Property(property="created_at", type="string", format="date-time"),
      *                     @OA\Property(property="updated_at", type="string", format="date-time")
      *                 )
@@ -656,6 +697,10 @@ class ProjectController
                 $updateFields[] = "prj_manager = ?";
                 $params[] = $data['prj_manager'];
             }
+            if (isset($data['created_by'])) {
+                $updateFields[] = "created_by = ?";
+                $params[] = $data['created_by'];
+            }
 
             if (empty($updateFields)) {
                 Flight::json([
@@ -673,9 +718,12 @@ class ProjectController
             $sql = "UPDATE fw_projects SET " . implode(', ', $updateFields) . " WHERE id = ?";
             $connection->executeStatement($sql, $params);
 
-            // Получаем обновленный проект
+            // Получаем обновленный проект с информацией о создателе
             $result = $connection->executeQuery(
-                "SELECT * FROM fw_projects WHERE id = ?",
+                "SELECT p.*, creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
+                 FROM fw_projects p
+                 LEFT JOIN fw_v_users creator ON p.created_by = creator.id
+                 WHERE p.id = ?",
                 [$id]
             );
             $project = $result->fetchAssociative();
@@ -694,6 +742,10 @@ class ProjectController
                         'priority' => $project['priority'],
                         'status' => $project['status'],
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
+                        'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
+                        'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
+                            ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name'] 
+                            : null,
                         'created_at' => $project['created_at'],
                         'updated_at' => $project['updated_at']
                     ]
@@ -810,7 +862,7 @@ class ProjectController
      */
     private function validateProjectData(array $data, bool $isCreate = true): array
     {
-        $requiredFields = ['prj_name', 'address', 'date_start', 'date_end', 'priority'];
+        $requiredFields = ['prj_name', 'address', 'date_start', 'date_end', 'priority', 'created_by'];
         
         if ($isCreate) {
             foreach ($requiredFields as $field) {
@@ -875,6 +927,14 @@ class ProjectController
                     'message' => 'End date must be after start date'
                 ];
             }
+        }
+
+        // Валидация created_by
+        if (isset($data['created_by']) && (!is_numeric($data['created_by']) || $data['created_by'] <= 0)) {
+            return [
+                'valid' => false,
+                'message' => 'created_by must be a positive integer'
+            ];
         }
 
         // Валидация ID менеджера
@@ -981,6 +1041,226 @@ class ProjectController
                 'data' => null
             ], 401);
             return false;
+        }
+    }
+
+    /**
+     * Логирует событие создания проекта
+     */
+    private function logProjectCreationEvent(array $project, array $requestData): void
+    {
+        try {
+            // Определяем тип актора (админ или менеджер)
+            $actorType = 'user';
+            $actorId = $project['created_by'];
+            
+            // Подготавливаем данные для логирования
+            $afterData = [
+                'id' => (int)$project['id'],
+                'prj_name' => $project['prj_name'],
+                'address' => $project['address'],
+                'date_start' => $project['date_start'],
+                'date_end' => $project['date_end'],
+                'priority' => $project['priority'],
+                'status' => $project['status'],
+                'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
+                'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
+                'created_at' => $project['created_at'],
+                'updated_at' => $project['updated_at']
+            ];
+
+            $changedFields = array_keys($requestData);
+            
+            // Логируем событие
+            $this->eventLoggingService->logEvent(
+                'project',
+                (int)$project['id'],
+                'PROJECT_CREATED',
+                [],
+                $afterData,
+                $changedFields,
+                [
+                    'actor_type' => $actorType,
+                    'actor_id' => $actorId,
+                    'comment' => 'Project created via API',
+                    'ip' => $this->getClientIp(),
+                    'user_agent' => $this->getUserAgent()
+                ]
+            );
+
+            $this->logger->info('Project creation event logged', [
+                'project_id' => $project['id'],
+                'created_by' => $project['created_by'],
+                'prj_manager' => $project['prj_manager']
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to log project creation event', [
+                'project_id' => $project['id'] ?? null,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Получает IP адрес клиента
+     */
+    private function getClientIp(): ?string
+    {
+        $headers = [
+            'HTTP_CF_CONNECTING_IP',
+            'HTTP_X_FORWARDED_FOR',
+            'HTTP_X_FORWARDED',
+            'HTTP_X_CLUSTER_CLIENT_IP',
+            'HTTP_FORWARDED_FOR',
+            'HTTP_FORWARDED',
+            'REMOTE_ADDR'
+        ];
+
+        foreach ($headers as $header) {
+            if (!empty($_SERVER[$header])) {
+                $ips = explode(',', $_SERVER[$header]);
+                return trim($ips[0]);
+            }
+        }
+
+        return $_SERVER['REMOTE_ADDR'] ?? null;
+    }
+
+    /**
+     * Получает User Agent клиента
+     */
+    private function getUserAgent(): ?string
+    {
+        return $_SERVER['HTTP_USER_AGENT'] ?? null;
+    }
+
+    /**
+     * Копирует стандартную структуру папок из проекта-образца (project_id = 0) в новый проект
+     */
+    private function copyDefaultFolderStructure(int $newProjectId, $connection): void
+    {
+        $this->logger->info('copyDefaultFolderStructure method called', [
+            'new_project_id' => $newProjectId,
+            'connection_type' => get_class($connection)
+        ]);
+        
+        try {
+            $this->logger->info('Copying default folder structure to new project', [
+                'new_project_id' => $newProjectId
+            ]);
+
+            // Получаем все папки из проекта-образца (project_id = 0)
+            $this->logger->info('Executing query to get default folders', [
+                'sql' => 'SELECT id, name, parent_id, created_at, updated_at FROM fw_plan_folders WHERE project_id = 0 ORDER BY parent_id ASC, id ASC'
+            ]);
+            try {
+                $templateFolders = $connection->executeQuery(
+                "SELECT id, name, parent_id, created_at, updated_at 
+                     FROM fw_plan_folders 
+                     WHERE project_id = 0 
+                     ORDER BY parent_id ASC, id ASC"
+                )->fetchAllAssociative();
+            } catch (\Throwable $e) {
+                $this->logger->error('Query to get default folders failed', [
+                    'error' => $e->getMessage()
+                ]);
+                return;
+            }
+
+            $this->logger->info('Query executed, found folders', [
+                'folder_count' => count($templateFolders),
+                'folders' => $templateFolders
+            ]);
+
+            if (empty($templateFolders)) {
+                $this->logger->info('No default folders found to copy');
+                return;
+            }
+
+            // Создаем маппинг старых ID на новые ID
+            $idMapping = [];
+            
+            // Первый проход: вставляем все папки с правильным parent_id
+            foreach ($templateFolders as $folder) {
+                $oldId = (int)$folder['id'];
+                $oldParentId = (int)$folder['parent_id'];
+                
+                // Определяем parent_id для новой папки
+                $newParentId = null;
+                if ($oldParentId == 0) {
+                    // Корневые папки остаются корневыми (parent_id = NULL)
+                    $newParentId = null;
+                } else {
+                    // Вложенные папки пока ставим parent_id = new_project_id (временно)
+                    $newParentId = $newProjectId;
+                }
+                
+                // Вставляем папку с новым project_id
+                try {
+                    $connection->executeStatement(
+                        "INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at) 
+                         VALUES (?, ?, ?, ?, ?)",
+                        [
+                            $folder['name'],
+                            $newParentId,
+                            $newProjectId,
+                            $folder['created_at'],
+                            $folder['updated_at']
+                        ]
+                    );
+                } catch (\Throwable $e) {
+                    $this->logger->error('Failed to insert default folder', [
+                        'new_project_id' => $newProjectId,
+                        'folder' => $folder,
+                        'error' => $e->getMessage()
+                    ]);
+                    continue;
+                }
+                
+                $newId = $connection->lastInsertId();
+                $idMapping[$oldId] = $newId;
+            }
+
+            // Второй проход: обновляем parent_id для вложенных папок
+            foreach ($templateFolders as $folder) {
+                $oldId = (int)$folder['id'];
+                $oldParentId = (int)$folder['parent_id'];
+                
+                if ($oldParentId > 0 && isset($idMapping[$oldParentId])) {
+                    // Если это вложенная папка и мы знаем новый ID родительской папки
+                    $newId = $idMapping[$oldId];
+                    $newParentId = $idMapping[$oldParentId];
+                    
+                    try {
+                        $connection->executeStatement(
+                            "UPDATE fw_plan_folders 
+                             SET parent_id = ? 
+                             WHERE id = ?",
+                            [$newParentId, $newId]
+                        );
+                    } catch (\Throwable $e) {
+                        $this->logger->error('Failed to update parent_id for folder', [
+                            'folder_id' => $newId,
+                            'new_parent_id' => $newParentId,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+                }
+            }
+
+            $this->logger->info('Default folder structure copied successfully', [
+                'new_project_id' => $newProjectId,
+                'folders_copied' => count($templateFolders),
+                'id_mapping' => $idMapping
+            ]);
+
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to copy default folder structure', [
+                'new_project_id' => $newProjectId,
+                'error' => $e->getMessage()
+            ]);
+            // Не прерываем создание проекта, если копирование папок не удалось
         }
     }
 }

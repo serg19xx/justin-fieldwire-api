@@ -3,6 +3,7 @@
 namespace App\Bootstrap;
 
 use App\Config\Config;
+use App\Database\Database;
 use App\Middleware\CorsMiddleware;
 use App\Routes\ApiRoutes;
 use Flight;
@@ -72,9 +73,10 @@ class Application
             // Register CORS middleware BEFORE routes
             Flight::before('start', [new CorsMiddleware($this->config), 'handle']);
             
-            // Register routes with logger
+            // Register routes with logger and database
             try {
-                $apiRoutes = new \App\Routes\ApiRoutes($this->logger);
+                $database = new Database($this->config);
+                $apiRoutes = new \App\Routes\ApiRoutes($this->logger, $database);
                 $this->safeLog('ApiRoutes created and registered');
             } catch (\Exception $e) {
                 $this->safeLog('ERROR creating ApiRoutes: ' . $e->getMessage());
