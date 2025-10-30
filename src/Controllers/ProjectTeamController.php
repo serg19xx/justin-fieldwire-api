@@ -451,8 +451,27 @@ class ProjectTeamController
                 return $this->errorResponse('User not found', 404);
             }
             
+            // Log user role for debugging
+            $this->logger->info('Checking user role for team addition', [
+                'user_id' => $input['user_id'],
+                'role_code' => $user['role_code'] ?? 'null',
+                'role_name' => $user['role_name'] ?? 'null'
+            ]);
+            
             // Check by role_code (more reliable than role_name)
-            if (isset($user['role_code']) && in_array($user['role_code'], ['admin', 'project_manager'], true)) {
+            // Also check role_name as fallback in case role_code is null or empty
+            $userRoleCode = $user['role_code'] ?? null;
+            $userRoleName = $user['role_name'] ?? null;
+            
+            $isAdmin = ($userRoleCode === 'admin' || $userRoleCode === 'project_manager' || 
+                       $userRoleName === 'System Administrator' || $userRoleName === 'Project Manager');
+            
+            if ($isAdmin) {
+                $this->logger->warning('Attempt to add admin/manager to team blocked', [
+                    'user_id' => $input['user_id'],
+                    'role_code' => $userRoleCode,
+                    'role_name' => $userRoleName
+                ]);
                 return $this->errorResponse('Cannot add System Administrator or Project Manager to team', 400);
             }
 
