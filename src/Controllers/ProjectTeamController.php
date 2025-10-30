@@ -443,7 +443,7 @@ class ProjectTeamController
             $connection = $this->database->getConnection();
 
             // Check if user exists, is not archived, and is not System Administrator or Project Manager
-            $userSql = "SELECT id, email, first_name, last_name, status, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency FROM fw_v_users WHERE id = ? AND archived_at IS NULL";
+            $userSql = "SELECT id, email, first_name, last_name, role_name, status, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency FROM fw_v_users WHERE id = ? AND archived_at IS NULL";
             $userResult = $connection->executeQuery($userSql, [$input['user_id']]);
             $user = $userResult->fetchAssociative();
             
@@ -451,7 +451,7 @@ class ProjectTeamController
                 return $this->errorResponse('User not found', 404);
             }
             
-            if (in_array($user[''], ['System Administrator', 'Project Manager'])) {
+            if (isset($user['role_name']) && in_array($user['role_name'], ['System Administrator', 'Project Manager'], true)) {
                 return $this->errorResponse('Cannot add System Administrator or Project Manager to team', 400);
             }
 
