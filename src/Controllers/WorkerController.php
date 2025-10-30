@@ -331,6 +331,9 @@ class WorkerController
                 }
             }
 
+            // Исключить администраторов и менеджеров проектов из списка работников
+            $sql .= " AND (r.code IS NULL OR r.code NOT IN ('admin', 'project_manager'))";
+
             // Фильтр по 2FA
             if ($twoFactor !== null) {
                 if ($twoFactor === 'true' || $twoFactor === true) {
@@ -355,17 +358,22 @@ class WorkerController
             if ($projectId && is_numeric($projectId)) {
                 $countSql = "SELECT COUNT(*) as total 
                             FROM fw_users u
+                            LEFT JOIN fw_glob_roles r ON u.role_id = r.id
                             INNER JOIN fw_prj_team_members tm ON u.id = tm.user_id
                             WHERE tm.project_id = ?";
                 $countParams = [(int)$projectId];
             } elseif ($prjMngrId && is_numeric($prjMngrId)) {
                 $countSql = "SELECT COUNT(*) as total 
                             FROM fw_users u
+                            LEFT JOIN fw_glob_roles r ON u.role_id = r.id
                             INNER JOIN fw_projects p ON u.id = p.prj_manager
                             WHERE p.prj_manager = ?";
                 $countParams = [(int)$prjMngrId];
             } else {
-                $countSql = "SELECT COUNT(*) as total FROM fw_users WHERE 1=1";
+                $countSql = "SELECT COUNT(*) as total 
+                            FROM fw_users u
+                            LEFT JOIN fw_glob_roles r ON u.role_id = r.id
+                            WHERE 1=1";
                 $countParams = [];
             }
             
@@ -412,6 +420,9 @@ class WorkerController
                     $countSql .= " AND archived_at IS NULL";
                 }
             }
+            
+            // Исключить администраторов и менеджеров проектов из подсчета
+            $countSql .= " AND (r.code IS NULL OR r.code NOT IN ('admin', 'project_manager'))";
             
             if ($twoFactor !== null) {
                 if ($twoFactor === 'true' || $twoFactor === true) {
