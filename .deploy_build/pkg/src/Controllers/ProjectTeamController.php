@@ -111,19 +111,18 @@ class ProjectTeamController
 
             $connection = $this->database->getConnection();
 
-            // Get total count (exclude System Administrator and Project Manager)
+            // Get total count (all team members, including admins and PMs if added)
             $countSql = "
                 SELECT COUNT(*) as total 
                 FROM fw_prj_team_members tm
                 JOIN fw_v_users u ON tm.user_id = u.id
                 WHERE tm.project_id = ? 
-                  AND u.archived_at IS NULL 
-                  AND u.role_code NOT IN ('admin', 'project_manager')
+                  AND u.archived_at IS NULL
             ";
             $countResult = $connection->executeQuery($countSql, [$projectId]);
             $total = $countResult->fetchOne();
 
-            // Get team members with all user data (exclude System Administrator and Project Manager)
+            // Get team members with all user data (all members including admins and PMs if added)
             $sql = "
                 SELECT 
                     -- Fields from fw_prj_team_members
@@ -177,8 +176,7 @@ class ProjectTeamController
                 FROM fw_prj_team_members tm
                 JOIN fw_v_users u ON tm.user_id = u.id
                 WHERE tm.project_id = ? 
-                  AND u.archived_at IS NULL 
-                  AND u.role_name NOT IN ('admin', 'project_manager')
+                  AND u.archived_at IS NULL
                 ORDER BY tm.assigned_at DESC
                 LIMIT " . (int)$limit . " OFFSET " . (int)$offset . "
             ";
@@ -328,7 +326,7 @@ class ProjectTeamController
                     u.role_description
                 FROM fw_v_users u
                 WHERE u.archived_at IS NULL 
-                  AND u.role_name NOT IN ('System Administrator', 'Project Manager')
+                  AND (u.role_code IS NULL OR u.role_code NOT IN ('admin', 'project_manager'))
                   AND u.id NOT IN (
                       SELECT tm.user_id 
                       FROM fw_prj_team_members tm 
@@ -442,8 +440,8 @@ class ProjectTeamController
 
             $connection = $this->database->getConnection();
 
-            // Check if user exists, is not archived, and is not System Administrator or Project Manager
-            $userSql = "SELECT id, email, first_name, last_name, status, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency FROM fw_v_users WHERE id = ? AND archived_at IS NULL";
+            // Check if user exists and is not archived
+            $userSql = "SELECT id, email, first_name, last_name, role_code, role_name, status, status_changed_at, status_end_at, dob, gender, nationality, country_of_origin, workforce_group, city, emergency FROM fw_v_users WHERE id = ? AND archived_at IS NULL";
             $userResult = $connection->executeQuery($userSql, [$input['user_id']]);
             $user = $userResult->fetchAssociative();
             
@@ -451,9 +449,8 @@ class ProjectTeamController
                 return $this->errorResponse('User not found', 404);
             }
             
-            if (in_array($user[''], ['System Administrator', 'Project Manager'])) {
-                return $this->errorResponse('Cannot add System Administrator or Project Manager to team', 400);
-            }
+            // Note: Administrators and Project Managers are filtered from available users list,
+            // but can be added directly if user_id is known (no restriction here)
 
             // Check if user is already in team
             $existingSql = "SELECT id FROM fw_prj_team_members WHERE project_id = ? AND user_id = ?";
