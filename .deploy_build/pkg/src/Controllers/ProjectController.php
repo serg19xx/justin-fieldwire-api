@@ -149,7 +149,7 @@ class ProjectController
             // Базовый SQL запрос
             $sql = "SELECT 
                         p.id, p.prj_name, p.address, p.date_start, p.date_end, 
-                        p.priority, p.status, p.prj_manager, p.created_by, p.created_at, p.updated_at,
+                        p.priority, p.status, p.description, p.prj_manager, p.created_by, p.created_at, p.updated_at,
                         u.first_name, u.last_name,
                         creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
                     FROM fw_projects p
@@ -231,6 +231,7 @@ class ProjectController
                     'date_end' => $project['date_end'],
                     'priority' => $project['priority'],
                     'status' => $project['status'],
+                    'description' => $project['description'] ?? null,
                     'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                     'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                     'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
@@ -339,7 +340,7 @@ class ProjectController
             
             $sql = "SELECT 
                         p.id, p.prj_name, p.address, p.date_start, p.date_end, 
-                        p.priority, p.status, p.prj_manager, p.created_by, p.created_at, p.updated_at,
+                        p.priority, p.status, p.description, p.prj_manager, p.created_by, p.created_at, p.updated_at,
                         u.first_name, u.last_name,
                         creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
                     FROM fw_projects p
@@ -368,6 +369,7 @@ class ProjectController
                 'date_end' => $project['date_end'],
                 'priority' => $project['priority'],
                 'status' => $project['status'],
+                'description' => $project['description'] ?? null,
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                 'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                 'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
@@ -487,8 +489,8 @@ class ProjectController
 
             $connection = $this->database->getConnection();
             
-            $sql = "INSERT INTO fw_projects (prj_name, address, date_start, date_end, priority, status, prj_manager, created_by) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO fw_projects (prj_name, address, date_start, date_end, priority, status, prj_manager, created_by, description) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
             
             $params = [
                 $data['prj_name'],
@@ -498,7 +500,8 @@ class ProjectController
                 $data['priority'],
                 $data['status'] ?? null,
                 $data['prj_manager'] ?? null,
-                $data['created_by'] ?? null
+                $data['created_by'] ?? null,
+                $data['description'] ?? null
             ];
 
             $connection->executeStatement($sql, $params);
@@ -535,6 +538,7 @@ class ProjectController
                         'date_end' => $project['date_end'],
                         'priority' => $project['priority'],
                         'status' => $project['status'],
+                        'description' => $project['description'] ?? null,
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                         'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
@@ -665,6 +669,14 @@ class ProjectController
                 return;
             }
 
+            // Получаем текущие данные проекта перед обновлением для логирования
+            $beforeResult = $connection->executeQuery(
+                "SELECT id, prj_name, address, date_start, date_end, priority, status, description, prj_manager, created_by, created_at, updated_at
+                 FROM fw_projects WHERE id = ?",
+                [$id]
+            );
+            $beforeData = $beforeResult->fetchAssociative();
+
             // Строим SQL запрос для обновления
             $updateFields = [];
             $params = [];
@@ -692,6 +704,10 @@ class ProjectController
             if (isset($data['status'])) {
                 $updateFields[] = "status = ?";
                 $params[] = $data['status'];
+            }
+            if (isset($data['description'])) {
+                $updateFields[] = "description = ?";
+                $params[] = $data['description'];
             }
             if (isset($data['prj_manager'])) {
                 $updateFields[] = "prj_manager = ?";
@@ -727,6 +743,84 @@ class ProjectController
                 [$id]
             );
             $project = $result->fetchAssociative();
+
+            // Логируем событие обновления проекта
+            try {
+                $user = Flight::get('current_user');
+                $actorId = $user['id'] ?? $beforeData['created_by'] ?? null;
+                
+                $afterData = [
+                    'id' => (int)$project['id'],
+                    'prj_name' => $project['prj_name'],
+                    'address' => $project['address'],
+                    'date_start' => $project['date_start'],
+                    'date_end' => $project['date_end'],
+                    'priority' => $project['priority'],
+                    'status' => $project['status'],
+                    'description' => $project['description'] ?? null,
+                    'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
+                    'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
+                    'updated_at' => $project['updated_at']
+                ];
+
+                $this->eventLoggingService->logSimple(
+                    entityType: 'project',
+                    entityId: $id,
+                    eventType: 'PROJECT_UPDATED',
+                    afterData: $afterData,
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $actorId,
+                        'before_data' => [
+                            'id' => (int)$beforeData['id'],
+                            'prj_name' => $beforeData['prj_name'],
+                            'address' => $beforeData['address'],
+                            'date_start' => $beforeData['date_start'],
+                            'date_end' => $beforeData['date_end'],
+                            'priority' => $beforeData['priority'],
+                            'status' => $beforeData['status'],
+                            'description' => $beforeData['description'] ?? null,
+                            'prj_manager' => $beforeData['prj_manager'] ? (int)$beforeData['prj_manager'] : null,
+                            'created_by' => $beforeData['created_by'] ? (int)$beforeData['created_by'] : null
+                        ],
+                        'changed_fields' => array_keys($data),
+                        'comment' => 'Project updated',
+                        'ip' => $this->getClientIp(),
+                        'user_agent' => $this->getUserAgent(),
+                        'severity' => 'important'
+                    ]
+                );
+
+                // Если изменился статус, логируем отдельное событие
+                if (isset($data['status']) && $beforeData['status'] !== $project['status']) {
+                    $this->eventLoggingService->logSimple(
+                        entityType: 'project',
+                        entityId: $id,
+                        eventType: 'PROJECT_STATUS_CHANGED',
+                        afterData: [
+                            'status' => $project['status'],
+                            'previous_status' => $beforeData['status'],
+                            'project_id' => $id,
+                            'project_name' => $project['prj_name']
+                        ],
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $actorId,
+                            'before_data' => ['status' => $beforeData['status']],
+                            'changed_fields' => ['status'],
+                            'comment' => "Project status changed from '{$beforeData['status']}' to '{$project['status']}'",
+                            'ip' => $this->getClientIp(),
+                            'user_agent' => $this->getUserAgent(),
+                            'severity' => 'important'
+                        ]
+                    );
+                }
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log project update event', [
+                    'error' => $e->getMessage(),
+                    'project_id' => $id
+                ]);
+            }
 
             Flight::json([
                 'error_code' => 0,
@@ -813,13 +907,15 @@ class ProjectController
         try{
             $connection = $this->database->getConnection();
             
-            // Проверяем, существует ли проект
-            $checkResult = $connection->executeQuery(
-                "SELECT id FROM fw_projects WHERE id = ?",
+            // Получаем данные проекта перед удалением для логирования
+            $projectResult = $connection->executeQuery(
+                "SELECT id, prj_name, address, date_start, date_end, priority, status, prj_manager, created_by, created_at, updated_at
+                 FROM fw_projects WHERE id = ?",
                 [$id]
             );
+            $projectData = $projectResult->fetchAssociative();
             
-            if (!$checkResult->fetchOne()) {
+            if (!$projectData) {
                 Flight::json([
                     'error_code' => 404,
                     'status' => 'error',
@@ -834,6 +930,49 @@ class ProjectController
                 "DELETE FROM fw_projects WHERE id = ?",
                 [$id]
             );
+
+            // Логируем событие удаления проекта
+            try {
+                $user = Flight::get('current_user');
+                $actorId = $user['id'] ?? $projectData['created_by'] ?? null;
+
+                $this->eventLoggingService->logSimple(
+                    entityType: 'project',
+                    entityId: $id,
+                    eventType: 'PROJECT_DELETED',
+                    afterData: [
+                        'id' => (int)$projectData['id'],
+                        'prj_name' => $projectData['prj_name'],
+                        'status' => $projectData['status'],
+                        'deleted_at' => date('c')
+                    ],
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $actorId,
+                        'before_data' => [
+                            'id' => (int)$projectData['id'],
+                            'prj_name' => $projectData['prj_name'],
+                            'address' => $projectData['address'],
+                            'date_start' => $projectData['date_start'],
+                            'date_end' => $projectData['date_end'],
+                            'priority' => $projectData['priority'],
+                            'status' => $projectData['status'],
+                            'prj_manager' => $projectData['prj_manager'] ? (int)$projectData['prj_manager'] : null,
+                            'created_by' => $projectData['created_by'] ? (int)$projectData['created_by'] : null
+                        ],
+                        'changed_fields' => ['deleted'],
+                        'comment' => "Project '{$projectData['prj_name']}' deleted",
+                        'ip' => $this->getClientIp(),
+                        'user_agent' => $this->getUserAgent(),
+                        'severity' => 'important'
+                    ]
+                );
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log project deletion event', [
+                    'error' => $e->getMessage(),
+                    'project_id' => $id
+                ]);
+            }
 
             Flight::json([
                 'error_code' => 0,
@@ -1063,6 +1202,7 @@ class ProjectController
                 'date_end' => $project['date_end'],
                 'priority' => $project['priority'],
                 'status' => $project['status'],
+                'description' => $project['description'] ?? null,
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                 'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                 'created_at' => $project['created_at'],

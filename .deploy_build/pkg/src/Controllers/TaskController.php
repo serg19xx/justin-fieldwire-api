@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\EventLoggingService;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
@@ -18,6 +19,7 @@ class TaskController
 {
     private Logger $logger;
     private Database $database;
+    private EventLoggingService $eventLoggingService;
 
     public function __construct(Logger $logger)
     {
@@ -25,6 +27,7 @@ class TaskController
         
         try {
             $this->database = new Database();
+            $this->eventLoggingService = new EventLoggingService($logger);
         } catch (\Exception $e) {
             $this->logger->error('Failed to initialize TaskController', [
                 'error' => $e->getMessage()
@@ -165,10 +168,24 @@ class TaskController
                 $params[] = $status;
             }
 
-            // Фильтр по milestone
-            if ($milestone !== null) {
-                $sql .= " AND milestone = ?";
-                $params[] = $milestone === 'true' ? 1 : 0;
+            // Фильтр по milestone (ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL)
+            if ($milestone !== null && $milestone !== '') {
+                // Если milestone = 'true' или true, фильтруем задачи где milestone IS NOT NULL
+                // Если milestone = 'false' или false, фильтруем задачи где milestone IS NULL
+                // Иначе фильтруем по конкретному значению enum
+                $milestoneValue = filter_var($milestone, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+                if ($milestoneValue === true || $milestone === 'true' || $milestone === true) {
+                    $sql .= " AND milestone IS NOT NULL";
+                } elseif ($milestoneValue === false || $milestone === 'false' || $milestone === false) {
+                    $sql .= " AND milestone IS NULL";
+                } else {
+                    // Фильтруем по конкретному значению enum
+                    $validMilestones = ['inspection', 'visit', 'meeting', 'review', 'delivery', 'approval', 'other'];
+                    if (in_array($milestone, $validMilestones, true)) {
+                        $sql .= " AND milestone = ?";
+                        $params[] = $milestone;
+                    }
+                }
             }
 
             // Поиск по названию
@@ -213,11 +230,11 @@ class TaskController
                     'id' => (int)$task['id'],
                     'task_order' => (int)$task['task_order'],
                     'project_id' => (int)$task['project_id'],
-                    'wbs_path' => $task['wbs_path'] ? json_decode($task['wbs_path'], true) : null,
+                    'wbs_path' => isset($task['wbs_path']) && $task['wbs_path'] ? json_decode($task['wbs_path'], true) : null,
                     'name' => $task['name'],
                     'start_planned' => $task['start_planned'],
                     'end_planned' => $task['end_planned'],
-                    'milestone' => (bool)$task['milestone'],
+                    'milestone' => $task['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
                     'status' => $task['status'],
                     'progress_pct' => (int)$task['progress_pct'],
                     'notes' => $task['notes'],
@@ -318,7 +335,7 @@ class TaskController
         try {
             $connection = $this->database->getConnection();
             
-            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ? AND project_id = ?";
+            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ? AND project_id = ?";
             $result = $connection->executeQuery($sql, [$taskId, $projectId]);
             $task = $result->fetchAssociative();
 
@@ -340,14 +357,13 @@ class TaskController
                 'name' => $task['name'],
                 'start_planned' => $task['start_planned'],
                 'end_planned' => $task['end_planned'],
-                'milestone' => (bool)$task['milestone'],
+                'milestone' => $task['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
                 'status' => $task['status'],
                 'progress_pct' => (int)$task['progress_pct'],
                 'notes' => $task['notes'],
                 'task_lead_id' => isset($task['task_lead_id']) && $task['task_lead_id'] ? (int)$task['task_lead_id'] : null,
                 'team_members' => isset($task['team_members']) && $task['team_members'] ? json_decode($task['team_members'], true) : null,
                 'resources' => $task['resources'] ? json_decode($task['resources'], true) : null,
-                'dependencies' => $task['dependencies'] ? json_decode($task['dependencies'], true) : null,
                 'baseline_start' => $task['baseline_start'],
                 'baseline_end' => $task['baseline_end'],
                 'actual_start' => $task['actual_start'],
@@ -502,40 +518,124 @@ class TaskController
             );
             $nextOrder = (int)$nextOrderResult->fetchOne();
             
-            $sql = "INSERT INTO fw_prj_tasks (task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO fw_prj_tasks (task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
             
+            // Обработка wbs_path - всегда сохраняем как JSON строку или NULL
+            $wbsPath = null;
+            if (isset($data['wbs_path']) && $data['wbs_path'] !== '' && $data['wbs_path'] !== null) {
+                // Убираем лишние пробелы
+                $wbsValue = is_string($data['wbs_path']) ? trim($data['wbs_path']) : $data['wbs_path'];
+                
+                if ($wbsValue !== '' && $wbsValue !== null) {
+                    if (is_array($wbsValue)) {
+                        $wbsPath = json_encode($wbsValue);
+                    } else {
+                        // Если это строка, оборачиваем её в JSON
+                        $wbsPath = json_encode($wbsValue);
+                    }
+                }
+            }
+
+            // Обработка team_members
+            $teamMembersJson = null;
+            if (isset($data['team_members'])) {
+                if (is_array($data['team_members']) && !empty($data['team_members'])) {
+                    // Фильтруем только числовые значения
+                    $teamMembers = array_filter($data['team_members'], 'is_numeric');
+                    $teamMembers = array_map('intval', $teamMembers);
+                    if (!empty($teamMembers)) {
+                        $teamMembersJson = json_encode(array_values($teamMembers));
+                    }
+                }
+            }
+
             $params = [
                 $nextOrder,
                 $projectId,
-                isset($data['wbs_path']) && $data['wbs_path'] ? json_encode($data['wbs_path']) : null,
+                $wbsPath,
                 $data['name'],
                 $data['start_planned'],
                 $data['end_planned'] ?? null,
-                $data['milestone'] ?? false,
+                $data['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
                 $data['status'] ?? 'planned',
                 $data['progress_pct'] ?? 0,
                 $data['notes'] ?? null,
-                isset($data['resources']) && $data['resources'] ? json_encode($data['resources']) : null,
-                isset($data['dependencies']) && $data['dependencies'] ? json_encode($data['dependencies']) : null,
+                isset($data['resources']) && is_array($data['resources']) && !empty($data['resources']) ? json_encode($data['resources']) : null,
                 $data['baseline_start'] ?? null,
                 $data['baseline_end'] ?? null,
                 $data['actual_start'] ?? null,
                 $data['actual_end'] ?? null,
                 $data['slack_days'] ?? null,
-                $data['task_lead_id'],
-                isset($data['team_members']) && $data['team_members'] ? json_encode($data['team_members']) : null
+                $data['task_lead_id'] ?? null,
+                $teamMembersJson
             ];
+
+            // Логируем для диагностики
+            $this->logger->info('Creating task with team_members', [
+                'project_id' => $projectId,
+                'team_members_input' => $data['team_members'] ?? null,
+                'team_members_json' => $teamMembersJson
+            ]);
 
             $connection->executeStatement($sql, $params);
             $taskId = $connection->lastInsertId();
 
             // Получаем созданную задачу
             $result = $connection->executeQuery(
-                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
+                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
                 [$taskId]
             );
             $task = $result->fetchAssociative();
+
+            if (!$task) {
+                throw new \Exception("Failed to retrieve created task with ID: {$taskId}");
+            }
+
+            // Логируем событие создания задачи
+            try {
+                $user = Flight::get('current_user');
+                $actorId = $user['id'] ?? null;
+
+                // Убеждаемся, что changed_fields содержит только строки
+                $changedFields = array_keys($data);
+                $changedFields = array_filter($changedFields, 'is_string');
+
+                $this->eventLoggingService->logSimple(
+                    entityType: 'task',
+                    entityId: $taskId,
+                    eventType: 'TASK_CREATED',
+                    afterData: [
+                        'id' => (int)$task['id'],
+                        'project_id' => (int)$task['project_id'],
+                        'name' => $task['name'],
+                        'status' => $task['status'],
+                        'milestone' => $task['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
+                        'start_planned' => $task['start_planned'],
+                        'end_planned' => $task['end_planned'],
+                        'task_lead_id' => $task['task_lead_id'] ? (int)$task['task_lead_id'] : null,
+                        'created_at' => $task['created_at']
+                    ],
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $actorId,
+                        'changed_fields' => array_values($changedFields), // Убеждаемся, что это массив
+                        'comment' => "Task '{$task['name']}' created in project {$projectId}",
+                        'ip' => Flight::request()->ip ?? null,
+                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                        'severity' => 'important'
+                    ]
+                );
+            } catch (\Exception $e) {
+                // Логируем ошибку, но не прерываем создание задачи
+                $this->logger->warning('Failed to log task creation event', [
+                    'error' => $e->getMessage(),
+                    'task_id' => $taskId,
+                    'trace' => $e->getTraceAsString(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine()
+                ]);
+            }
 
             Flight::json([
                 'error_code' => 0,
@@ -547,17 +647,37 @@ class TaskController
             ], 201);
 
         } catch (Exception $e) {
+            $errorMessage = $e->getMessage();
+            $errorTrace = $e->getTraceAsString();
+            $errorFile = $e->getFile();
+            $errorLine = $e->getLine();
+            
             $this->logger->error('Failed to create task', [
                 'project_id' => $projectId,
-                'error' => $e->getMessage()
+                'error' => $errorMessage,
+                'trace' => $errorTrace,
+                'file' => $errorFile,
+                'line' => $errorLine
             ]);
 
-            Flight::json([
+            // В режиме разработки возвращаем детальную ошибку
+            $appEnv = $_ENV['APP_ENV'] ?? 'development';
+            $responseData = [
                 'error_code' => 500,
                 'status' => 'error',
                 'message' => 'Failed to create task',
                 'data' => null
-            ], 500);
+            ];
+            
+            if ($appEnv !== 'production') {
+                $responseData['debug'] = [
+                    'error' => $errorMessage,
+                    'file' => $errorFile,
+                    'line' => $errorLine
+                ];
+            }
+
+            Flight::json($responseData, 500);
         }
     }
 
@@ -679,13 +799,33 @@ class TaskController
                 return;
             }
 
+            // Получаем текущие данные задачи перед обновлением для логирования
+            $beforeResult = $connection->executeQuery(
+                "SELECT id, project_id, name, status, start_planned, end_planned, milestone, progress_pct, task_lead_id, team_members, actual_start, actual_end
+                 FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
+                [$taskId, $projectId]
+            );
+            $beforeData = $beforeResult->fetchAssociative();
+
             // Строим SQL запрос для обновления
             $updateFields = [];
             $params = [];
 
             if (isset($data['wbs_path'])) {
                 $updateFields[] = "wbs_path = ?";
-                $params[] = $data['wbs_path'] ? json_encode($data['wbs_path']) : null;
+                // Обработка wbs_path - всегда сохраняем как JSON строку или NULL
+                $wbsPath = null;
+                if ($data['wbs_path'] !== '' && $data['wbs_path'] !== null) {
+                    $wbsValue = is_string($data['wbs_path']) ? trim($data['wbs_path']) : $data['wbs_path'];
+                    if ($wbsValue !== '' && $wbsValue !== null) {
+                        if (is_array($wbsValue)) {
+                            $wbsPath = json_encode($wbsValue);
+                        } else {
+                            $wbsPath = json_encode($wbsValue);
+                        }
+                    }
+                }
+                $params[] = $wbsPath;
             }
             if (isset($data['name'])) {
                 $updateFields[] = "name = ?";
@@ -701,7 +841,12 @@ class TaskController
             }
             if (isset($data['milestone'])) {
                 $updateFields[] = "milestone = ?";
-                $params[] = $data['milestone'] ? 1 : 0;
+                // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
+                $validMilestones = ['inspection', 'visit', 'meeting', 'review', 'delivery', 'approval', 'other'];
+                $milestoneValue = ($data['milestone'] === null || $data['milestone'] === '') 
+                    ? null 
+                    : (in_array($data['milestone'], $validMilestones, true) ? $data['milestone'] : null);
+                $params[] = $milestoneValue;
             }
             if (isset($data['status'])) {
                 $updateFields[] = "status = ?";
@@ -726,10 +871,6 @@ class TaskController
             if (isset($data['resources'])) {
                 $updateFields[] = "resources = ?";
                 $params[] = $data['resources'] ? json_encode($data['resources']) : null;
-            }
-            if (isset($data['dependencies'])) {
-                $updateFields[] = "dependencies = ?";
-                $params[] = $data['dependencies'] ? json_encode($data['dependencies']) : null;
             }
             if (isset($data['baseline_start'])) {
                 $updateFields[] = "baseline_start = ?";
@@ -770,10 +911,153 @@ class TaskController
 
             // Получаем обновленную задачу
             $result = $connection->executeQuery(
-                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, dependencies, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
+                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
                 [$taskId]
             );
             $task = $result->fetchAssociative();
+
+            // Логируем событие обновления задачи
+            try {
+                $user = Flight::get('current_user');
+                $actorId = $user['id'] ?? null;
+
+                $afterData = [
+                    'id' => (int)$task['id'],
+                    'project_id' => (int)$task['project_id'],
+                    'name' => $task['name'],
+                    'status' => $task['status'],
+                    'milestone' => $task['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
+                    'start_planned' => $task['start_planned'],
+                    'end_planned' => $task['end_planned'],
+                    'progress_pct' => (int)$task['progress_pct'],
+                    'task_lead_id' => $task['task_lead_id'] ? (int)$task['task_lead_id'] : null,
+                    'updated_at' => $task['updated_at']
+                ];
+
+                $this->eventLoggingService->logSimple(
+                    entityType: 'task',
+                    entityId: $taskId,
+                    eventType: 'TASK_UPDATED',
+                    afterData: $afterData,
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $actorId,
+                        'before_data' => [
+                            'id' => (int)$beforeData['id'],
+                            'project_id' => (int)$beforeData['project_id'],
+                            'name' => $beforeData['name'],
+                            'status' => $beforeData['status'],
+                            'milestone' => $beforeData['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
+                            'start_planned' => $beforeData['start_planned'],
+                            'end_planned' => $beforeData['end_planned'],
+                            'progress_pct' => (int)$beforeData['progress_pct'],
+                            'task_lead_id' => $beforeData['task_lead_id'] ? (int)$beforeData['task_lead_id'] : null
+                        ],
+                        'changed_fields' => array_keys($data),
+                        'comment' => "Task '{$task['name']}' updated",
+                        'ip' => Flight::request()->ip ?? null,
+                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                        'severity' => 'important'
+                    ]
+                );
+
+                // Если изменился статус, логируем отдельное событие
+                if (isset($data['status']) && $beforeData['status'] !== $task['status']) {
+                    $this->eventLoggingService->logSimple(
+                        entityType: 'task',
+                        entityId: $taskId,
+                        eventType: 'TASK_STATUS_CHANGED',
+                        afterData: [
+                            'status' => $task['status'],
+                            'previous_status' => $beforeData['status'],
+                            'task_id' => $taskId,
+                            'task_name' => $task['name'],
+                            'project_id' => (int)$task['project_id']
+                        ],
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $actorId,
+                            'before_data' => ['status' => $beforeData['status']],
+                            'changed_fields' => ['status'],
+                            'comment' => "Task status changed from '{$beforeData['status']}' to '{$task['status']}'",
+                            'ip' => Flight::request()->ip ?? null,
+                            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                            'severity' => 'important'
+                        ]
+                    );
+                }
+
+                // Если изменилось расписание (start_planned или end_planned), логируем событие
+                if ((isset($data['start_planned']) && $beforeData['start_planned'] !== $task['start_planned']) ||
+                    (isset($data['end_planned']) && $beforeData['end_planned'] !== $task['end_planned'])) {
+                    $this->eventLoggingService->logSimple(
+                        entityType: 'task',
+                        entityId: $taskId,
+                        eventType: 'TASK_SCHEDULE_CHANGED',
+                        afterData: [
+                            'start_planned' => $task['start_planned'],
+                            'end_planned' => $task['end_planned'],
+                            'previous_start_planned' => $beforeData['start_planned'],
+                            'previous_end_planned' => $beforeData['end_planned'],
+                            'task_id' => $taskId,
+                            'task_name' => $task['name'],
+                            'project_id' => (int)$task['project_id']
+                        ],
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $actorId,
+                            'before_data' => [
+                                'start_planned' => $beforeData['start_planned'],
+                                'end_planned' => $beforeData['end_planned']
+                            ],
+                            'changed_fields' => isset($data['start_planned']) && isset($data['end_planned']) 
+                                ? ['start_planned', 'end_planned']
+                                : (isset($data['start_planned']) ? ['start_planned'] : ['end_planned']),
+                            'comment' => "Task schedule updated",
+                            'ip' => Flight::request()->ip ?? null,
+                            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                            'severity' => 'important'
+                        ]
+                    );
+                }
+
+                // Если изменились исполнители (team_members), логируем событие
+                $beforeTeamMembers = $beforeData['team_members'] ? json_decode($beforeData['team_members'], true) : [];
+                $afterTeamMembers = $task['team_members'] ? json_decode($task['team_members'], true) : [];
+                if (isset($data['team_members']) && json_encode($beforeTeamMembers) !== json_encode($afterTeamMembers)) {
+                    $this->eventLoggingService->logSimple(
+                        entityType: 'task',
+                        entityId: $taskId,
+                        eventType: 'TASK_ASSIGNEES_CHANGED',
+                        afterData: [
+                            'team_members' => $afterTeamMembers,
+                            'previous_team_members' => $beforeTeamMembers,
+                            'task_id' => $taskId,
+                            'task_name' => $task['name'],
+                            'project_id' => (int)$task['project_id']
+                        ],
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $actorId,
+                            'before_data' => ['team_members' => $beforeTeamMembers],
+                            'changed_fields' => ['team_members'],
+                            'comment' => "Task assignees changed",
+                            'ip' => Flight::request()->ip ?? null,
+                            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                            'severity' => 'important'
+                        ]
+                    );
+                }
+            } catch (\Exception $e) {
+                // Логируем ошибку детально, но не прерываем обновление задачи
+                $this->logger->error('Failed to log task update event', [
+                    'error' => $e->getMessage(),
+                    'task_id' => $taskId,
+                    'trace' => $e->getTraceAsString(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine()
+                ]);
+            }
 
             Flight::json([
                 'error_code' => 0,
@@ -852,13 +1136,15 @@ class TaskController
         try {
             $connection = $this->database->getConnection();
             
-            // Проверяем, существует ли задача
-            $checkResult = $connection->executeQuery(
-                "SELECT id FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
+            // Получаем данные задачи перед удалением для логирования
+            $taskResult = $connection->executeQuery(
+                "SELECT id, project_id, name, status, start_planned, end_planned, milestone, task_lead_id, team_members
+                 FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
                 [$taskId, $projectId]
             );
+            $taskData = $taskResult->fetchAssociative();
             
-            if (!$checkResult->fetchOne()) {
+            if (!$taskData) {
                 Flight::json([
                     'error_code' => 404,
                     'status' => 'error',
@@ -873,6 +1159,49 @@ class TaskController
                 "DELETE FROM fw_prj_tasks WHERE id = ?",
                 [$taskId]
             );
+
+            // Логируем событие удаления задачи
+            try {
+                $user = Flight::get('current_user');
+                $actorId = $user['id'] ?? null;
+
+                $this->eventLoggingService->logSimple(
+                    entityType: 'task',
+                    entityId: $taskId,
+                    eventType: 'TASK_DELETED',
+                    afterData: [
+                        'id' => (int)$taskData['id'],
+                        'project_id' => (int)$taskData['project_id'],
+                        'name' => $taskData['name'],
+                        'status' => $taskData['status'],
+                        'deleted_at' => date('c')
+                    ],
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $actorId,
+                        'before_data' => [
+                            'id' => (int)$taskData['id'],
+                            'project_id' => (int)$taskData['project_id'],
+                            'name' => $taskData['name'],
+                            'status' => $taskData['status'],
+                            'milestone' => $taskData['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
+                            'start_planned' => $taskData['start_planned'],
+                            'end_planned' => $taskData['end_planned'],
+                            'task_lead_id' => $taskData['task_lead_id'] ? (int)$taskData['task_lead_id'] : null
+                        ],
+                        'changed_fields' => ['deleted'],
+                        'comment' => "Task '{$taskData['name']}' deleted from project {$projectId}",
+                        'ip' => Flight::request()->ip ?? null,
+                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                        'severity' => 'important'
+                    ]
+                );
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log task deletion event', [
+                    'error' => $e->getMessage(),
+                    'task_id' => $taskId
+                ]);
+            }
 
             Flight::json([
                 'error_code' => 0,
@@ -902,16 +1231,27 @@ class TaskController
      */
     private function validateTaskData(array $data, bool $isCreate = true): array
     {
-        $requiredFields = ['name', 'start_planned', 'task_lead_id'];
-        
         if ($isCreate) {
-            foreach ($requiredFields as $field) {
-                if (!isset($data[$field]) || empty(trim($data[$field]))) {
-                    return [
-                        'valid' => false,
-                        'message' => "Field '{$field}' is required"
-                    ];
-                }
+            // Проверка обязательных полей
+            if (!isset($data['name']) || empty(trim($data['name']))) {
+                return [
+                    'valid' => false,
+                    'message' => "Field 'name' is required"
+                ];
+            }
+            
+            if (!isset($data['start_planned']) || empty(trim($data['start_planned']))) {
+                return [
+                    'valid' => false,
+                    'message' => "Field 'start_planned' is required"
+                ];
+            }
+            
+            if (!isset($data['task_lead_id']) || !is_numeric($data['task_lead_id']) || $data['task_lead_id'] <= 0) {
+                return [
+                    'valid' => false,
+                    'message' => "Field 'task_lead_id' is required and must be a positive number"
+                ];
             }
         }
 
@@ -980,23 +1320,40 @@ class TaskController
                 ];
             }
             
-            // Проверяем, существует ли пользователь
+            // Проверяем, существует ли пользователь и активен ли он
             try {
                 $connection = $this->database->getConnection();
-                $stmt = $connection->executeQuery(
-                    "SELECT id FROM fw_v_users WHERE id = ? AND status = 1",
+                
+                // Сначала проверяем, существует ли пользователь вообще
+                $checkUser = $connection->executeQuery(
+                    "SELECT id, status FROM fw_v_users WHERE id = ?",
                     [$data['task_lead_id']]
                 );
+                $user = $checkUser->fetchAssociative();
                 
-                if (!$stmt->fetchOne()) {
+                if (!$user) {
                     return [
                         'valid' => false,
-                        'message' => 'Task lead user not found or inactive'
+                        'message' => "Task lead user with ID {$data['task_lead_id']} not found"
+                    ];
+                }
+                
+                // Проверяем, активен ли пользователь (status может быть BOOLEAN или TINYINT(1))
+                $isActive = $user['status'] == 1 || $user['status'] === true || $user['status'] === '1';
+                
+                if (!$isActive) {
+                    return [
+                        'valid' => false,
+                        'message' => "Task lead user with ID {$data['task_lead_id']} is inactive"
                     ];
                 }
             } catch (Exception $e) {
                 // Если не удается проверить пользователя, пропускаем валидацию
                 // чтобы не блокировать создание задачи из-за проблем с БД
+                $this->logger->warning('Failed to validate task lead user', [
+                    'task_lead_id' => $data['task_lead_id'],
+                    'error' => $e->getMessage()
+                ]);
             }
         }
 
@@ -1118,23 +1475,22 @@ class TaskController
             'id' => (int)$task['id'],
             'task_order' => (int)$task['task_order'],
             'project_id' => (int)$task['project_id'],
-            'wbs_path' => $task['wbs_path'] ? json_decode($task['wbs_path'], true) : null,
+            'wbs_path' => isset($task['wbs_path']) && $task['wbs_path'] ? json_decode($task['wbs_path'], true) : null,
             'name' => $task['name'],
             'start_planned' => $task['start_planned'],
             'end_planned' => $task['end_planned'],
-            'milestone' => (bool)$task['milestone'],
+            'milestone' => $task['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
             'status' => $task['status'],
             'progress_pct' => (int)$task['progress_pct'],
             'notes' => $task['notes'],
             'task_lead_id' => isset($task['task_lead_id']) && $task['task_lead_id'] ? (int)$task['task_lead_id'] : null,
             'team_members' => isset($task['team_members']) && $task['team_members'] ? json_decode($task['team_members'], true) : null,
-            'resources' => $task['resources'] ? json_decode($task['resources'], true) : null,
-            'dependencies' => $task['dependencies'] ? json_decode($task['dependencies'], true) : null,
-            'baseline_start' => $task['baseline_start'],
-            'baseline_end' => $task['baseline_end'],
-            'actual_start' => $task['actual_start'],
-            'actual_end' => $task['actual_end'],
-            'slack_days' => $task['slack_days'] ? (int)$task['slack_days'] : null,
+            'resources' => isset($task['resources']) && $task['resources'] ? json_decode($task['resources'], true) : null,
+            'baseline_start' => $task['baseline_start'] ?? null,
+            'baseline_end' => $task['baseline_end'] ?? null,
+            'actual_start' => $task['actual_start'] ?? null,
+            'actual_end' => $task['actual_end'] ?? null,
+            'slack_days' => isset($task['slack_days']) && $task['slack_days'] ? (int)$task['slack_days'] : null,
             'created_at' => $task['created_at'],
             'updated_at' => $task['updated_at']
         ];
@@ -1305,41 +1661,154 @@ class TaskController
      */
     public function createDependency(int $projectId): void
     {
-        $request = Flight::request();
-        $data = json_decode($request->getBody(), true);
-
-        $connection = $this->database->getConnection();
-        $connection->beginTransaction();
-
         try {
-            $sql = "INSERT INTO fw_prj_task_dependencies (project_id, from_task_id, to_task_id, dependency_type, lag_days, priority, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)";
+            $request = Flight::request();
+            $data = json_decode($request->getBody(), true);
+
+            // Валидация обязательных полей
+            if (!isset($data['from_task_id']) || !isset($data['to_task_id']) || !isset($data['dependency_type'])) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Missing required fields: from_task_id, to_task_id, dependency_type',
+                    'data' => null
+                ], 400);
+                return;
+            }
+
+            $connection = $this->database->getConnection();
             
-            $params = [
-                $projectId,
-                $data['from_task_id'],
-                $data['to_task_id'],
-                $data['dependency_type'],
-                $data['lag_days'] ?? 0,
-                $data['priority'] ?? 1,
-                $data['created_by'] ?? 47 // TODO: получить из токена
-            ];
-
-            $connection->executeStatement($sql, $params);
-            $dependencyId = $connection->lastInsertId();
-
-            $connection->commit();
-
-            Flight::json([
-                'error_code' => 0,
-                'status' => 'success',
-                'message' => 'Dependency created successfully',
-                'data' => [
-                    'dependency_id' => $dependencyId
-                ]
+            // Логируем начало создания зависимости
+            $this->logger->info('Starting dependency creation', [
+                'project_id' => $projectId,
+                'data' => $data
             ]);
 
+            $connection->beginTransaction();
+
+            try {
+                // Получаем текущего пользователя
+                $user = Flight::get('current_user');
+                $actorId = $user['id'] ?? null;
+
+                $sql = "INSERT INTO fw_prj_task_dependencies (project_id, from_task_id, to_task_id, dependency_type, lag_days, priority, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)";
+                
+                $params = [
+                    $projectId,
+                    (int)$data['from_task_id'],
+                    (int)$data['to_task_id'],
+                    $data['dependency_type'],
+                    (int)($data['lag_days'] ?? 0),
+                    (int)($data['priority'] ?? 1),
+                    $actorId ?? $data['created_by'] ?? null
+                ];
+
+                $this->logger->info('Executing INSERT for dependency', [
+                    'sql' => $sql,
+                    'params' => $params
+                ]);
+
+                $connection->executeStatement($sql, $params);
+                $dependencyId = (int)$connection->lastInsertId();
+
+                $this->logger->info('Dependency inserted, got ID', [
+                    'dependency_id' => $dependencyId
+                ]);
+
+                if (!$dependencyId || $dependencyId === 0) {
+                    throw new \Exception('Failed to get dependency ID after insert. lastInsertId returned: ' . $dependencyId);
+                }
+
+                // Логируем событие создания зависимости
+                try {
+                    $this->logger->info('Starting event logging for dependency', [
+                        'dependency_id' => $dependencyId
+                    ]);
+
+                    $logResult = $this->eventLoggingService->logSimple(
+                        entityType: 'task_dependency',
+                        entityId: $dependencyId,
+                        eventType: 'TASK_DEPENDENCY_ADDED',
+                        afterData: [
+                            'id' => $dependencyId,
+                            'project_id' => (int)$projectId,
+                            'from_task_id' => (int)$data['from_task_id'],
+                            'to_task_id' => (int)$data['to_task_id'],
+                            'dependency_type' => $data['dependency_type'],
+                            'lag_days' => (int)($data['lag_days'] ?? 0),
+                            'priority' => (int)($data['priority'] ?? 1),
+                            'created_at' => date('c')
+                        ],
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $actorId,
+                            'changed_fields' => ['from_task_id', 'to_task_id', 'dependency_type', 'lag_days', 'priority'],
+                            'comment' => "Task dependency created: task {$data['from_task_id']} -> task {$data['to_task_id']} (type: {$data['dependency_type']})",
+                            'ip' => Flight::request()->ip ?? null,
+                            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                            'severity' => 'important'
+                        ]
+                    );
+
+                    $this->logger->info('Event logging completed', [
+                        'dependency_id' => $dependencyId,
+                        'log_result' => $logResult
+                    ]);
+                } catch (\Exception $e) {
+                    // Логируем ошибку, но не прерываем создание зависимости
+                    $this->logger->error('Failed to log dependency creation event', [
+                        'error' => $e->getMessage(),
+                        'dependency_id' => $dependencyId,
+                        'trace' => $e->getTraceAsString(),
+                        'file' => $e->getFile(),
+                        'line' => $e->getLine()
+                    ]);
+                }
+
+                $this->logger->info('Committing transaction', [
+                    'dependency_id' => $dependencyId
+                ]);
+
+                $connection->commit();
+
+                $this->logger->info('Transaction committed successfully', [
+                    'dependency_id' => $dependencyId
+                ]);
+
+                Flight::json([
+                    'error_code' => 0,
+                    'status' => 'success',
+                    'message' => 'Dependency created successfully',
+                    'data' => [
+                        'dependency_id' => $dependencyId
+                    ]
+                ]);
+
+            } catch (Exception $e) {
+                $connection->rollBack();
+                $this->logger->error('Failed to create dependency', [
+                    'project_id' => $projectId,
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine(),
+                    'data' => $data
+                ]);
+
+                Flight::json([
+                    'error_code' => 500,
+                    'status' => 'error',
+                    'message' => 'Failed to create dependency: ' . $e->getMessage(),
+                    'data' => null
+                ], 500);
+            }
         } catch (Exception $e) {
-            $connection->rollBack();
+            $this->logger->error('Failed to create dependency - outer catch', [
+                'project_id' => $projectId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
             Flight::json([
                 'error_code' => 500,
                 'status' => 'error',
@@ -1421,6 +1890,25 @@ class TaskController
         $data = json_decode($request->getBody(), true);
 
         $connection = $this->database->getConnection();
+        
+        // Получаем текущие данные зависимости перед обновлением
+        $beforeResult = $connection->executeQuery(
+            "SELECT id, project_id, from_task_id, to_task_id, dependency_type, lag_days, priority
+             FROM fw_prj_task_dependencies WHERE id = ?",
+            [$dependencyId]
+        );
+        $beforeData = $beforeResult->fetchAssociative();
+        
+        if (!$beforeData) {
+            Flight::json([
+                'error_code' => 404,
+                'status' => 'error',
+                'message' => 'Dependency not found',
+                'data' => null
+            ], 404);
+            return;
+        }
+
         $connection->beginTransaction();
 
         try {
@@ -1455,6 +1943,56 @@ class TaskController
             $params[] = $dependencyId;
             $sql = "UPDATE fw_prj_task_dependencies SET " . implode(', ', $updateFields) . " WHERE id = ?";
             $connection->executeStatement($sql, $params);
+
+            // Получаем обновленные данные
+            $afterResult = $connection->executeQuery(
+                "SELECT id, project_id, from_task_id, to_task_id, dependency_type, lag_days, priority
+                 FROM fw_prj_task_dependencies WHERE id = ?",
+                [$dependencyId]
+            );
+            $afterData = $afterResult->fetchAssociative();
+
+            // Логируем событие обновления зависимости
+            try {
+                $user = Flight::get('current_user');
+                $actorId = $user['id'] ?? null;
+
+                $this->eventLoggingService->logSimple(
+                    entityType: 'task_dependency',
+                    entityId: $dependencyId,
+                    eventType: 'TASK_DEPENDENCY_UPDATED',
+                    afterData: [
+                        'id' => (int)$afterData['id'],
+                        'project_id' => (int)$afterData['project_id'],
+                        'from_task_id' => (int)$afterData['from_task_id'],
+                        'to_task_id' => (int)$afterData['to_task_id'],
+                        'dependency_type' => $afterData['dependency_type'],
+                        'lag_days' => (int)$afterData['lag_days'],
+                        'priority' => (int)$afterData['priority'],
+                        'updated_at' => date('c')
+                    ],
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $actorId,
+                        'before_data' => [
+                            'id' => (int)$beforeData['id'],
+                            'dependency_type' => $beforeData['dependency_type'],
+                            'lag_days' => (int)$beforeData['lag_days'],
+                            'priority' => (int)$beforeData['priority']
+                        ],
+                        'changed_fields' => array_keys($data),
+                        'comment' => "Task dependency updated: task {$afterData['from_task_id']} -> task {$afterData['to_task_id']}",
+                        'ip' => Flight::request()->ip ?? null,
+                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                        'severity' => 'important'
+                    ]
+                );
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log dependency update event', [
+                    'error' => $e->getMessage(),
+                    'dependency_id' => $dependencyId
+                ]);
+            }
 
             $connection->commit();
 
@@ -1527,6 +2065,25 @@ class TaskController
     public function deleteDependency(int $dependencyId): void
     {
         $connection = $this->database->getConnection();
+        
+        // Получаем данные зависимости перед удалением для логирования
+        $dependencyResult = $connection->executeQuery(
+            "SELECT id, project_id, from_task_id, to_task_id, dependency_type, lag_days, priority
+             FROM fw_prj_task_dependencies WHERE id = ?",
+            [$dependencyId]
+        );
+        $dependencyData = $dependencyResult->fetchAssociative();
+        
+        if (!$dependencyData) {
+            Flight::json([
+                'error_code' => 404,
+                'status' => 'error',
+                'message' => 'Dependency not found',
+                'data' => null
+            ], 404);
+            return;
+        }
+
         $connection->beginTransaction();
 
         try {
@@ -1534,6 +2091,49 @@ class TaskController
                 "DELETE FROM fw_prj_task_dependencies WHERE id = ?",
                 [$dependencyId]
             );
+
+            // Логируем событие удаления зависимости
+            try {
+                $user = Flight::get('current_user');
+                $actorId = $user['id'] ?? null;
+
+                $this->eventLoggingService->logSimple(
+                    entityType: 'task_dependency',
+                    entityId: $dependencyId,
+                    eventType: 'TASK_DEPENDENCY_REMOVED',
+                    afterData: [
+                        'id' => (int)$dependencyData['id'],
+                        'project_id' => (int)$dependencyData['project_id'],
+                        'from_task_id' => (int)$dependencyData['from_task_id'],
+                        'to_task_id' => (int)$dependencyData['to_task_id'],
+                        'dependency_type' => $dependencyData['dependency_type'],
+                        'deleted_at' => date('c')
+                    ],
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $actorId,
+                        'before_data' => [
+                            'id' => (int)$dependencyData['id'],
+                            'project_id' => (int)$dependencyData['project_id'],
+                            'from_task_id' => (int)$dependencyData['from_task_id'],
+                            'to_task_id' => (int)$dependencyData['to_task_id'],
+                            'dependency_type' => $dependencyData['dependency_type'],
+                            'lag_days' => (int)$dependencyData['lag_days'],
+                            'priority' => (int)$dependencyData['priority']
+                        ],
+                        'changed_fields' => ['deleted'],
+                        'comment' => "Task dependency removed: task {$dependencyData['from_task_id']} -> task {$dependencyData['to_task_id']} (type: {$dependencyData['dependency_type']})",
+                        'ip' => Flight::request()->ip ?? null,
+                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                        'severity' => 'important'
+                    ]
+                );
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log dependency deletion event', [
+                    'error' => $e->getMessage(),
+                    'dependency_id' => $dependencyId
+                ]);
+            }
 
             $connection->commit();
 

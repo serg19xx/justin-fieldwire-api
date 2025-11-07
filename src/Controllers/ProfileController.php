@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Database\Database;
 use App\Services\TwilioService;
 use App\Services\EmailService;
+use App\Services\EventLoggingService;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
@@ -21,12 +22,14 @@ class ProfileController
     private Logger $logger;
     private TwilioService $twilioService;
     private EmailService $emailService;
+    private EventLoggingService $eventLoggingService;
 
     public function __construct(Logger $logger, TwilioService $twilioService, EmailService $emailService)
     {
         $this->logger = $logger;
         $this->twilioService = $twilioService;
         $this->emailService = $emailService;
+        $this->eventLoggingService = new EventLoggingService($logger);
     }
 
     /**
@@ -289,8 +292,83 @@ class ProfileController
                 return;
             }
 
+            // Get current user data before update for logging
+            $currentUserData = $this->getUserById($user['id']);
+            $beforeData = [];
+            if ($currentUserData) {
+                $beforeData = [
+                    'first_name' => $currentUserData['first_name'] ?? null,
+                    'last_name' => $currentUserData['last_name'] ?? null,
+                    'phone' => $currentUserData['phone'] ?? null,
+                    'dob' => $currentUserData['dob'] ?? null,
+                    'gender' => $currentUserData['gender'] ?? null,
+                    'nationality' => $currentUserData['nationality'] ?? null,
+                    'country_of_origin' => $currentUserData['country_of_origin'] ?? null,
+                    'workforce_group' => $currentUserData['workforce_group'] ?? null,
+                    'city' => $currentUserData['city'] ?? null,
+                    'job_title' => $currentUserData['job_title'] ?? null
+                ];
+            }
+
             // Update user profile
             $updatedUser = $this->updateUserProfile($user['id'], $data);
+            
+            // Log profile update event
+            if (!empty($data)) {
+                try {
+                    $this->eventLoggingService->logSimple(
+                        entityType: 'user',
+                        entityId: $user['id'],
+                        eventType: 'USER_PROFILE_UPDATED',
+                        afterData: array_merge($beforeData, array_filter($data, function($value) {
+                            return $value !== null && $value !== '';
+                        })),
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $user['id'],
+                            'before_data' => $beforeData,
+                            'changed_fields' => array_keys($data),
+                            'comment' => 'User profile updated',
+                            'ip' => Flight::request()->ip,
+                            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                            'severity' => 'important'
+                        ]
+                    );
+                    
+                    // Check if profile became complete after this update
+                    $completenessCheck = $this->checkProfileCompleteness($user['id']);
+                    if ($completenessCheck['is_complete']) {
+                        // Check if profile was incomplete before by checking if any required fields were missing
+                        $wasIncomplete = empty($beforeData['first_name']) || 
+                                       empty($beforeData['last_name']) || 
+                                       empty($beforeData['phone']) || 
+                                       empty($beforeData['dob']) || 
+                                       empty($beforeData['gender']);
+                        
+                        if ($wasIncomplete) {
+                            $this->eventLoggingService->logSimple(
+                                entityType: 'user',
+                                entityId: $user['id'],
+                                eventType: 'USER_PROFILE_BECAME_COMPLETE',
+                                afterData: $completenessCheck,
+                                options: [
+                                    'actor_type' => 'user',
+                                    'actor_id' => $user['id'],
+                                    'comment' => 'User profile became complete and ready for activation',
+                                    'ip' => Flight::request()->ip,
+                                    'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                                    'severity' => 'important'
+                                ]
+                            );
+                        }
+                    }
+                } catch (\Exception $e) {
+                    $this->logger->warning('Failed to log USER_PROFILE_UPDATED event', [
+                        'error' => $e->getMessage(),
+                        'user_id' => $user['id']
+                    ]);
+                }
+            }
 
             // Synchronize languages if provided
             if ($languages !== null) {
@@ -604,31 +682,78 @@ class ProfileController
             $status_details = !empty($input['inactive_reason_details']) ? $input['inactive_reason_details'] : null;
             $status_end_at = !empty($input['inactive_until']) ? $input['inactive_until'] : null;
 
-            // Update work status in database
-            $result = $this->updateUserWorkStatus($user['id'], $status, $status_reason, $status_details,$status_end_at);
-            
-            if ($result) {
-                Flight::json([
-                    'error_code' => 0,
-                    'status' => 'success',
-                    'message' => 'Work status updated successfully',
-                    'data' => [
-                        'work_status' => [
-                            'isActive' => $status,
-                            'inactive_reason' => $status_reason,
-                            'inactive_reason_details' => $status_details,
-                            'inactive_until' => $status_end_at,
-                            'updated_at' => date('Y-m-d H:i:s')
+            // If trying to activate, check profile completeness first
+            if ($status) {
+                $completenessCheck = $this->checkProfileCompleteness($user['id']);
+                if (!$completenessCheck['is_complete']) {
+                    Flight::json([
+                        'error_code' => 400,
+                        'status' => 'error',
+                        'message' => 'Cannot activate user: profile is incomplete',
+                        'data' => [
+                            'is_complete' => false,
+                            'missing_fields' => $completenessCheck['missing_fields'],
+                            'message' => $completenessCheck['message']
                         ]
-                    ]
+                    ], 400);
+                    return;
+                }
+            }
+
+            // Update work status in database
+            try {
+                $result = $this->updateUserWorkStatus($user['id'], $status, $status_reason, $status_details, $status_end_at);
+                
+                if ($result) {
+                    Flight::json([
+                        'error_code' => 0,
+                        'status' => 'success',
+                        'message' => 'Work status updated successfully',
+                        'data' => [
+                            'work_status' => [
+                                'isActive' => $status,
+                                'inactive_reason' => $status_reason,
+                                'inactive_reason_details' => $status_details,
+                                'inactive_until' => $status_end_at,
+                                'updated_at' => date('Y-m-d H:i:s')
+                            ]
+                        ]
+                    ]);
+                } else {
+                    Flight::json([
+                        'error_code' => 500,
+                        'status' => 'error',
+                        'message' => 'Failed to update work status',
+                        'data' => null
+                    ], 500);
+                }
+            } catch (\Exception $e) {
+                $this->logger->error('Error in updateWorkStatus: ' . $e->getMessage(), [
+                    'user_id' => $user['id'],
+                    'error' => $e->getMessage()
                 ]);
-            } else {
-                Flight::json([
-                    'error_code' => 500,
-                    'status' => 'error',
-                    'message' => 'Failed to update work status',
-                    'data' => null
-                ], 500);
+                
+                // Check if it's a profile completeness error
+                if (strpos($e->getMessage(), 'profile is incomplete') !== false) {
+                    $completenessCheck = $this->checkProfileCompleteness($user['id']);
+                    Flight::json([
+                        'error_code' => 400,
+                        'status' => 'error',
+                        'message' => $e->getMessage(),
+                        'data' => [
+                            'is_complete' => false,
+                            'missing_fields' => $completenessCheck['missing_fields'] ?? [],
+                            'message' => $completenessCheck['message'] ?? 'Profile is incomplete'
+                        ]
+                    ], 400);
+                } else {
+                    Flight::json([
+                        'error_code' => 500,
+                        'status' => 'error',
+                        'message' => 'Failed to update work status: ' . $e->getMessage(),
+                        'data' => null
+                    ], 500);
+                }
             }
         } catch (\Exception $e) {
             $this->logger->error('Error updating work status: ' . $e->getMessage());
@@ -1648,6 +1773,69 @@ class ProfileController
 
             $connection->executeStatement($sql, [$emergencyJson, $user['id']]);
 
+            // Log emergency contact update event
+            try {
+                $this->eventLoggingService->logSimple(
+                    entityType: 'user',
+                    entityId: $user['id'],
+                    eventType: 'USER_EMERGENCY_CONTACT_UPDATED',
+                    afterData: $mergedData,
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $user['id'],
+                        'before_data' => $existingData,
+                        'changed_fields' => array_keys($filteredData),
+                        'comment' => 'User emergency contact and medical information updated',
+                        'ip' => Flight::request()->ip,
+                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                        'severity' => 'important'
+                    ]
+                );
+                
+                // Check if profile became complete after this update
+                $completenessCheck = $this->checkProfileCompleteness($user['id']);
+                if ($completenessCheck['is_complete']) {
+                    // Check if profile was incomplete before
+                    $beforeCompleteness = [];
+                    if (!empty($existingData)) {
+                        // Reconstruct previous emergency data to check completeness
+                        $tempEmergencyData = $existingData;
+                        $tempUserData = $this->getUserById($user['id']);
+                        if ($tempUserData) {
+                            $tempUserData['emergency'] = json_encode($tempEmergencyData);
+                            // Simple check: if key fields were missing before
+                            $wasIncomplete = empty($tempEmergencyData['primary_contact_name']) || 
+                                           empty($tempEmergencyData['primary_contact_phone']) ||
+                                           empty($tempEmergencyData['blood_type']) ||
+                                           empty($tempEmergencyData['insurance_company']) ||
+                                           empty($tempEmergencyData['policy_number']);
+                            
+                            if ($wasIncomplete) {
+                                $this->eventLoggingService->logSimple(
+                                    entityType: 'user',
+                                    entityId: $user['id'],
+                                    eventType: 'USER_PROFILE_BECAME_COMPLETE',
+                                    afterData: $completenessCheck,
+                                    options: [
+                                        'actor_type' => 'user',
+                                        'actor_id' => $user['id'],
+                                        'comment' => 'User profile became complete and ready for activation',
+                                        'ip' => Flight::request()->ip,
+                                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                                        'severity' => 'important'
+                                    ]
+                                );
+                            }
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log USER_EMERGENCY_CONTACT_UPDATED event', [
+                    'error' => $e->getMessage(),
+                    'user_id' => $user['id']
+                ]);
+            }
+
             // Return updated data
             $this->getEmergencyContact();
 
@@ -1661,6 +1849,80 @@ class ProfileController
                 'error_code' => 500,
                 'status' => 'error',
                 'message' => 'Failed to update emergency contact information',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * @OA\Get(
+     *     path="/api/v1/profile/activation-status",
+     *     summary="Check profile activation readiness",
+     *     description="Check if user profile has all required data for activation (personal data, medical, insurance, emergency contacts)",
+     *     tags={"Profile"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Response(
+     *         response=200,
+     *         description="Profile activation status retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=0),
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="message", type="string", example="Profile activation status retrieved successfully"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="is_complete", type="boolean", example=false),
+     *                 @OA\Property(property="missing_fields", type="object",
+     *                     @OA\Property(property="personal", type="array", @OA\Items(type="string"), example={"dob", "gender"}),
+     *                     @OA\Property(property="medical", type="array", @OA\Items(type="string"), example={"blood_type"}),
+     *                     @OA\Property(property="insurance", type="array", @OA\Items(type="string"), example={"insurance_company", "policy_number"}),
+     *                     @OA\Property(property="emergency", type="array", @OA\Items(type="string"), example={"primary_contact_name", "primary_contact_phone"})
+     *                 ),
+     *                 @OA\Property(property="message", type="string", example="Profile is incomplete. Please fill all required fields.")
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=401,
+     *         description="Unauthorized",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=401),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Unauthorized")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=500,
+     *         description="Internal server error",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="error_code", type="integer", example=500),
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Failed to check profile activation status")
+     *         )
+     *     )
+     * )
+     */
+    public function getActivationStatus(): void
+    {
+        try {
+            $user = Flight::get('current_user');
+            
+            $completenessCheck = $this->checkProfileCompleteness($user['id']);
+            
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Profile activation status retrieved successfully',
+                'data' => $completenessCheck
+            ]);
+        } catch (Exception $e) {
+            $this->logger->error('Error checking profile activation status', [
+                'user_id' => $user['id'] ?? null,
+                'error' => $e->getMessage()
+            ]);
+            
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Failed to check profile activation status',
                 'data' => null
             ], 500);
         }
@@ -2097,6 +2359,100 @@ class ProfileController
     }
 
     /**
+     * Check if user profile has all required data for activation
+     * Required fields:
+     * - Personal data: first_name, last_name, phone, dob, gender
+     * - Medical data: blood_type
+     * - Insurance: insurance_company, policy_number
+     * - Emergency contacts: primary_contact_name, primary_contact_phone
+     */
+    private function checkProfileCompleteness(int $userId): array
+    {
+        try {
+            $connection = Database::getConnection();
+            
+            // Get user data
+            $sql = "SELECT first_name, last_name, phone, dob, gender, emergency 
+                    FROM fw_v_users 
+                    WHERE id = ?";
+            $result = $connection->executeQuery($sql, [$userId]);
+            $user = $result->fetchAssociative();
+            
+            if (!$user) {
+                return [
+                    'is_complete' => false,
+                    'missing_fields' => [],
+                    'message' => 'User not found'
+                ];
+            }
+            
+            // Parse emergency data
+            $emergencyData = [];
+            if ($user['emergency']) {
+                $emergencyData = json_decode($user['emergency'], true) ?: [];
+            }
+            
+            // Check required fields
+            $missingFields = [];
+            
+            // Personal data
+            if (empty($user['first_name'])) {
+                $missingFields['personal'][] = 'first_name';
+            }
+            if (empty($user['last_name'])) {
+                $missingFields['personal'][] = 'last_name';
+            }
+            if (empty($user['phone'])) {
+                $missingFields['personal'][] = 'phone';
+            }
+            if (empty($user['dob'])) {
+                $missingFields['personal'][] = 'dob';
+            }
+            if (empty($user['gender'])) {
+                $missingFields['personal'][] = 'gender';
+            }
+            
+            // Medical data
+            if (empty($emergencyData['blood_type'])) {
+                $missingFields['medical'][] = 'blood_type';
+            }
+            
+            // Insurance
+            if (empty($emergencyData['insurance_company'])) {
+                $missingFields['insurance'][] = 'insurance_company';
+            }
+            if (empty($emergencyData['policy_number'])) {
+                $missingFields['insurance'][] = 'policy_number';
+            }
+            
+            // Emergency contacts
+            if (empty($emergencyData['primary_contact_name'])) {
+                $missingFields['emergency'][] = 'primary_contact_name';
+            }
+            if (empty($emergencyData['primary_contact_phone'])) {
+                $missingFields['emergency'][] = 'primary_contact_phone';
+            }
+            
+            $isComplete = empty($missingFields);
+            
+            return [
+                'is_complete' => $isComplete,
+                'missing_fields' => $missingFields,
+                'message' => $isComplete 
+                    ? 'Profile is complete and ready for activation' 
+                    : 'Profile is incomplete. Please fill all required fields.'
+            ];
+        } catch (\Exception $e) {
+            $this->logger->error('Error checking profile completeness: ' . $e->getMessage());
+            return [
+                'is_complete' => false,
+                'missing_fields' => [],
+                'message' => 'Error checking profile completeness'
+            ];
+        }
+    }
+
+    /**
      * Update user work status in database
      */
     private function updateUserWorkStatus(int $userId, bool $isActive, ?string $inactiveReason, ?string $inactiveReasonDetails, ?string $status_end_at): bool
@@ -2104,7 +2460,19 @@ class ProfileController
         try {
             $connection = Database::getConnection();
             
+            // Get current status before update
+            $currentUserSql = "SELECT status, status_reason, status_details, status_end_at FROM fw_users WHERE id = ?";
+            $currentResult = $connection->executeQuery($currentUserSql, [$userId]);
+            $currentUser = $currentResult->fetchAssociative();
+            $oldStatus = (bool)($currentUser['status'] ?? false);
+            
             if ($isActive) {
+                // Check if profile is complete before activation
+                $completenessCheck = $this->checkProfileCompleteness($userId);
+                if (!$completenessCheck['is_complete']) {
+                    throw new \Exception('Cannot activate user: profile is incomplete. Missing fields: ' . json_encode($completenessCheck['missing_fields']));
+                }
+                
                 // If user is active, clear inactive reasons
                 $sql = "UPDATE fw_users SET 
                         status = TRUE,
@@ -2115,6 +2483,44 @@ class ProfileController
                         updated_at = NOW() 
                         WHERE id = ?";
                 $connection->executeStatement($sql, [$userId]);
+                
+                // Log activation event
+                // Using logSimple for USER_ACTIVATED - always writes to fw_event_log
+                // USER_STATUS_CHANGED is too generic - use specific USER_ACTIVATED instead
+                try {
+                    $this->eventLoggingService->logSimple(
+                        entityType: 'user',
+                        entityId: $userId,
+                        eventType: 'USER_ACTIVATED',
+                        afterData: [
+                            'status' => true,
+                            'profile_complete' => true,
+                            'activated_at' => date('c'),
+                            'previous_status' => $oldStatus,
+                            'previous_status_reason' => $currentUser['status_reason'] ?? null
+                        ],
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $userId,
+                            'before_data' => [
+                                'status' => $oldStatus,
+                                'status_reason' => $currentUser['status_reason'] ?? null,
+                                'status_details' => $currentUser['status_details'] ?? null,
+                                'status_end_at' => $currentUser['status_end_at'] ?? null
+                            ],
+                            'changed_fields' => ['status', 'status_reason', 'status_details', 'status_end_at', 'status_changed_at'],
+                            'comment' => 'User activated - all required profile data completed',
+                            'ip' => Flight::request()->ip ?? null,
+                            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                            'severity' => 'important'
+                        ]
+                    );
+                } catch (\Exception $e) {
+                    $this->logger->warning('Failed to log USER_ACTIVATED event', [
+                        'error' => $e->getMessage(),
+                        'user_id' => $userId
+                    ]);
+                }
             } else {
                 // If user is inactive, set reasons
                 $sql = "UPDATE fw_users SET 
@@ -2126,6 +2532,51 @@ class ProfileController
                         updated_at = NOW() 
                         WHERE id = ?";
                 $connection->executeStatement($sql, [$inactiveReason, $inactiveReasonDetails, $status_end_at, $userId]);
+                
+                // Log deactivation event
+                // Using logSimple for USER_DEACTIVATED - always writes to fw_event_log
+                // USER_STATUS_CHANGED is too generic - use specific USER_DEACTIVATED instead
+                $isTemporary = !empty($status_end_at);
+                $comment = $isTemporary 
+                    ? "User temporarily deactivated until {$status_end_at}. Reason: {$inactiveReason}" 
+                    : "User deactivated. Reason: {$inactiveReason}";
+                
+                try {
+                    $this->eventLoggingService->logSimple(
+                        entityType: 'user',
+                        entityId: $userId,
+                        eventType: 'USER_DEACTIVATED',
+                        afterData: [
+                            'status' => false,
+                            'status_reason' => $inactiveReason,
+                            'status_details' => $inactiveReasonDetails,
+                            'status_end_at' => $status_end_at,
+                            'is_temporary' => $isTemporary,
+                            'deactivated_at' => date('c'),
+                            'previous_status' => $oldStatus
+                        ],
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $userId,
+                            'before_data' => [
+                                'status' => $oldStatus,
+                                'status_reason' => $currentUser['status_reason'] ?? null,
+                                'status_details' => $currentUser['status_details'] ?? null,
+                                'status_end_at' => $currentUser['status_end_at'] ?? null
+                            ],
+                            'changed_fields' => ['status', 'status_reason', 'status_details', 'status_end_at', 'status_changed_at'],
+                            'comment' => $comment,
+                            'ip' => Flight::request()->ip ?? null,
+                            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                            'severity' => 'important'
+                        ]
+                    );
+                } catch (\Exception $e) {
+                    $this->logger->warning('Failed to log USER_DEACTIVATED event', [
+                        'error' => $e->getMessage(),
+                        'user_id' => $userId
+                    ]);
+                }
             }
             
             return true;

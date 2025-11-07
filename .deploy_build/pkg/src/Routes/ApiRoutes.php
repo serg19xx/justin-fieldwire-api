@@ -267,6 +267,12 @@ class ApiRoutes
                 }
             });
             
+            Flight::route('GET /api/v1/profile/activation-status', function() use ($profileController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $profileController->getActivationStatus();
+                }
+            });
+            
             // Professional data routes
             Flight::route('GET /api/v1/profile/professional', function() use ($profileController, $authMiddleware) {
                 if ($authMiddleware->handle()) {

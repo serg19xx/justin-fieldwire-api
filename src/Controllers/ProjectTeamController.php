@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\EventLoggingService;
 use Exception;
 use Monolog\Logger;
 
@@ -16,11 +17,13 @@ class ProjectTeamController
 {
     private $database;
     private $logger;
+    private EventLoggingService $eventLoggingService;
 
     public function __construct(Logger $logger)
     {
         $this->database = new Database();
         $this->logger = $logger;
+        $this->eventLoggingService = new EventLoggingService($logger);
     }
 
     /**
@@ -128,6 +131,7 @@ class ProjectTeamController
                     -- Fields from fw_prj_team_members
                     tm.id as team_member_id,
                     tm.project_id,
+                    tm.task_id,
                     tm.role_in_project as role,
                     tm.assigned_at as added_at,
                     
@@ -385,6 +389,7 @@ class ProjectTeamController
      *         required=true,
      *         @OA\JsonContent(
      *             @OA\Property(property="user_id", type="integer", example=47),
+     *             @OA\Property(property="task_id", type="integer", example=61, description="Task ID - required, all team members must be assigned to a task"),
      *             @OA\Property(property="role", type="string", example="member")
      *         )
      *     ),
@@ -452,18 +457,77 @@ class ProjectTeamController
             // Note: Administrators and Project Managers are filtered from available users list,
             // but can be added directly if user_id is known (no restriction here)
 
-            // Check if user is already in team
-            $existingSql = "SELECT id FROM fw_prj_team_members WHERE project_id = ? AND user_id = ?";
-            $existingResult = $connection->executeQuery($existingSql, [$projectId, $input['user_id']]);
+            // Все пользователи должны быть прикреплены к задачам - task_id обязателен
+            if (!isset($input['task_id']) || !is_numeric($input['task_id'])) {
+                return $this->errorResponse('task_id is required. All team members must be assigned to a task', 400);
+            }
+            
+            $taskId = (int)$input['task_id'];
+            
+            // Проверяем, что задача существует и принадлежит проекту
+            $taskCheck = $connection->executeQuery(
+                "SELECT id FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
+                [$taskId, $projectId]
+            );
+            if (!$taskCheck->fetchOne()) {
+                return $this->errorResponse('Task not found or does not belong to this project', 404);
+            }
+            
+            // Проверяем, не назначен ли уже пользователь на эту задачу
+            $existingSql = "SELECT id FROM fw_prj_team_members WHERE project_id = ? AND user_id = ? AND task_id = ?";
+            $existingResult = $connection->executeQuery($existingSql, [$projectId, $input['user_id'], $taskId]);
             if ($existingResult->fetchOne()) {
-                return $this->errorResponse('User already in team', 409);
+                return $this->errorResponse('User already assigned to this task', 409);
             }
 
-            // Add team member
-            $insertSql = "INSERT INTO fw_prj_team_members (project_id, user_id, role_in_project) VALUES (?, ?, ?)";
-            $connection->executeStatement($insertSql, [$projectId, $input['user_id'], $input['role']]);
+            // Добавляем пользователя к задаче (все пользователи должны быть прикреплены к задачам)
+            $insertSql = "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project) VALUES (?, ?, ?, ?)";
+            $connection->executeStatement($insertSql, [$projectId, $taskId, $input['user_id'], $input['role'] ?? null]);
 
             $teamMemberId = $connection->lastInsertId();
+
+            // Логируем событие добавления участника проекта
+            try {
+                $currentUser = \Flight::get('current_user');
+                $actorId = $currentUser['id'] ?? null;
+
+                // Получаем информацию о проекте
+                $projectResult = $connection->executeQuery(
+                    "SELECT id, prj_name FROM fw_projects WHERE id = ?",
+                    [$projectId]
+                );
+                $project = $projectResult->fetchAssociative();
+
+                $this->eventLoggingService->logSimple(
+                    entityType: 'project',
+                    entityId: $projectId,
+                    eventType: 'PROJECT_MEMBER_ADDED',
+                    afterData: [
+                        'project_id' => (int)$projectId,
+                        'project_name' => $project['prj_name'] ?? null,
+                        'user_id' => (int)$input['user_id'],
+                        'user_name' => ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''),
+                        'role' => $input['role'],
+                        'team_member_id' => (int)$teamMemberId,
+                        'added_at' => date('c')
+                    ],
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $actorId,
+                        'changed_fields' => ['user_id', 'role'],
+                        'comment' => "User {$input['user_id']} added to project '{$project['prj_name']}' with role '{$input['role']}'",
+                        'ip' => \Flight::request()->ip ?? null,
+                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                        'severity' => 'important'
+                    ]
+                );
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log project member addition event', [
+                    'error' => $e->getMessage(),
+                    'project_id' => $projectId,
+                    'user_id' => $input['user_id']
+                ]);
+            }
 
             return [
                 'error_code' => 0,
@@ -641,17 +705,66 @@ class ProjectTeamController
 
             $connection = $this->database->getConnection();
 
-            // Check if team member exists
-            $checkSql = "SELECT id FROM fw_prj_team_members WHERE id = ? AND project_id = ?";
-            $checkResult = $connection->executeQuery($checkSql, [$teamMemberId, $projectId]);
+            // Получаем данные участника команды и проекта перед удалением для логирования
+            $teamMemberSql = "SELECT ptm.id, ptm.project_id, ptm.user_id, ptm.role_in_project, 
+                                   u.first_name, u.last_name, u.email,
+                                   p.prj_name
+                             FROM fw_prj_team_members ptm
+                             LEFT JOIN fw_v_users u ON ptm.user_id = u.id
+                             LEFT JOIN fw_projects p ON ptm.project_id = p.id
+                             WHERE ptm.id = ? AND ptm.project_id = ?";
+            $teamMemberResult = $connection->executeQuery($teamMemberSql, [$teamMemberId, $projectId]);
+            $teamMemberData = $teamMemberResult->fetchAssociative();
             
-            if (!$checkResult->fetchOne()) {
+            if (!$teamMemberData) {
                 return $this->errorResponse('Team member not found', 404);
             }
 
             // Remove team member
             $deleteSql = "DELETE FROM fw_prj_team_members WHERE id = ?";
             $connection->executeStatement($deleteSql, [$teamMemberId]);
+
+            // Логируем событие удаления участника проекта
+            try {
+                $currentUser = \Flight::get('current_user');
+                $actorId = $currentUser['id'] ?? null;
+
+                $this->eventLoggingService->logSimple(
+                    entityType: 'project',
+                    entityId: $projectId,
+                    eventType: 'PROJECT_MEMBER_REMOVED',
+                    afterData: [
+                        'project_id' => (int)$projectId,
+                        'project_name' => $teamMemberData['prj_name'] ?? null,
+                        'user_id' => (int)$teamMemberData['user_id'],
+                        'user_name' => ($teamMemberData['first_name'] ?? '') . ' ' . ($teamMemberData['last_name'] ?? ''),
+                        'role' => $teamMemberData['role_in_project'],
+                        'team_member_id' => (int)$teamMemberId,
+                        'removed_at' => date('c')
+                    ],
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $actorId,
+                        'before_data' => [
+                            'team_member_id' => (int)$teamMemberId,
+                            'project_id' => (int)$projectId,
+                            'user_id' => (int)$teamMemberData['user_id'],
+                            'role' => $teamMemberData['role_in_project']
+                        ],
+                        'changed_fields' => ['deleted'],
+                        'comment' => "User {$teamMemberData['user_id']} removed from project '{$teamMemberData['prj_name']}'",
+                        'ip' => \Flight::request()->ip ?? null,
+                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                        'severity' => 'important'
+                    ]
+                );
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log project member removal event', [
+                    'error' => $e->getMessage(),
+                    'project_id' => $projectId,
+                    'team_member_id' => $teamMemberId
+                ]);
+            }
 
             return [
                 'error_code' => 0,
@@ -735,6 +848,8 @@ class ProjectTeamController
     {
         return isset($data['user_id']) && 
                is_numeric($data['user_id']) && 
+               isset($data['task_id']) && 
+               is_numeric($data['task_id']) &&
                isset($data['role']) && 
                !empty($data['role']);
     }
@@ -745,6 +860,7 @@ class ProjectTeamController
             // Team member specific fields
             'team_member_id' => (int) $member['team_member_id'],
             'project_id' => (int) $member['project_id'],
+            'task_id' => isset($member['task_id']) && $member['task_id'] !== null ? (int) $member['task_id'] : null,
             'project_role' => $member['role'],
             'added_at' => $member['added_at'],
             

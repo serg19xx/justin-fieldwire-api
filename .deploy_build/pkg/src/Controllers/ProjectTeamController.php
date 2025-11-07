@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\EventLoggingService;
 use Exception;
 use Monolog\Logger;
 
@@ -16,11 +17,13 @@ class ProjectTeamController
 {
     private $database;
     private $logger;
+    private EventLoggingService $eventLoggingService;
 
     public function __construct(Logger $logger)
     {
         $this->database = new Database();
         $this->logger = $logger;
+        $this->eventLoggingService = new EventLoggingService($logger);
     }
 
     /**
@@ -465,6 +468,49 @@ class ProjectTeamController
 
             $teamMemberId = $connection->lastInsertId();
 
+            // Логируем событие добавления участника проекта
+            try {
+                $currentUser = \Flight::get('current_user');
+                $actorId = $currentUser['id'] ?? null;
+
+                // Получаем информацию о проекте
+                $projectResult = $connection->executeQuery(
+                    "SELECT id, prj_name FROM fw_projects WHERE id = ?",
+                    [$projectId]
+                );
+                $project = $projectResult->fetchAssociative();
+
+                $this->eventLoggingService->logSimple(
+                    entityType: 'project',
+                    entityId: $projectId,
+                    eventType: 'PROJECT_MEMBER_ADDED',
+                    afterData: [
+                        'project_id' => (int)$projectId,
+                        'project_name' => $project['prj_name'] ?? null,
+                        'user_id' => (int)$input['user_id'],
+                        'user_name' => ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''),
+                        'role' => $input['role'],
+                        'team_member_id' => (int)$teamMemberId,
+                        'added_at' => date('c')
+                    ],
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $actorId,
+                        'changed_fields' => ['user_id', 'role'],
+                        'comment' => "User {$input['user_id']} added to project '{$project['prj_name']}' with role '{$input['role']}'",
+                        'ip' => \Flight::request()->ip ?? null,
+                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                        'severity' => 'important'
+                    ]
+                );
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log project member addition event', [
+                    'error' => $e->getMessage(),
+                    'project_id' => $projectId,
+                    'user_id' => $input['user_id']
+                ]);
+            }
+
             return [
                 'error_code' => 0,
                 'status' => 'success',
@@ -641,17 +687,66 @@ class ProjectTeamController
 
             $connection = $this->database->getConnection();
 
-            // Check if team member exists
-            $checkSql = "SELECT id FROM fw_prj_team_members WHERE id = ? AND project_id = ?";
-            $checkResult = $connection->executeQuery($checkSql, [$teamMemberId, $projectId]);
+            // Получаем данные участника команды и проекта перед удалением для логирования
+            $teamMemberSql = "SELECT ptm.id, ptm.project_id, ptm.user_id, ptm.role_in_project, 
+                                   u.first_name, u.last_name, u.email,
+                                   p.prj_name
+                             FROM fw_prj_team_members ptm
+                             LEFT JOIN fw_v_users u ON ptm.user_id = u.id
+                             LEFT JOIN fw_projects p ON ptm.project_id = p.id
+                             WHERE ptm.id = ? AND ptm.project_id = ?";
+            $teamMemberResult = $connection->executeQuery($teamMemberSql, [$teamMemberId, $projectId]);
+            $teamMemberData = $teamMemberResult->fetchAssociative();
             
-            if (!$checkResult->fetchOne()) {
+            if (!$teamMemberData) {
                 return $this->errorResponse('Team member not found', 404);
             }
 
             // Remove team member
             $deleteSql = "DELETE FROM fw_prj_team_members WHERE id = ?";
             $connection->executeStatement($deleteSql, [$teamMemberId]);
+
+            // Логируем событие удаления участника проекта
+            try {
+                $currentUser = \Flight::get('current_user');
+                $actorId = $currentUser['id'] ?? null;
+
+                $this->eventLoggingService->logSimple(
+                    entityType: 'project',
+                    entityId: $projectId,
+                    eventType: 'PROJECT_MEMBER_REMOVED',
+                    afterData: [
+                        'project_id' => (int)$projectId,
+                        'project_name' => $teamMemberData['prj_name'] ?? null,
+                        'user_id' => (int)$teamMemberData['user_id'],
+                        'user_name' => ($teamMemberData['first_name'] ?? '') . ' ' . ($teamMemberData['last_name'] ?? ''),
+                        'role' => $teamMemberData['role_in_project'],
+                        'team_member_id' => (int)$teamMemberId,
+                        'removed_at' => date('c')
+                    ],
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $actorId,
+                        'before_data' => [
+                            'team_member_id' => (int)$teamMemberId,
+                            'project_id' => (int)$projectId,
+                            'user_id' => (int)$teamMemberData['user_id'],
+                            'role' => $teamMemberData['role_in_project']
+                        ],
+                        'changed_fields' => ['deleted'],
+                        'comment' => "User {$teamMemberData['user_id']} removed from project '{$teamMemberData['prj_name']}'",
+                        'ip' => \Flight::request()->ip ?? null,
+                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                        'severity' => 'important'
+                    ]
+                );
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log project member removal event', [
+                    'error' => $e->getMessage(),
+                    'project_id' => $projectId,
+                    'team_member_id' => $teamMemberId
+                ]);
+            }
 
             return [
                 'error_code' => 0,

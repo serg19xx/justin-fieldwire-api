@@ -267,6 +267,12 @@ class ApiRoutes
                 }
             });
             
+            Flight::route('GET /api/v1/profile/activation-status', function() use ($profileController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $profileController->getActivationStatus();
+                }
+            });
+            
             // Professional data routes
             Flight::route('GET /api/v1/profile/professional', function() use ($profileController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
@@ -895,6 +901,21 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $taskController = new \App\Controllers\TaskController($this->logger);
                 $taskController->deleteTask((int)$project_id, (int)$task_id);
+            }
+        });
+
+        Flight::route('GET /api/v1/tasks/@task_id/available-workers', function($task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getAvailableWorkers((int)$task_id);
+            }
+        });
+
+        // Task team members (including invited people)
+        Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/team', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getTaskTeam((int)$project_id, (int)$task_id);
             }
         });
 

@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Database\Database;
 use Monolog\Logger;
 use Exception;
+use Doctrine\DBAL\Exception as DBALException;
 
 class EventLoggingService
 {
@@ -29,6 +30,24 @@ class EventLoggingService
         array $options = []
     ): ?int {
         try {
+            // Пытаемся получить правило для определения execution_location
+            $executionLocation = $options['execution_location'] ?? null;
+            
+            try {
+                $eventRule = $this->getEventRule($eventType);
+                if ($eventRule !== null && isset($eventRule['execution_location'])) {
+                    $executionLocation = $eventRule['execution_location'];
+                }
+            } catch (\Exception $e) {
+                // Игнорируем ошибки при получении правила - используем значение по умолчанию
+                $this->logger->debug('Could not get event rule for execution_location', [
+                    'event_type' => $eventType,
+                    'error' => $e->getMessage()
+                ]);
+            }
+            
+            // NULL = везде (и server, и auto)
+
             $logData = [
                 'tenant_id' => $options['tenant_id'] ?? null,
                 'entity_type' => $entityType,
@@ -45,6 +64,7 @@ class EventLoggingService
                 'comment' => $options['comment'] ?? null,
                 'ip' => $options['ip'] ?? $this->getClientIp(),
                 'user_agent' => $options['user_agent'] ?? $this->getUserAgent(),
+                'execution_location' => $executionLocation,
             ];
 
             $eventLogId = $this->insertEventLog($logData);
@@ -59,12 +79,15 @@ class EventLoggingService
             }
 
             return $eventLogId;
-        } catch (Exception $e) {
+        } catch (DBALException | Exception $e) {
             $this->logger->error('Failed to log simple event', [
                 'error' => $e->getMessage(),
                 'event_type' => $eventType,
                 'entity_type' => $entityType,
-                'entity_id' => $entityId
+                'entity_id' => $entityId,
+                'trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine()
             ]);
             return null;
         }
@@ -116,6 +139,7 @@ class EventLoggingService
                 'comment' => $options['comment'] ?? null,
                 'ip' => $options['ip'] ?? $this->getClientIp(),
                 'user_agent' => $options['user_agent'] ?? $this->getUserAgent(),
+                'execution_location' => $eventRule['execution_location'] ?? null,  // Берем из правила или NULL (везде)
             ];
 
             // Insert event log
@@ -154,7 +178,7 @@ class EventLoggingService
     {
         try {
             $result = $this->connection->executeQuery(
-                'SELECT event_type, enabled, actions, severity, conditions, comment 
+                'SELECT event_type, enabled, actions, severity, conditions, execution_location, comment 
                  FROM fw_event_rules 
                  WHERE event_type = ? AND enabled = 1',
                 [$eventType]
@@ -167,10 +191,11 @@ class EventLoggingService
             }
 
             return $rule ?: null;
-        } catch (Exception $e) {
+        } catch (DBALException | Exception $e) {
             $this->logger->error('Failed to get event rule', [
                 'error' => $e->getMessage(),
-                'event_type' => $eventType
+                'event_type' => $eventType,
+                'trace' => $e->getTraceAsString()
             ]);
             return null;
         }
@@ -185,8 +210,8 @@ class EventLoggingService
             $sql = 'INSERT INTO fw_event_log (
                 occurred_at, tenant_id, entity_type, entity_id, entity_version, event_type, severity,
                 actor_type, actor_id, correlation_id, changed_fields, before_data, after_data,
-                comment, ip, user_agent
-            ) VALUES (NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+                comment, ip, user_agent, execution_location
+            ) VALUES (NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
 
             $this->connection->executeStatement($sql, [
                 $logData['tenant_id'],
@@ -203,14 +228,18 @@ class EventLoggingService
                 $logData['after_data'],
                 $logData['comment'],
                 $logData['ip'],
-                $logData['user_agent']
+                $logData['user_agent'],
+                $logData['execution_location'] ?? null  // NULL означает "везде" (и server, и auto/n8n)
             ]);
 
             return $this->connection->lastInsertId();
-        } catch (Exception $e) {
+        } catch (DBALException | Exception $e) {
             $this->logger->error('Failed to insert event log', [
                 'error' => $e->getMessage(),
-                'log_data' => $logData
+                'event_type' => $logData['event_type'] ?? 'unknown',
+                'entity_type' => $logData['entity_type'] ?? 'unknown',
+                'entity_id' => $logData['entity_id'] ?? null,
+                'trace' => $e->getTraceAsString()
             ]);
             return null;
         }
