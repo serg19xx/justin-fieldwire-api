@@ -70,8 +70,15 @@ class EventLoggingService
             $eventLogId = $this->insertEventLog($logData);
 
             if ($eventLogId) {
-                $this->logger->info('Simple event logged', [
+                $this->logger->info('Simple event logged successfully', [
                     'event_log_id' => $eventLogId,
+                    'event_type' => $eventType,
+                    'entity_type' => $entityType,
+                    'entity_id' => $entityId,
+                    'execution_location' => $executionLocation
+                ]);
+            } else {
+                $this->logger->warning('Failed to insert event log - insertEventLog returned null', [
                     'event_type' => $eventType,
                     'entity_type' => $entityType,
                     'entity_id' => $entityId

@@ -1,6 +1,44 @@
 -- Add event rules for worker registration and activation cycle
 -- This script adds rules for tracking the complete worker registration process
 
+-- USER_REGISTRATION_COMPLETED: When user completes registration via invitation token
+INSERT INTO fw_event_rules (
+  event_type,
+  enabled,
+  actions,
+  severity,
+  conditions,
+  execution_location,
+  comment,
+  updated_at,
+  updated_by
+) VALUES (
+  'USER_REGISTRATION_COMPLETED',
+  1,
+  JSON_ARRAY(
+    JSON_OBJECT(
+      'type', 'create_report',
+      'period', 'daily',
+      'recipients', JSON_ARRAY('admin', 'project_manager'),
+      'store_for_dashboard', true
+    )
+  ),
+  'important',
+  NULL,
+  NULL,
+  'Auto-added default rule for user registration completion events',
+  NOW(),
+  NULL
+)
+ON DUPLICATE KEY UPDATE
+  enabled = VALUES(enabled),
+  actions = VALUES(actions),
+  severity = VALUES(severity),
+  conditions = VALUES(conditions),
+  execution_location = VALUES(execution_location),
+  comment = VALUES(comment),
+  updated_at = NOW();
+
 -- USER_PROFILE_UPDATED: When user updates personal profile data
 INSERT INTO fw_event_rules (
   event_type,

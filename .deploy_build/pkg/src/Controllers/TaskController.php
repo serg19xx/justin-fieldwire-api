@@ -134,7 +134,6 @@ class TaskController
      */
     public function getTasks(int $projectId): void
     {
-        // Проверка токена
         try {
             $request = Flight::request();
             $status = $request->query['status'] ?? null;
@@ -158,8 +157,8 @@ class TaskController
                 return;
             }
 
-            // Базовый SQL запрос
-            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE project_id = ?";
+            // Базовый SQL запрос - task_lead_id и team_members теперь в fw_prj_team_members
+            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE project_id = ?";
             $params = [$projectId];
 
             // Фильтр по статусу
@@ -194,7 +193,6 @@ class TaskController
                 $params[] = "%{$search}%";
             }
 
-            // Подсчет общего количества
             // Добавляем сортировку
             $sql .= " ORDER BY task_order ASC, start_planned ASC";
 
@@ -224,8 +222,81 @@ class TaskController
                 ];
             }, $dependencies);
 
+            // Получаем team_members и task_lead_id для задач из fw_prj_team_members (где task_id заполнен)
+            $taskIds = array_column($tasks, 'id');
+            $taskAssignees = [];
+            $taskLeads = [];
+            $taskInvitedPeople = []; // Инициализируем всегда
+            
+            if (!empty($taskIds)) {
+                $placeholders = str_repeat('?,', count($taskIds) - 1) . '?';
+                
+                // Сначала получаем информацию о milestone для каждой задачи
+                $milestoneSql = "SELECT id, milestone FROM fw_prj_tasks WHERE id IN ($placeholders)";
+                $milestoneResult = $connection->executeQuery($milestoneSql, $taskIds);
+                $milestoneData = $milestoneResult->fetchAllAssociative();
+                $taskMilestones = []; // Для определения, какие задачи являются milestone
+                foreach ($milestoneData as $milestoneRow) {
+                    $taskMilestones[(int)$milestoneRow['id']] = $milestoneRow['milestone'] !== null && $milestoneRow['milestone'] !== '';
+                }
+                
+                // Получаем всех назначенных на задачи (исполнители, бригадиры и приглашенные)
+                $assigneesSql = "SELECT task_id, user_id, role_in_project, invited_people FROM fw_prj_team_members WHERE task_id IN ($placeholders)";
+                $assigneesResult = $connection->executeQuery($assigneesSql, $taskIds);
+                $assigneesData = $assigneesResult->fetchAllAssociative();
+                
+                // Группируем по task_id и определяем бригадира, исполнителей и приглашенных
+                foreach ($assigneesData as $assignee) {
+                    $taskId = (int)$assignee['task_id'];
+                    $role = $assignee['role_in_project'] ?? null;
+                    $isMilestone = isset($taskMilestones[$taskId]) && $taskMilestones[$taskId];
+                    
+                    if ($isMilestone && $role === 'task_lead') {
+                        // Для milestone: ОДНА запись с role_in_project = 'task_lead' и invited_people (JSON массив)
+                        $invitedPeopleRaw = $assignee['invited_people'] ?? null;
+                        if ($invitedPeopleRaw !== null && $invitedPeopleRaw !== '') {
+                            $invitedPeopleArray = json_decode($invitedPeopleRaw, true);
+                            if (is_array($invitedPeopleArray)) {
+                                $taskInvitedPeople[$taskId] = $invitedPeopleArray;
+                            } else {
+                                $taskInvitedPeople[$taskId] = [];
+                            }
+                        } else {
+                            $taskInvitedPeople[$taskId] = [];
+                        }
+                        // task_lead для milestone
+                        if ($assignee['user_id']) {
+                            $taskLeads[$taskId] = (int)$assignee['user_id'];
+                        }
+                    } elseif (!$isMilestone && $assignee['user_id']) {
+                        // Для обычной задачи: отдельные записи для каждого члена бригады
+                        $userId = (int)$assignee['user_id'];
+                        // Бригадир определяется по role_in_project (например, 'task_lead' или 'supervisor')
+                        // Если role указывает на бригадира, сохраняем как task_lead_id
+                        if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
+                            $taskLeads[$taskId] = $userId;
+                        } else {
+                            // Иначе это исполнитель
+                            if (!isset($taskAssignees[$taskId])) {
+                                $taskAssignees[$taskId] = [];
+                            }
+                            $taskAssignees[$taskId][] = $userId;
+                        }
+                    }
+                }
+            }
+
             // Форматируем данные задач
-            $formattedTasks = array_map(function($task) {
+            $formattedTasks = array_map(function($task) use ($taskAssignees, $taskLeads, $taskInvitedPeople) {
+                $taskId = (int)$task['id'];
+                $teamMembers = isset($taskAssignees[$taskId]) ? $taskAssignees[$taskId] : null;
+                $taskLeadId = isset($taskLeads[$taskId]) ? $taskLeads[$taskId] : null;
+                $isMilestone = $task['milestone'] !== null && $task['milestone'] !== '';
+                // Для milestone всегда возвращаем массив (даже пустой), для обычной задачи - null
+                $invitedPeople = $isMilestone 
+                    ? (isset($taskInvitedPeople[$taskId]) && is_array($taskInvitedPeople[$taskId]) ? $taskInvitedPeople[$taskId] : [])
+                    : null;
+                
                 return [
                     'id' => (int)$task['id'],
                     'task_order' => (int)$task['task_order'],
@@ -238,8 +309,9 @@ class TaskController
                     'status' => $task['status'],
                     'progress_pct' => (int)$task['progress_pct'],
                     'notes' => $task['notes'],
-                    'task_lead_id' => isset($task['task_lead_id']) && $task['task_lead_id'] ? (int)$task['task_lead_id'] : null,
-                    'team_members' => isset($task['team_members']) && $task['team_members'] ? json_decode($task['team_members'], true) : null,
+                    'task_lead_id' => $taskLeadId,
+                    'team_members' => $teamMembers,
+                    'invited_people' => $invitedPeople,
                     'resources' => $task['resources'] ? json_decode($task['resources'], true) : null,
                     'baseline_start' => $task['baseline_start'],
                     'baseline_end' => $task['baseline_end'],
@@ -262,17 +334,37 @@ class TaskController
             ]);
 
         } catch (Exception $e) {
+            $errorMessage = $e->getMessage();
+            $errorTrace = $e->getTraceAsString();
+            $errorFile = $e->getFile();
+            $errorLine = $e->getLine();
+            
             $this->logger->error('Failed to retrieve tasks', [
                 'project_id' => $projectId,
-                'error' => $e->getMessage()
+                'error' => $errorMessage,
+                'trace' => $errorTrace,
+                'file' => $errorFile,
+                'line' => $errorLine
             ]);
 
-            Flight::json([
+            // В режиме разработки возвращаем детальную ошибку
+            $appEnv = $_ENV['APP_ENV'] ?? 'development';
+            $responseData = [
                 'error_code' => 500,
                 'status' => 'error',
                 'message' => 'Failed to retrieve tasks',
                 'data' => null
-            ], 500);
+            ];
+            
+            if ($appEnv !== 'production') {
+                $responseData['debug'] = [
+                    'error' => $errorMessage,
+                    'file' => $errorFile,
+                    'line' => $errorLine
+                ];
+            }
+
+            Flight::json($responseData, 500);
         }
     }
 
@@ -335,7 +427,7 @@ class TaskController
         try {
             $connection = $this->database->getConnection();
             
-            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ? AND project_id = ?";
+            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ? AND project_id = ?";
             $result = $connection->executeQuery($sql, [$taskId, $projectId]);
             $task = $result->fetchAssociative();
 
@@ -349,6 +441,114 @@ class TaskController
                 return;
             }
 
+            // Получаем task_lead_id, team_members и invited_people из fw_prj_team_members для этой задачи
+            $assigneesResult = $connection->executeQuery(
+                "SELECT user_id, role_in_project, invited_people FROM fw_prj_team_members WHERE task_id = ?",
+                [$taskId]
+            );
+            $assigneesData = $assigneesResult->fetchAllAssociative();
+            
+            $this->logger->info('Reading team members for task', [
+                'task_id' => $taskId,
+                'assignees_count' => count($assigneesData),
+                'assignees_data' => $assigneesData
+            ]);
+            
+            $taskLeadId = null;
+            $teamMembers = [];
+            $invitedPeople = null;
+            
+            // Проверяем, является ли задача milestone
+            $isMilestone = $task['milestone'] !== null && $task['milestone'] !== '';
+            
+            $this->logger->info('Task milestone check', [
+                'task_id' => $taskId,
+                'is_milestone' => $isMilestone,
+                'milestone_value' => $task['milestone'] ?? null
+            ]);
+            
+            if ($isMilestone) {
+                // Для milestone: ищем ОДНУ запись с role_in_project = 'task_lead' и invited_people
+                foreach ($assigneesData as $assignee) {
+                    $this->logger->info('Checking assignee for milestone', [
+                        'task_id' => $taskId,
+                        'role' => $assignee['role_in_project'] ?? null,
+                        'invited_people_raw' => $assignee['invited_people'] ?? null
+                    ]);
+                    
+                    if ($assignee['role_in_project'] === 'task_lead') {
+                        $taskLeadId = $assignee['user_id'] ? (int)$assignee['user_id'] : null;
+                        // invited_people - это JSON массив (может быть пустой массив "[]")
+                        $invitedPeopleRaw = $assignee['invited_people'] ?? null;
+                        
+                        $this->logger->info('Found task_lead record', [
+                            'task_id' => $taskId,
+                            'task_lead_id' => $taskLeadId,
+                            'invited_people_raw' => $invitedPeopleRaw,
+                            'invited_people_type' => gettype($invitedPeopleRaw),
+                            'invited_people_empty' => empty($invitedPeopleRaw)
+                        ]);
+                        
+                        if ($invitedPeopleRaw !== null && $invitedPeopleRaw !== '') {
+                            $decoded = json_decode($invitedPeopleRaw, true);
+                            $jsonError = json_last_error();
+                            
+                            $this->logger->info('Decoding invited_people JSON', [
+                                'task_id' => $taskId,
+                                'raw' => $invitedPeopleRaw,
+                                'decoded' => $decoded,
+                                'json_error' => $jsonError,
+                                'is_array' => is_array($decoded)
+                            ]);
+                            
+                            $invitedPeople = is_array($decoded) ? $decoded : [];
+                        } else {
+                            $invitedPeople = [];
+                        }
+                        
+                        $this->logger->info('Final invited_people for milestone', [
+                            'task_id' => $taskId,
+                            'invited_people' => $invitedPeople,
+                            'count' => is_array($invitedPeople) ? count($invitedPeople) : 0
+                        ]);
+                        
+                        break; // Только одна запись для milestone
+                    }
+                }
+                
+                if ($invitedPeople === null) {
+                    $this->logger->warning('No task_lead record found for milestone', [
+                        'task_id' => $taskId,
+                        'assignees_data' => $assigneesData
+                    ]);
+                    $invitedPeople = [];
+                }
+            } else {
+                // Для обычной задачи: отдельные записи для каждого члена бригады
+                foreach ($assigneesData as $assignee) {
+                    $userId = (int)$assignee['user_id'];
+                    $role = $assignee['role_in_project'] ?? null;
+                    if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
+                        $taskLeadId = $userId;
+                    } else {
+                        $teamMembers[] = $userId;
+                    }
+                }
+            }
+
+            // Убеждаемся, что invited_people всегда массив для milestone
+            if ($isMilestone && $invitedPeople === null) {
+                $invitedPeople = [];
+            }
+            
+            $this->logger->info('Final task data before response', [
+                'task_id' => $taskId,
+                'is_milestone' => $isMilestone,
+                'invited_people' => $invitedPeople,
+                'invited_people_type' => gettype($invitedPeople),
+                'invited_people_count' => is_array($invitedPeople) ? count($invitedPeople) : 'not array'
+            ]);
+            
             $formattedTask = [
                 'id' => (int)$task['id'],
                 'task_order' => (int)$task['task_order'],
@@ -361,8 +561,9 @@ class TaskController
                 'status' => $task['status'],
                 'progress_pct' => (int)$task['progress_pct'],
                 'notes' => $task['notes'],
-                'task_lead_id' => isset($task['task_lead_id']) && $task['task_lead_id'] ? (int)$task['task_lead_id'] : null,
-                'team_members' => isset($task['team_members']) && $task['team_members'] ? json_decode($task['team_members'], true) : null,
+                'task_lead_id' => $taskLeadId,
+                'team_members' => !empty($teamMembers) ? $teamMembers : null,
+                'invited_people' => $isMilestone ? ($invitedPeople ?? []) : null,
                 'resources' => $task['resources'] ? json_decode($task['resources'], true) : null,
                 'baseline_start' => $task['baseline_start'],
                 'baseline_end' => $task['baseline_end'],
@@ -518,8 +719,9 @@ class TaskController
             );
             $nextOrder = (int)$nextOrderResult->fetchOne();
             
-            $sql = "INSERT INTO fw_prj_tasks (task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO fw_prj_tasks (task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            // 15 параметров: task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days
             
             // Обработка wbs_path - всегда сохраняем как JSON строку или NULL
             $wbsPath = null;
@@ -537,18 +739,19 @@ class TaskController
                 }
             }
 
-            // Обработка team_members
-            $teamMembersJson = null;
-            if (isset($data['team_members'])) {
-                if (is_array($data['team_members']) && !empty($data['team_members'])) {
-                    // Фильтруем только числовые значения
-                    $teamMembers = array_filter($data['team_members'], 'is_numeric');
-                    $teamMembers = array_map('intval', $teamMembers);
-                    if (!empty($teamMembers)) {
-                        $teamMembersJson = json_encode(array_values($teamMembers));
-                    }
-                }
+            // Обработка team_members - все пользователи должны быть прикреплены к задачам
+            // Не проверяем наличие в команде проекта, так как все должны быть назначены на задачи
+            $teamMembers = [];
+            if (isset($data['team_members']) && is_array($data['team_members']) && !empty($data['team_members'])) {
+                // Фильтруем только числовые значения
+                $teamMemberIds = array_filter($data['team_members'], 'is_numeric');
+                $teamMemberIds = array_map('intval', $teamMemberIds);
+                $teamMembers = $teamMemberIds;
             }
+            
+            // Обработка task_lead_id - все пользователи должны быть прикреплены к задачам
+            // Не проверяем наличие в команде проекта, так как все должны быть назначены на задачи
+            $taskLeadId = isset($data['task_lead_id']) && $data['task_lead_id'] ? (int)$data['task_lead_id'] : null;
 
             $params = [
                 $nextOrder,
@@ -566,24 +769,157 @@ class TaskController
                 $data['baseline_end'] ?? null,
                 $data['actual_start'] ?? null,
                 $data['actual_end'] ?? null,
-                $data['slack_days'] ?? null,
-                $data['task_lead_id'] ?? null,
-                $teamMembersJson
+                $data['slack_days'] ?? null
             ];
-
-            // Логируем для диагностики
-            $this->logger->info('Creating task with team_members', [
-                'project_id' => $projectId,
-                'team_members_input' => $data['team_members'] ?? null,
-                'team_members_json' => $teamMembersJson
-            ]);
 
             $connection->executeStatement($sql, $params);
             $taskId = $connection->lastInsertId();
 
+            if (!$taskId || $taskId === 0) {
+                throw new \Exception("Failed to create task: lastInsertId returned 0");
+            }
+
+            // Определяем, является ли задача milestone
+            $isMilestone = isset($data['milestone']) && $data['milestone'] !== null && $data['milestone'] !== '';
+            
+            if ($isMilestone) {
+                // Для milestone: ОДНА строка с task_lead и JSON массивом invited_people
+                
+                // Подготавливаем JSON массив для invited_people
+                $invitedPeopleArray = [];
+                if (array_key_exists('invited_people', $data) && is_array($data['invited_people'])) {
+                    $this->logger->info('Processing invited_people for milestone', [
+                        'task_id' => $taskId,
+                        'invited_people_count' => count($data['invited_people']),
+                        'invited_people' => $data['invited_people']
+                    ]);
+                    
+                    foreach ($data['invited_people'] as $invitedPerson) {
+                        // Валидация обязательных полей
+                        if (!isset($invitedPerson['name']) || empty(trim($invitedPerson['name']))) {
+                            $this->logger->warning('Skipping invited person without name', [
+                                'task_id' => $taskId,
+                                'invited_person' => $invitedPerson
+                            ]);
+                            continue;
+                        }
+                        
+                        // Подготавливаем данные для invited_people
+                        $invitedPersonData = [];
+                        
+                        // Добавляем name (обязательное поле)
+                        if (isset($invitedPerson['name']) && !empty(trim($invitedPerson['name']))) {
+                            $invitedPersonData['name'] = trim($invitedPerson['name']);
+                        }
+                        
+                        // Добавляем email, если он указан
+                        if (isset($invitedPerson['email']) && !empty(trim($invitedPerson['email']))) {
+                            $invitedPersonData['email'] = trim($invitedPerson['email']);
+                        }
+                        if (isset($invitedPerson['company']) && !empty(trim($invitedPerson['company']))) {
+                            $invitedPersonData['company'] = trim($invitedPerson['company']);
+                        }
+                        if (isset($invitedPerson['phone']) && !empty(trim($invitedPerson['phone']))) {
+                            $invitedPersonData['phone'] = trim($invitedPerson['phone']);
+                        }
+                        if (isset($invitedPerson['notes']) && !empty(trim($invitedPerson['notes']))) {
+                            $invitedPersonData['notes'] = trim($invitedPerson['notes']);
+                        }
+                        if (isset($invitedPerson['avatar']) && !empty(trim($invitedPerson['avatar']))) {
+                            $invitedPersonData['avatar'] = trim($invitedPerson['avatar']);
+                        }
+                        
+                        // Добавляем в массив, если есть name
+                        if (!empty($invitedPersonData) && isset($invitedPersonData['name'])) {
+                            $invitedPeopleArray[] = $invitedPersonData;
+                            $this->logger->info('Added invited person to array', [
+                                'task_id' => $taskId,
+                                'person_data' => $invitedPersonData
+                            ]);
+                        } else {
+                            $this->logger->warning('Skipping invited person - no name or empty data', [
+                                'task_id' => $taskId,
+                                'person_data' => $invitedPersonData,
+                                'original_data' => $invitedPerson
+                            ]);
+                        }
+                    }
+                    
+                    $this->logger->info('Final invited_people array', [
+                        'task_id' => $taskId,
+                        'count' => count($invitedPeopleArray),
+                        'array' => $invitedPeopleArray
+                    ]);
+                }
+                
+                // Если invited_people установлен (даже пустой массив), сохраняем как JSON, иначе null
+                if (array_key_exists('invited_people', $data) && is_array($data['invited_people'])) {
+                    $invitedPeopleJson = json_encode($invitedPeopleArray, JSON_UNESCAPED_UNICODE);
+                    $this->logger->info('Saving invited_people JSON', [
+                        'task_id' => $taskId,
+                        'json' => $invitedPeopleJson
+                    ]);
+                } else {
+                    $invitedPeopleJson = null;
+                }
+                
+                // Создаем или обновляем ОДНУ запись для milestone
+                try {
+                    $connection->executeStatement(
+                        "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project, invited_people) VALUES (?, ?, ?, 'task_lead', ?)
+                         ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), invited_people = VALUES(invited_people)",
+                        [$projectId, $taskId, $taskLeadId, $invitedPeopleJson]
+                    );
+                } catch (\Exception $e) {
+                    $this->logger->warning('Failed to create/update milestone team member', [
+                        'task_id' => $taskId,
+                        'task_lead_id' => $taskLeadId,
+                        'error' => $e->getMessage()
+                    ]);
+                }
+            } else {
+                // Для обычной задачи: отдельные строки для каждого члена бригады
+                
+                // Сохраняем task_lead_id с role_in_project = 'task_lead'
+                if ($taskLeadId) {
+                    try {
+                        $connection->executeStatement(
+                            "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project) VALUES (?, ?, ?, 'task_lead')
+                             ON DUPLICATE KEY UPDATE role_in_project = 'task_lead'",
+                            [$projectId, $taskId, $taskLeadId]
+                        );
+                    } catch (\Exception $e) {
+                        $this->logger->warning('Failed to assign task lead to task', [
+                            'task_id' => $taskId,
+                            'user_id' => $taskLeadId,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
+                }
+                
+                // Сохраняем team_members (исполнители) - отдельные строки
+                if (!empty($teamMembers)) {
+                    foreach ($teamMembers as $userId) {
+                        try {
+                            $connection->executeStatement(
+                                "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project) VALUES (?, ?, ?, 'member')
+                                 ON DUPLICATE KEY UPDATE role_in_project = IF(role_in_project = 'task_lead', 'task_lead', 'member')",
+                                [$projectId, $taskId, $userId]
+                            );
+                        } catch (\Exception $e) {
+                            $this->logger->warning('Failed to assign team member to task', [
+                                'task_id' => $taskId,
+                                'user_id' => $userId,
+                                'error' => $e->getMessage()
+                            ]);
+                        }
+                    }
+                }
+            }
+
             // Получаем созданную задачу
             $result = $connection->executeQuery(
-                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
+                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
                 [$taskId]
             );
             $task = $result->fetchAssociative();
@@ -591,6 +927,51 @@ class TaskController
             if (!$task) {
                 throw new \Exception("Failed to retrieve created task with ID: {$taskId}");
             }
+            
+            // Получаем task_lead_id, team_members и invited_people из fw_prj_team_members для этой задачи
+            $assigneesResult = $connection->executeQuery(
+                "SELECT user_id, role_in_project, invited_people FROM fw_prj_team_members WHERE task_id = ?",
+                [$taskId]
+            );
+            $assigneesData = $assigneesResult->fetchAllAssociative();
+            
+            $taskLeadId = null;
+            $teamMembers = [];
+            $invitedPeople = null;
+            
+            // Проверяем, является ли задача milestone
+            $isMilestone = $task['milestone'] !== null && $task['milestone'] !== '';
+            
+            if ($isMilestone) {
+                // Для milestone: ищем ОДНУ запись с role_in_project = 'task_lead' и invited_people
+                foreach ($assigneesData as $assignee) {
+                    if ($assignee['role_in_project'] === 'task_lead') {
+                        $taskLeadId = $assignee['user_id'] ? (int)$assignee['user_id'] : null;
+                        // invited_people - это JSON массив
+                        if ($assignee['invited_people']) {
+                            $invitedPeople = json_decode($assignee['invited_people'], true);
+                        }
+                        break; // Только одна запись для milestone
+                    }
+                }
+            } else {
+                // Для обычной задачи: отдельные записи для каждого члена бригады
+                foreach ($assigneesData as $assignee) {
+                    $role = $assignee['role_in_project'] ?? null;
+                    
+                    if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
+                        // Бригадир
+                        $taskLeadId = (int)$assignee['user_id'];
+                    } elseif ($assignee['user_id']) {
+                        // Обычный участник команды
+                        $teamMembers[] = (int)$assignee['user_id'];
+                    }
+                }
+            }
+            
+            $task['task_lead_id'] = $taskLeadId;
+            $task['team_members'] = !empty($teamMembers) ? json_encode($teamMembers) : null;
+            $task['invited_people'] = $invitedPeople;
 
             // Логируем событие создания задачи
             try {
@@ -801,11 +1182,41 @@ class TaskController
 
             // Получаем текущие данные задачи перед обновлением для логирования
             $beforeResult = $connection->executeQuery(
-                "SELECT id, project_id, name, status, start_planned, end_planned, milestone, progress_pct, task_lead_id, team_members, actual_start, actual_end
+                "SELECT id, project_id, name, status, start_planned, end_planned, milestone, progress_pct, actual_start, actual_end
                  FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
                 [$taskId, $projectId]
             );
             $beforeData = $beforeResult->fetchAssociative();
+            
+            // Получаем task_lead_id, team_members и invited_people из fw_prj_team_members для beforeData
+            $beforeAssigneesResult = $connection->executeQuery(
+                "SELECT user_id, role_in_project, invited_people FROM fw_prj_team_members WHERE task_id = ?",
+                [$taskId]
+            );
+            $beforeAssigneesData = $beforeAssigneesResult->fetchAllAssociative();
+            
+            $beforeTaskLeadId = null;
+            $beforeTeamMembers = [];
+            $beforeInvitedPeople = null;
+            foreach ($beforeAssigneesData as $assignee) {
+                $userId = (int)$assignee['user_id'];
+                $role = $assignee['role_in_project'] ?? null;
+                $invitedPeople = $assignee['invited_people'] ?? null;
+                
+                // Сохраняем invited_people для milestone (role = 'task_lead' для milestone)
+                if ($role === 'task_lead' && $invitedPeople !== null) {
+                    $beforeInvitedPeople = $invitedPeople;
+                }
+                
+                if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
+                    $beforeTaskLeadId = $userId;
+                } else {
+                    $beforeTeamMembers[] = $userId;
+                }
+            }
+            $beforeData['task_lead_id'] = $beforeTaskLeadId;
+            $beforeData['team_members'] = !empty($beforeTeamMembers) ? json_encode($beforeTeamMembers) : null;
+            $beforeData['invited_people'] = $beforeInvitedPeople;
 
             // Строим SQL запрос для обновления
             $updateFields = [];
@@ -860,13 +1271,26 @@ class TaskController
                 $updateFields[] = "notes = ?";
                 $params[] = $data['notes'];
             }
-            if (isset($data['task_lead_id'])) {
-                $updateFields[] = "task_lead_id = ?";
-                $params[] = $data['task_lead_id'];
+            // Обработка task_lead_id и team_members - НЕ добавляем в команду проекта отдельно
+            // Пользователь будет добавлен в команду проекта автоматически при назначении на задачу
+            // Это предотвращает дублирование записей с task_id = NULL
+            // Если task_lead_id не передан, используем старое значение из beforeData
+            $taskLeadId = null;
+            if (array_key_exists('task_lead_id', $data)) {
+                $taskLeadId = $data['task_lead_id'] ? (int)$data['task_lead_id'] : null;
+            } else {
+                // Используем старое значение, если новое не передано
+                $taskLeadId = $beforeTaskLeadId;
             }
+            $teamMembers = [];
+            
             if (isset($data['team_members'])) {
-                $updateFields[] = "team_members = ?";
-                $params[] = $data['team_members'] ? json_encode($data['team_members']) : null;
+                if (is_array($data['team_members']) && !empty($data['team_members'])) {
+                    // Фильтруем только числовые значения
+                    $teamMemberIds = array_filter($data['team_members'], 'is_numeric');
+                    $teamMemberIds = array_map('intval', $teamMemberIds);
+                    $teamMembers = $teamMemberIds;
+                }
             }
             if (isset($data['resources'])) {
                 $updateFields[] = "resources = ?";
@@ -908,13 +1332,308 @@ class TaskController
 
             $sql = "UPDATE fw_prj_tasks SET " . implode(', ', $updateFields) . " WHERE id = ?";
             $connection->executeStatement($sql, $params);
+            
+            // Определяем старое значение milestone из beforeData
+            $oldIsMilestone = isset($beforeData['milestone']) && $beforeData['milestone'] !== null && $beforeData['milestone'] !== '';
+            
+            // Определяем новое значение milestone (после обновления)
+            $newIsMilestone = isset($data['milestone']) 
+                ? ($data['milestone'] !== null && $data['milestone'] !== '')
+                : $oldIsMilestone;
+            
+            // Если milestone изменился, нужно пересоздать записи в fw_prj_team_members
+            $milestoneChanged = isset($data['milestone']) && ($oldIsMilestone !== $newIsMilestone);
+            
+            // Для milestone всегда обновляем team_members, если передаются task_lead_id или invited_people
+            // Для обычной задачи обновляем, если передаются task_lead_id или team_members
+            $shouldUpdateTeamMembers = false;
+            if ($newIsMilestone) {
+                // Для milestone обновляем, если передается task_lead_id или invited_people
+                // Используем array_key_exists для проверки наличия ключа, даже если значение null или пустой массив
+                $hasTaskLeadId = array_key_exists('task_lead_id', $data);
+                $hasInvitedPeople = array_key_exists('invited_people', $data);
+                $shouldUpdateTeamMembers = $milestoneChanged || $hasTaskLeadId || $hasInvitedPeople;
+                
+                $this->logger->info('Checking if should update team members for milestone', [
+                    'task_id' => $taskId,
+                    'milestone_changed' => $milestoneChanged,
+                    'has_task_lead_id' => $hasTaskLeadId,
+                    'has_invited_people' => $hasInvitedPeople,
+                    'should_update' => $shouldUpdateTeamMembers,
+                    'data_keys' => array_keys($data)
+                ]);
+            } else {
+                // Для обычной задачи обновляем, если передается task_lead_id или team_members
+                $shouldUpdateTeamMembers = $milestoneChanged 
+                    || array_key_exists('task_lead_id', $data) 
+                    || array_key_exists('team_members', $data);
+            }
+            
+            if ($shouldUpdateTeamMembers) {
+                $this->logger->info('Updating team members', [
+                    'task_id' => $taskId,
+                    'is_milestone' => $newIsMilestone
+                ]);
+                
+                if ($newIsMilestone) {
+                    // Для milestone: удаляем все записи, кроме той, что с role_in_project = 'task_lead'
+                    // Потом обновим или создадим запись с task_lead
+                    $connection->executeStatement(
+                        "DELETE FROM fw_prj_team_members WHERE task_id = ? AND project_id = ? AND role_in_project != 'task_lead'",
+                        [$taskId, $projectId]
+                    );
+                    // Для milestone: ОДНА строка с task_lead и JSON массивом invited_people
+                    
+                    // Подготавливаем JSON массив для invited_people
+                    $invitedPeopleArray = [];
+                    
+                    if (array_key_exists('invited_people', $data) && is_array($data['invited_people'])) {
+                        // Если invited_people передан, используем его как полный массив (фронтенд должен отправлять весь список)
+                        $this->logger->info('Processing invited_people for milestone update', [
+                            'task_id' => $taskId,
+                            'invited_people_count' => count($data['invited_people']),
+                            'invited_people' => $data['invited_people']
+                        ]);
+                        
+                        // Обрабатываем переданные данные
+                        foreach ($data['invited_people'] as $invitedPerson) {
+                            // Валидация обязательных полей
+                            if (!isset($invitedPerson['name']) || empty(trim($invitedPerson['name']))) {
+                                $this->logger->warning('Skipping invited person without name', [
+                                    'task_id' => $taskId,
+                                    'invited_person' => $invitedPerson
+                                ]);
+                                continue;
+                            }
+                            
+                            // Подготавливаем данные для invited_people
+                            $invitedPersonData = [];
+                            
+                            // Добавляем name (обязательное поле)
+                            if (isset($invitedPerson['name']) && !empty(trim($invitedPerson['name']))) {
+                                $invitedPersonData['name'] = trim($invitedPerson['name']);
+                            }
+                            
+                            // Добавляем email, если он указан
+                            if (isset($invitedPerson['email']) && !empty(trim($invitedPerson['email']))) {
+                                $invitedPersonData['email'] = trim($invitedPerson['email']);
+                            }
+                            if (isset($invitedPerson['company']) && !empty(trim($invitedPerson['company']))) {
+                                $invitedPersonData['company'] = trim($invitedPerson['company']);
+                            }
+                            if (isset($invitedPerson['phone']) && !empty(trim($invitedPerson['phone']))) {
+                                $invitedPersonData['phone'] = trim($invitedPerson['phone']);
+                            }
+                            if (isset($invitedPerson['notes']) && !empty(trim($invitedPerson['notes']))) {
+                                $invitedPersonData['notes'] = trim($invitedPerson['notes']);
+                            }
+                            if (isset($invitedPerson['avatar']) && !empty(trim($invitedPerson['avatar']))) {
+                                $invitedPersonData['avatar'] = trim($invitedPerson['avatar']);
+                            }
+                            
+                            // Добавляем в массив, если есть name
+                            if (!empty($invitedPersonData) && isset($invitedPersonData['name'])) {
+                                $invitedPeopleArray[] = $invitedPersonData;
+                                $this->logger->info('Added invited person to array', [
+                                    'task_id' => $taskId,
+                                    'person_data' => $invitedPersonData
+                                ]);
+                            } else {
+                                $this->logger->warning('Skipping invited person - no name or empty data', [
+                                    'task_id' => $taskId,
+                                    'person_data' => $invitedPersonData,
+                                    'original_data' => $invitedPerson
+                                ]);
+                            }
+                        }
+                        
+                        $this->logger->info('Final invited_people array for update', [
+                            'task_id' => $taskId,
+                            'count' => count($invitedPeopleArray),
+                            'array' => $invitedPeopleArray
+                        ]);
+                        
+                        // Сохраняем как JSON (даже если пустой массив)
+                        $invitedPeopleJson = json_encode($invitedPeopleArray, JSON_UNESCAPED_UNICODE);
+                        $this->logger->info('Saving invited_people JSON for update', [
+                            'task_id' => $taskId,
+                            'count' => count($invitedPeopleArray),
+                            'json' => $invitedPeopleJson
+                        ]);
+                    } else {
+                        // Если invited_people не передан, используем старое значение из базы
+                        if (!empty($beforeData['invited_people'])) {
+                            $invitedPeopleJson = is_string($beforeData['invited_people']) 
+                                ? $beforeData['invited_people'] 
+                                : json_encode($beforeData['invited_people'], JSON_UNESCAPED_UNICODE);
+                        } else {
+                            $invitedPeopleJson = null;
+                        }
+                        $this->logger->info('Using old invited_people value', [
+                            'task_id' => $taskId,
+                            'old_value' => $invitedPeopleJson
+                        ]);
+                    }
+                    
+                    // Проверяем, существует ли уже запись для этого milestone
+                    $existingRecord = $connection->executeQuery(
+                        "SELECT id FROM fw_prj_team_members WHERE task_id = ? AND project_id = ? AND role_in_project = 'task_lead'",
+                        [$taskId, $projectId]
+                    )->fetchAssociative();
+                    
+                    if ($existingRecord) {
+                        // Обновляем существующую запись
+                        try {
+                            $this->logger->info('Updating existing milestone team member', [
+                                'task_id' => $taskId,
+                                'record_id' => $existingRecord['id'],
+                                'project_id' => $projectId,
+                                'task_lead_id' => $taskLeadId,
+                                'invited_people_json' => $invitedPeopleJson
+                            ]);
+                            
+                            $connection->executeStatement(
+                                "UPDATE fw_prj_team_members 
+                                 SET user_id = ?, invited_people = ?, role_in_project = 'task_lead'
+                                 WHERE id = ?",
+                                [$taskLeadId, $invitedPeopleJson, $existingRecord['id']]
+                            );
+                            
+                            $this->logger->info('Successfully updated milestone team member', [
+                                'task_id' => $taskId,
+                                'record_id' => $existingRecord['id']
+                            ]);
+                        } catch (\Exception $e) {
+                            $this->logger->error('Failed to update milestone team member', [
+                                'task_id' => $taskId,
+                                'record_id' => $existingRecord['id'],
+                                'project_id' => $projectId,
+                                'task_lead_id' => $taskLeadId,
+                                'invited_people_json' => $invitedPeopleJson,
+                                'error' => $e->getMessage(),
+                                'trace' => $e->getTraceAsString()
+                            ]);
+                        }
+                    } else {
+                        // Создаем новую запись
+                        try {
+                            $this->logger->info('Creating new milestone team member', [
+                                'task_id' => $taskId,
+                                'project_id' => $projectId,
+                                'task_lead_id' => $taskLeadId,
+                                'invited_people_json' => $invitedPeopleJson
+                            ]);
+                            
+                            $connection->executeStatement(
+                                "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project, invited_people) 
+                                 VALUES (?, ?, ?, 'task_lead', ?)",
+                                [$projectId, $taskId, $taskLeadId, $invitedPeopleJson]
+                            );
+                            
+                            $this->logger->info('Successfully created milestone team member', [
+                                'task_id' => $taskId
+                            ]);
+                        } catch (\Exception $e) {
+                            $this->logger->error('Failed to create milestone team member', [
+                                'task_id' => $taskId,
+                                'project_id' => $projectId,
+                                'task_lead_id' => $taskLeadId,
+                                'invited_people_json' => $invitedPeopleJson,
+                                'error' => $e->getMessage(),
+                                'trace' => $e->getTraceAsString()
+                            ]);
+                        }
+                    }
+                } else {
+                    // Для обычной задачи: отдельные строки для каждого члена бригады
+                    
+                    // Сохраняем task_lead_id с role_in_project = 'task_lead'
+                    if ($taskLeadId) {
+                        try {
+                            $connection->executeStatement(
+                                "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project) VALUES (?, ?, ?, 'task_lead')",
+                                [$projectId, $taskId, $taskLeadId]
+                            );
+                        } catch (\Exception $e) {
+                            $this->logger->warning('Failed to assign task lead to task', [
+                                'task_id' => $taskId,
+                                'user_id' => $taskLeadId,
+                                'error' => $e->getMessage()
+                            ]);
+                        }
+                    }
+                    
+                    // Сохраняем team_members (исполнители) - отдельные строки
+                    if (!empty($teamMembers)) {
+                        foreach ($teamMembers as $userId) {
+                            try {
+                                $connection->executeStatement(
+                                    "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project) VALUES (?, ?, ?, 'member')",
+                                    [$projectId, $taskId, $userId]
+                                );
+                            } catch (\Exception $e) {
+                                $this->logger->warning('Failed to assign team member to task', [
+                                    'task_id' => $taskId,
+                                    'user_id' => $userId,
+                                    'error' => $e->getMessage()
+                                ]);
+                            }
+                        }
+                    }
+                }
+            }
 
             // Получаем обновленную задачу
             $result = $connection->executeQuery(
-                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, task_lead_id, team_members, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
+                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
                 [$taskId]
             );
             $task = $result->fetchAssociative();
+            
+            // Получаем task_lead_id, team_members и invited_people из fw_prj_team_members для этой задачи
+            $assigneesResult = $connection->executeQuery(
+                "SELECT user_id, role_in_project, invited_people FROM fw_prj_team_members WHERE task_id = ?",
+                [$taskId]
+            );
+            $assigneesData = $assigneesResult->fetchAllAssociative();
+            
+            $taskLeadId = null;
+            $teamMembers = [];
+            $invitedPeople = null;
+            
+            // Проверяем, является ли задача milestone
+            $isMilestone = $task['milestone'] !== null && $task['milestone'] !== '';
+            
+            if ($isMilestone) {
+                // Для milestone: ищем ОДНУ запись с role_in_project = 'task_lead' и invited_people
+                foreach ($assigneesData as $assignee) {
+                    if ($assignee['role_in_project'] === 'task_lead') {
+                        $taskLeadId = $assignee['user_id'] ? (int)$assignee['user_id'] : null;
+                        // invited_people - это JSON массив
+                        if ($assignee['invited_people']) {
+                            $invitedPeople = json_decode($assignee['invited_people'], true);
+                        }
+                        break; // Только одна запись для milestone
+                    }
+                }
+            } else {
+                // Для обычной задачи: отдельные записи для каждого члена бригады
+                foreach ($assigneesData as $assignee) {
+                    $role = $assignee['role_in_project'] ?? null;
+                    
+                    if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
+                        // Бригадир
+                        $taskLeadId = (int)$assignee['user_id'];
+                    } elseif ($assignee['user_id']) {
+                        // Обычный участник команды
+                        $teamMembers[] = (int)$assignee['user_id'];
+                    }
+                }
+            }
+            
+            $task['task_lead_id'] = $taskLeadId;
+            $task['team_members'] = !empty($teamMembers) ? json_encode($teamMembers) : null;
+            $task['invited_people'] = $invitedPeople;
 
             // Логируем событие обновления задачи
             try {
@@ -1138,11 +1857,19 @@ class TaskController
             
             // Получаем данные задачи перед удалением для логирования
             $taskResult = $connection->executeQuery(
-                "SELECT id, project_id, name, status, start_planned, end_planned, milestone, task_lead_id, team_members
+                "SELECT id, project_id, name, status, start_planned, end_planned, milestone
                  FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
                 [$taskId, $projectId]
             );
             $taskData = $taskResult->fetchAssociative();
+            
+            // Получаем task_lead_id из fw_prj_team_members для логирования
+            $leadResult = $connection->executeQuery(
+                "SELECT user_id FROM fw_prj_team_members WHERE task_id = ? AND (role_in_project LIKE '%lead%' OR role_in_project LIKE '%supervisor%' OR role_in_project LIKE '%manager%') LIMIT 1",
+                [$taskId]
+            );
+            $taskLeadId = $leadResult->fetchOne();
+            $taskData['task_lead_id'] = $taskLeadId ? (int)$taskLeadId : null;
             
             if (!$taskData) {
                 Flight::json([
@@ -1227,6 +1954,243 @@ class TaskController
     }
 
     /**
+     * Получить доступных работников для задачи
+     * GET /api/v1/tasks/{taskId}/available-workers
+     *
+     * @OA\Get(
+     *     path="/api/v1/tasks/{taskId}/available-workers",
+     *     summary="Get available workers for task",
+     *     description="Get list of workers available for assignment to a task in the specified date range",
+     *     tags={"Tasks"},
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(
+     *         name="taskId",
+     *         in="path",
+     *         description="Task ID",
+     *         required=true,
+     *         @OA\Schema(type="integer")
+     *     ),
+     *     @OA\Parameter(
+     *         name="start_date",
+     *         in="query",
+     *         description="Start date of task period (YYYY-MM-DD)",
+     *         required=true,
+     *         @OA\Schema(type="string", format="date")
+     *     ),
+     *     @OA\Parameter(
+     *         name="end_date",
+     *         in="query",
+     *         description="End date of task period (YYYY-MM-DD)",
+     *         required=true,
+     *         @OA\Schema(type="string", format="date")
+     *     ),
+     *     @OA\Response(
+     *         response=200,
+     *         description="Available workers retrieved successfully",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="status", type="string", example="success"),
+     *             @OA\Property(property="data", type="object",
+     *                 @OA\Property(property="workers", type="array",
+     *                     @OA\Items(type="object",
+     *                         @OA\Property(property="id", type="integer", example=1),
+     *                         @OA\Property(property="user_id", type="integer", example=1),
+     *                         @OA\Property(property="first_name", type="string", example="John"),
+     *                         @OA\Property(property="last_name", type="string", example="Smith"),
+     *                         @OA\Property(property="full_name", type="string", example="John Smith"),
+     *                         @OA\Property(property="email", type="string", example="john@example.com"),
+     *                         @OA\Property(property="role_name", type="string", example="Foreman"),
+     *                         @OA\Property(property="role_code", type="string", example="foreman"),
+     *                         @OA\Property(property="avatar_url", type="string", nullable=true),
+     *                         @OA\Property(property="status", type="integer", example=1)
+     *                     )
+     *                 )
+     *             )
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=400,
+     *         description="Invalid date parameters",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Invalid date format or missing dates")
+     *         )
+     *     ),
+     *     @OA\Response(
+     *         response=404,
+     *         description="Task not found",
+     *         @OA\JsonContent(
+     *             @OA\Property(property="status", type="string", example="error"),
+     *             @OA\Property(property="message", type="string", example="Task not found")
+     *         )
+     *     )
+     * )
+     */
+    public function getAvailableWorkers(int $taskId): void
+    {
+        try {
+            $request = Flight::request();
+            $startDate = $request->query['start_date'] ?? null;
+            $endDate = $request->query['end_date'] ?? null;
+
+            // Валидация дат
+            if (!$startDate || !$endDate) {
+                Flight::json([
+                    'status' => 'error',
+                    'message' => 'start_date and end_date are required',
+                    'data' => null
+                ], 400);
+                return;
+            }
+
+            if (!$this->isValidDate($startDate) || !$this->isValidDate($endDate)) {
+                Flight::json([
+                    'status' => 'error',
+                    'message' => 'Invalid date format. Use YYYY-MM-DD',
+                    'data' => null
+                ], 400);
+                return;
+            }
+
+            if (strtotime($endDate) < strtotime($startDate)) {
+                Flight::json([
+                    'status' => 'error',
+                    'message' => 'end_date must be after or equal to start_date',
+                    'data' => null
+                ], 400);
+                return;
+            }
+
+            $connection = $this->database->getConnection();
+
+            // Проверяем, существует ли задача
+            $taskCheck = $connection->executeQuery(
+                "SELECT id, project_id FROM fw_prj_tasks WHERE id = ?",
+                [$taskId]
+            );
+            $task = $taskCheck->fetchAssociative();
+
+            if (!$task) {
+                Flight::json([
+                    'status' => 'error',
+                    'message' => 'Task not found',
+                    'data' => null
+                ], 404);
+                return;
+            }
+
+            $projectId = (int)$task['project_id'];
+
+            // Получаем уже назначенных на текущую задачу (task_lead_id и team_members из fw_prj_team_members)
+            $assignedUsersResult = $connection->executeQuery(
+                "SELECT DISTINCT user_id FROM fw_prj_team_members WHERE task_id = ?",
+                [$taskId]
+            );
+            $assignedUserIds = $assignedUsersResult->fetchFirstColumn();
+            $assignedUserIds = array_map('intval', $assignedUserIds);
+
+            // Получаем занятых работников в других задачах (пересечение дат)
+            // Проверяем все задачи всех проектов, где есть пересечение дат
+            // Два периода пересекаются, если: (start1 <= end2) AND (end1 >= start2)
+            $busyUsersSql = "
+                SELECT DISTINCT tm.user_id
+                FROM fw_prj_team_members tm
+                INNER JOIN fw_prj_tasks t ON tm.task_id = t.id
+                WHERE tm.task_id IS NOT NULL
+                  AND tm.task_id != ?
+                  AND t.start_planned IS NOT NULL
+                  AND t.end_planned IS NOT NULL
+                  AND t.start_planned <= ?
+                  AND t.end_planned >= ?
+            ";
+            $busyUsersResult = $connection->executeQuery(
+                $busyUsersSql,
+                [
+                    $taskId,
+                    $endDate,    // task.start <= request.end
+                    $startDate   // task.end >= request.start
+                ]
+            );
+            $busyUserIds = $busyUsersResult->fetchFirstColumn();
+            $busyUserIds = array_map('intval', $busyUserIds);
+
+            // Объединяем исключенных пользователей
+            $excludedUserIds = array_unique(array_merge($assignedUserIds, $busyUserIds));
+
+            // Строим SQL запрос для получения доступных работников
+            $sql = "
+                SELECT 
+                    u.id,
+                    u.id as user_id,
+                    u.first_name,
+                    u.last_name,
+                    CONCAT(u.first_name, ' ', u.last_name) as full_name,
+                    u.email,
+                    u.role_id,
+                    u.job_title,
+                    u.status,
+                    u.avatar_url,
+                    r.code as role_code,
+                    r.name as role_name
+                FROM fw_users u
+                LEFT JOIN fw_glob_roles r ON u.role_id = r.id
+                WHERE u.status = 1
+                  AND u.archived_at IS NULL
+                  AND (r.code IS NULL OR r.code NOT IN ('admin', 'project_manager'))
+            ";
+
+            $params = [];
+
+            // Исключаем уже назначенных и занятых
+            if (!empty($excludedUserIds)) {
+                $placeholders = str_repeat('?,', count($excludedUserIds) - 1) . '?';
+                $sql .= " AND u.id NOT IN ($placeholders)";
+                $params = array_merge($params, $excludedUserIds);
+            }
+
+            $sql .= " ORDER BY u.first_name ASC, u.last_name ASC";
+
+            $result = $connection->executeQuery($sql, $params);
+            $workers = $result->fetchAllAssociative();
+
+            // Форматируем результат
+            $formattedWorkers = array_map(function($worker) {
+                return [
+                    'id' => (int)$worker['id'],
+                    'user_id' => (int)$worker['user_id'],
+                    'first_name' => $worker['first_name'],
+                    'last_name' => $worker['last_name'],
+                    'full_name' => $worker['full_name'],
+                    'email' => $worker['email'],
+                    'role_name' => $worker['role_name'] ?? null,
+                    'role_code' => $worker['role_code'] ?? null,
+                    'avatar_url' => $worker['avatar_url'] ?? null,
+                    'status' => (int)$worker['status']
+                ];
+            }, $workers);
+
+            Flight::json([
+                'status' => 'success',
+                'data' => [
+                    'workers' => $formattedWorkers
+                ]
+            ]);
+
+        } catch (Exception $e) {
+            $this->logger->error('Failed to get available workers', [
+                'task_id' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            Flight::json([
+                'status' => 'error',
+                'message' => 'Failed to get available workers',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
      * Валидация данных задачи
      */
     private function validateTaskData(array $data, bool $isCreate = true): array
@@ -1247,10 +2211,11 @@ class TaskController
                 ];
             }
             
-            if (!isset($data['task_lead_id']) || !is_numeric($data['task_lead_id']) || $data['task_lead_id'] <= 0) {
+            // task_lead_id не обязателен при создании, но если передан - должен быть валидным
+            if (isset($data['task_lead_id']) && (!is_numeric($data['task_lead_id']) || $data['task_lead_id'] <= 0)) {
                 return [
                     'valid' => false,
-                    'message' => "Field 'task_lead_id' is required and must be a positive number"
+                    'message' => "Field 'task_lead_id' must be a positive number if provided"
                 ];
             }
         }
@@ -2693,6 +3658,319 @@ class TaskController
                 'data' => null
             ], 401);
             return false;
+        }
+    }
+
+    /**
+     * Get all team members for a task (including invited people)
+     * GET /api/v1/projects/{projectId}/tasks/{taskId}/team
+     */
+    public function getTaskTeam($projectId, $taskId)
+    {
+        try {
+            $connection = $this->database->getConnection();
+            
+            // Проверяем, что задача существует и принадлежит проекту
+            $taskCheck = $connection->executeQuery(
+                "SELECT id, milestone FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
+                [$taskId, $projectId]
+            );
+            $task = $taskCheck->fetchAssociative();
+            
+            if (!$task) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => 'Task not found',
+                    'data' => null
+                ], 404);
+                return;
+            }
+            
+            // Получаем всех участников команды для этой задачи
+            $sql = "
+                SELECT 
+                    tm.id,
+                    tm.project_id,
+                    tm.task_id,
+                    tm.user_id,
+                    tm.role_in_project,
+                    tm.assigned_at,
+                    tm.invited_people,
+                    u.id as user_table_id,
+                    u.first_name,
+                    u.last_name,
+                    u.email,
+                    u.job_title,
+                    u.role_code,
+                    u.role_name
+                FROM fw_prj_team_members tm
+                LEFT JOIN fw_v_users u ON tm.user_id = u.id
+                WHERE tm.task_id = ? AND tm.project_id = ?
+                ORDER BY tm.assigned_at ASC
+            ";
+            
+            $result = $connection->executeQuery($sql, [$taskId, $projectId]);
+            $teamMembers = $result->fetchAllAssociative();
+            
+            // Определяем, является ли задача milestone
+            $isMilestone = $task['milestone'] !== null && $task['milestone'] !== '';
+            
+            $formattedMembers = [];
+            
+            if ($isMilestone) {
+                // Для milestone: ОДНА запись с task_lead и JSON массивом invited_people
+                foreach ($teamMembers as $member) {
+                    if ($member['role_in_project'] === 'task_lead') {
+                        $formattedMember = [
+                            'id' => (int)$member['id'],
+                            'project_id' => (int)$member['project_id'],
+                            'task_id' => (int)$member['task_id'],
+                            'user_id' => $member['user_id'] ? (int)$member['user_id'] : null,
+                            'role_in_project' => $member['role_in_project'],
+                            'assigned_at' => $member['assigned_at']
+                        ];
+                        
+                        // Данные ответственного из fw_users
+                        if ($member['user_id']) {
+                            $formattedMember['name'] = trim(($member['first_name'] ?? '') . ' ' . ($member['last_name'] ?? ''));
+                            $formattedMember['email'] = $member['email'] ?? null;
+                            $formattedMember['user_type'] = $member['role_code'] ?? null;
+                            $formattedMember['job_title'] = $member['job_title'] ?? null;
+                        }
+                        
+                        // invited_people - это JSON массив
+                        if ($member['invited_people']) {
+                            $invitedPeopleArray = json_decode($member['invited_people'], true);
+                            if ($invitedPeopleArray && is_array($invitedPeopleArray)) {
+                                $formattedMember['invited_people'] = $invitedPeopleArray;
+                            }
+                        }
+                        
+                        $formattedMembers[] = $formattedMember;
+                        break; // Только одна запись для milestone
+                    }
+                }
+            } else {
+                // Для обычной задачи: отдельные записи для каждого члена бригады
+                foreach ($teamMembers as $member) {
+                    $formattedMember = [
+                        'id' => (int)$member['id'],
+                        'project_id' => (int)$member['project_id'],
+                        'task_id' => (int)$member['task_id'],
+                        'user_id' => $member['user_id'] ? (int)$member['user_id'] : null,
+                        'role_in_project' => $member['role_in_project'],
+                        'assigned_at' => $member['assigned_at']
+                    ];
+                    
+                    // Обычный участник команды - используем данные из fw_users
+                    if ($member['user_id']) {
+                        $formattedMember['name'] = trim(($member['first_name'] ?? '') . ' ' . ($member['last_name'] ?? ''));
+                        $formattedMember['email'] = $member['email'] ?? null;
+                        $formattedMember['user_type'] = $member['role_code'] ?? null;
+                        $formattedMember['job_title'] = $member['job_title'] ?? null;
+                    }
+                    
+                    $formattedMembers[] = $formattedMember;
+                }
+            }
+            
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'data' => [
+                    'team_members' => $formattedMembers
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            $this->logger->error('Error getting task team', [
+                'project_id' => $projectId,
+                'task_id' => $taskId,
+                'error' => $e->getMessage()
+            ]);
+            
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Failed to get task team',
+                'data' => null
+            ], 500);
+        }
+    }
+
+    /**
+     * @deprecated This method is no longer used. Invited people are added via createTask/updateTask
+     * Add invited person to milestone
+     * POST /api/v1/projects/{projectId}/tasks/{taskId}/invited
+     */
+    public function addInvitedPerson($projectId, $taskId)
+    {
+        try {
+            $connection = $this->database->getConnection();
+            
+            // Проверяем, что задача существует и является milestone
+            $taskCheck = $connection->executeQuery(
+                "SELECT id, milestone FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
+                [$taskId, $projectId]
+            );
+            $task = $taskCheck->fetchAssociative();
+            
+            if (!$task) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => 'Task not found or does not belong to this project',
+                    'data' => null
+                ], 404);
+                return;
+            }
+            
+            if (!$task['milestone']) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Task is not a milestone',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            $input = json_decode(file_get_contents('php://input'), true);
+            
+            // Валидация
+            if (!isset($input['invited_people']) || !isset($input['invited_people']['name']) || empty(trim($input['invited_people']['name']))) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'invited_people.name is required',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            // Валидация email, если указан
+            if (isset($input['invited_people']['email']) && !empty($input['invited_people']['email'])) {
+                if (!filter_var($input['invited_people']['email'], FILTER_VALIDATE_EMAIL)) {
+                    Flight::json([
+                        'error_code' => 400,
+                        'status' => 'error',
+                        'message' => 'Invalid email format',
+                        'data' => null
+                    ], 400);
+                    return;
+                }
+            }
+            
+            // Подготавливаем JSON данные для invited_people
+            $invitedPeopleData = [
+                'name' => trim($input['invited_people']['name']),
+                'email' => isset($input['invited_people']['email']) ? trim($input['invited_people']['email']) : null,
+                'company' => isset($input['invited_people']['company']) ? trim($input['invited_people']['company']) : null,
+                'phone' => isset($input['invited_people']['phone']) ? trim($input['invited_people']['phone']) : null,
+                'notes' => isset($input['invited_people']['notes']) ? trim($input['invited_people']['notes']) : null,
+                'avatar' => isset($input['invited_people']['avatar']) ? trim($input['invited_people']['avatar']) : null
+            ];
+            
+            // Удаляем null значения для чистоты JSON
+            $invitedPeopleData = array_filter($invitedPeopleData, function($value) {
+                return $value !== null && $value !== '';
+            });
+            
+            $invitedPeopleJson = json_encode($invitedPeopleData, JSON_UNESCAPED_UNICODE);
+            
+            // user_id может быть указан, если человек уже есть в системе, иначе NULL
+            $invitedUserId = isset($input['user_id']) && is_numeric($input['user_id']) 
+                ? (int)$input['user_id'] 
+                : null;
+            
+            // Добавляем приглашенного человека
+            // Проверяем, что invited_people не пустой (должен содержать хотя бы name)
+            if (empty($invitedPeopleJson) || $invitedPeopleJson === '[]' || $invitedPeopleJson === '{}') {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'invited_people data is empty',
+                    'data' => null
+                ], 400);
+                return;
+            }
+            
+            $connection->executeStatement(
+                "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project, invited_people) VALUES (?, ?, ?, 'invited', ?)",
+                [$projectId, $taskId, $invitedUserId, $invitedPeopleJson]
+            );
+            
+            $teamMemberId = $connection->lastInsertId();
+            
+            // Получаем созданную запись
+            if (!$teamMemberId || $teamMemberId === 0) {
+                throw new \Exception("Failed to get inserted team member ID");
+            }
+            
+            $result = $connection->executeQuery(
+                "SELECT id, project_id, task_id, user_id, role_in_project, assigned_at, invited_people FROM fw_prj_team_members WHERE id = ?",
+                [$teamMemberId]
+            );
+            $member = $result->fetchAssociative();
+            
+            if (!$member) {
+                throw new \Exception("Failed to retrieve created team member with ID: {$teamMemberId}");
+            }
+            
+            $formattedMember = [
+                'id' => (int)$member['id'],
+                'project_id' => (int)$member['project_id'],
+                'task_id' => (int)$member['task_id'],
+                'user_id' => $member['user_id'] ? (int)$member['user_id'] : null,
+                'role_in_project' => $member['role_in_project'],
+                'assigned_at' => $member['assigned_at'],
+                'invited_people' => $member['invited_people'] ? json_decode($member['invited_people'], true) : null
+            ];
+            
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'data' => [
+                    'team_member' => $formattedMember
+                ]
+            ], 201);
+            
+        } catch (\Exception $e) {
+            $this->logger->error('Error adding invited person', [
+                'project_id' => $projectId,
+                'task_id' => $taskId,
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'input' => $input ?? null
+            ]);
+            
+            $errorMessage = 'Failed to add invited person';
+            $debugInfo = null;
+            
+            // В режиме разработки добавляем детальную информацию об ошибке
+            if (isset($_ENV['APP_ENV']) && $_ENV['APP_ENV'] !== 'production') {
+                $debugInfo = [
+                    'error' => $e->getMessage(),
+                    'file' => $e->getFile(),
+                    'line' => $e->getLine()
+                ];
+            }
+            
+            $response = [
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => $errorMessage,
+                'data' => null
+            ];
+            
+            if ($debugInfo) {
+                $response['debug'] = $debugInfo;
+            }
+            
+            Flight::json($response, 500);
         }
     }
 }

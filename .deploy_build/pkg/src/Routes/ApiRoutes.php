@@ -904,6 +904,21 @@ class ApiRoutes
             }
         });
 
+        Flight::route('GET /api/v1/tasks/@task_id/available-workers', function($task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getAvailableWorkers((int)$task_id);
+            }
+        });
+
+        // Task team members (including invited people)
+        Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/team', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getTaskTeam((int)$project_id, (int)$task_id);
+            }
+        });
+
         // Plans (folders/files)
         Flight::route('GET /api/v1/plan/folders/tree', function() use ($authMiddleware) {
             if ($authMiddleware->handle()) {

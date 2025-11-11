@@ -131,6 +131,7 @@ class ProjectTeamController
                     -- Fields from fw_prj_team_members
                     tm.id as team_member_id,
                     tm.project_id,
+                    tm.task_id,
                     tm.role_in_project as role,
                     tm.assigned_at as added_at,
                     
@@ -388,6 +389,7 @@ class ProjectTeamController
      *         required=true,
      *         @OA\JsonContent(
      *             @OA\Property(property="user_id", type="integer", example=47),
+     *             @OA\Property(property="task_id", type="integer", example=61, description="Task ID - required, all team members must be assigned to a task"),
      *             @OA\Property(property="role", type="string", example="member")
      *         )
      *     ),
@@ -455,16 +457,32 @@ class ProjectTeamController
             // Note: Administrators and Project Managers are filtered from available users list,
             // but can be added directly if user_id is known (no restriction here)
 
-            // Check if user is already in team
-            $existingSql = "SELECT id FROM fw_prj_team_members WHERE project_id = ? AND user_id = ?";
-            $existingResult = $connection->executeQuery($existingSql, [$projectId, $input['user_id']]);
+            // Все пользователи должны быть прикреплены к задачам - task_id обязателен
+            if (!isset($input['task_id']) || !is_numeric($input['task_id'])) {
+                return $this->errorResponse('task_id is required. All team members must be assigned to a task', 400);
+            }
+            
+            $taskId = (int)$input['task_id'];
+            
+            // Проверяем, что задача существует и принадлежит проекту
+            $taskCheck = $connection->executeQuery(
+                "SELECT id FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
+                [$taskId, $projectId]
+            );
+            if (!$taskCheck->fetchOne()) {
+                return $this->errorResponse('Task not found or does not belong to this project', 404);
+            }
+            
+            // Проверяем, не назначен ли уже пользователь на эту задачу
+            $existingSql = "SELECT id FROM fw_prj_team_members WHERE project_id = ? AND user_id = ? AND task_id = ?";
+            $existingResult = $connection->executeQuery($existingSql, [$projectId, $input['user_id'], $taskId]);
             if ($existingResult->fetchOne()) {
-                return $this->errorResponse('User already in team', 409);
+                return $this->errorResponse('User already assigned to this task', 409);
             }
 
-            // Add team member
-            $insertSql = "INSERT INTO fw_prj_team_members (project_id, user_id, role_in_project) VALUES (?, ?, ?)";
-            $connection->executeStatement($insertSql, [$projectId, $input['user_id'], $input['role']]);
+            // Добавляем пользователя к задаче (все пользователи должны быть прикреплены к задачам)
+            $insertSql = "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project) VALUES (?, ?, ?, ?)";
+            $connection->executeStatement($insertSql, [$projectId, $taskId, $input['user_id'], $input['role'] ?? null]);
 
             $teamMemberId = $connection->lastInsertId();
 
@@ -830,6 +848,8 @@ class ProjectTeamController
     {
         return isset($data['user_id']) && 
                is_numeric($data['user_id']) && 
+               isset($data['task_id']) && 
+               is_numeric($data['task_id']) &&
                isset($data['role']) && 
                !empty($data['role']);
     }
@@ -840,6 +860,7 @@ class ProjectTeamController
             // Team member specific fields
             'team_member_id' => (int) $member['team_member_id'],
             'project_id' => (int) $member['project_id'],
+            'task_id' => isset($member['task_id']) && $member['task_id'] !== null ? (int) $member['task_id'] : null,
             'project_role' => $member['role'],
             'added_at' => $member['added_at'],
             

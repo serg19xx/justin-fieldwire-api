@@ -292,8 +292,83 @@ class ProfileController
                 return;
             }
 
+            // Get current user data before update for logging
+            $currentUserData = $this->getUserById($user['id']);
+            $beforeData = [];
+            if ($currentUserData) {
+                $beforeData = [
+                    'first_name' => $currentUserData['first_name'] ?? null,
+                    'last_name' => $currentUserData['last_name'] ?? null,
+                    'phone' => $currentUserData['phone'] ?? null,
+                    'dob' => $currentUserData['dob'] ?? null,
+                    'gender' => $currentUserData['gender'] ?? null,
+                    'nationality' => $currentUserData['nationality'] ?? null,
+                    'country_of_origin' => $currentUserData['country_of_origin'] ?? null,
+                    'workforce_group' => $currentUserData['workforce_group'] ?? null,
+                    'city' => $currentUserData['city'] ?? null,
+                    'job_title' => $currentUserData['job_title'] ?? null
+                ];
+            }
+
             // Update user profile
             $updatedUser = $this->updateUserProfile($user['id'], $data);
+            
+            // Log profile update event
+            if (!empty($data)) {
+                try {
+                    $this->eventLoggingService->logSimple(
+                        entityType: 'user',
+                        entityId: $user['id'],
+                        eventType: 'USER_PROFILE_UPDATED',
+                        afterData: array_merge($beforeData, array_filter($data, function($value) {
+                            return $value !== null && $value !== '';
+                        })),
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $user['id'],
+                            'before_data' => $beforeData,
+                            'changed_fields' => array_keys($data),
+                            'comment' => 'User profile updated',
+                            'ip' => Flight::request()->ip,
+                            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                            'severity' => 'important'
+                        ]
+                    );
+                    
+                    // Check if profile became complete after this update
+                    $completenessCheck = $this->checkProfileCompleteness($user['id']);
+                    if ($completenessCheck['is_complete']) {
+                        // Check if profile was incomplete before by checking if any required fields were missing
+                        $wasIncomplete = empty($beforeData['first_name']) || 
+                                       empty($beforeData['last_name']) || 
+                                       empty($beforeData['phone']) || 
+                                       empty($beforeData['dob']) || 
+                                       empty($beforeData['gender']);
+                        
+                        if ($wasIncomplete) {
+                            $this->eventLoggingService->logSimple(
+                                entityType: 'user',
+                                entityId: $user['id'],
+                                eventType: 'USER_PROFILE_BECAME_COMPLETE',
+                                afterData: $completenessCheck,
+                                options: [
+                                    'actor_type' => 'user',
+                                    'actor_id' => $user['id'],
+                                    'comment' => 'User profile became complete and ready for activation',
+                                    'ip' => Flight::request()->ip,
+                                    'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                                    'severity' => 'important'
+                                ]
+                            );
+                        }
+                    }
+                } catch (\Exception $e) {
+                    $this->logger->warning('Failed to log USER_PROFILE_UPDATED event', [
+                        'error' => $e->getMessage(),
+                        'user_id' => $user['id']
+                    ]);
+                }
+            }
 
             // Synchronize languages if provided
             if ($languages !== null) {
@@ -1698,6 +1773,69 @@ class ProfileController
 
             $connection->executeStatement($sql, [$emergencyJson, $user['id']]);
 
+            // Log emergency contact update event
+            try {
+                $this->eventLoggingService->logSimple(
+                    entityType: 'user',
+                    entityId: $user['id'],
+                    eventType: 'USER_EMERGENCY_CONTACT_UPDATED',
+                    afterData: $mergedData,
+                    options: [
+                        'actor_type' => 'user',
+                        'actor_id' => $user['id'],
+                        'before_data' => $existingData,
+                        'changed_fields' => array_keys($filteredData),
+                        'comment' => 'User emergency contact and medical information updated',
+                        'ip' => Flight::request()->ip,
+                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                        'severity' => 'important'
+                    ]
+                );
+                
+                // Check if profile became complete after this update
+                $completenessCheck = $this->checkProfileCompleteness($user['id']);
+                if ($completenessCheck['is_complete']) {
+                    // Check if profile was incomplete before
+                    $beforeCompleteness = [];
+                    if (!empty($existingData)) {
+                        // Reconstruct previous emergency data to check completeness
+                        $tempEmergencyData = $existingData;
+                        $tempUserData = $this->getUserById($user['id']);
+                        if ($tempUserData) {
+                            $tempUserData['emergency'] = json_encode($tempEmergencyData);
+                            // Simple check: if key fields were missing before
+                            $wasIncomplete = empty($tempEmergencyData['primary_contact_name']) || 
+                                           empty($tempEmergencyData['primary_contact_phone']) ||
+                                           empty($tempEmergencyData['blood_type']) ||
+                                           empty($tempEmergencyData['insurance_company']) ||
+                                           empty($tempEmergencyData['policy_number']);
+                            
+                            if ($wasIncomplete) {
+                                $this->eventLoggingService->logSimple(
+                                    entityType: 'user',
+                                    entityId: $user['id'],
+                                    eventType: 'USER_PROFILE_BECAME_COMPLETE',
+                                    afterData: $completenessCheck,
+                                    options: [
+                                        'actor_type' => 'user',
+                                        'actor_id' => $user['id'],
+                                        'comment' => 'User profile became complete and ready for activation',
+                                        'ip' => Flight::request()->ip,
+                                        'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                                        'severity' => 'important'
+                                    ]
+                                );
+                            }
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log USER_EMERGENCY_CONTACT_UPDATED event', [
+                    'error' => $e->getMessage(),
+                    'user_id' => $user['id']
+                ]);
+            }
+
             // Return updated data
             $this->getEmergencyContact();
 
@@ -2347,30 +2485,42 @@ class ProfileController
                 $connection->executeStatement($sql, [$userId]);
                 
                 // Log activation event
-                $this->eventLoggingService->logEvent(
-                    entityType: 'user',
-                    entityId: $userId,
-                    eventType: 'USER_STATUS_CHANGED',
-                    beforeData: [
-                        'status' => $oldStatus,
-                        'status_reason' => $currentUser['status_reason'] ?? null,
-                        'status_details' => $currentUser['status_details'] ?? null,
-                        'status_end_at' => $currentUser['status_end_at'] ?? null
-                    ],
-                    afterData: [
-                        'status' => true,
-                        'status_reason' => null,
-                        'status_details' => null,
-                        'status_end_at' => null
-                    ],
-                    changedFields: ['status', 'status_reason', 'status_details', 'status_end_at', 'status_changed_at'],
-                    options: [
-                        'actor_type' => 'user',
-                        'actor_id' => $userId,
-                        'comment' => 'User activated - profile complete',
-                        'severity' => 'important'
-                    ]
-                );
+                // Using logSimple for USER_ACTIVATED - always writes to fw_event_log
+                // USER_STATUS_CHANGED is too generic - use specific USER_ACTIVATED instead
+                try {
+                    $this->eventLoggingService->logSimple(
+                        entityType: 'user',
+                        entityId: $userId,
+                        eventType: 'USER_ACTIVATED',
+                        afterData: [
+                            'status' => true,
+                            'profile_complete' => true,
+                            'activated_at' => date('c'),
+                            'previous_status' => $oldStatus,
+                            'previous_status_reason' => $currentUser['status_reason'] ?? null
+                        ],
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $userId,
+                            'before_data' => [
+                                'status' => $oldStatus,
+                                'status_reason' => $currentUser['status_reason'] ?? null,
+                                'status_details' => $currentUser['status_details'] ?? null,
+                                'status_end_at' => $currentUser['status_end_at'] ?? null
+                            ],
+                            'changed_fields' => ['status', 'status_reason', 'status_details', 'status_end_at', 'status_changed_at'],
+                            'comment' => 'User activated - all required profile data completed',
+                            'ip' => Flight::request()->ip ?? null,
+                            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                            'severity' => 'important'
+                        ]
+                    );
+                } catch (\Exception $e) {
+                    $this->logger->warning('Failed to log USER_ACTIVATED event', [
+                        'error' => $e->getMessage(),
+                        'user_id' => $userId
+                    ]);
+                }
             } else {
                 // If user is inactive, set reasons
                 $sql = "UPDATE fw_users SET 
@@ -2384,37 +2534,49 @@ class ProfileController
                 $connection->executeStatement($sql, [$inactiveReason, $inactiveReasonDetails, $status_end_at, $userId]);
                 
                 // Log deactivation event
+                // Using logSimple for USER_DEACTIVATED - always writes to fw_event_log
+                // USER_STATUS_CHANGED is too generic - use specific USER_DEACTIVATED instead
                 $isTemporary = !empty($status_end_at);
                 $comment = $isTemporary 
                     ? "User temporarily deactivated until {$status_end_at}. Reason: {$inactiveReason}" 
                     : "User deactivated. Reason: {$inactiveReason}";
                 
-                $this->eventLoggingService->logEvent(
-                    entityType: 'user',
-                    entityId: $userId,
-                    eventType: 'USER_STATUS_CHANGED',
-                    beforeData: [
-                        'status' => $oldStatus,
-                        'status_reason' => $currentUser['status_reason'] ?? null,
-                        'status_details' => $currentUser['status_details'] ?? null,
-                        'status_end_at' => $currentUser['status_end_at'] ?? null
-                    ],
-                    afterData: [
-                        'status' => false,
-                        'status_reason' => $inactiveReason,
-                        'status_details' => $inactiveReasonDetails,
-                        'status_end_at' => $status_end_at
-                    ],
-                    changedFields: ['status', 'status_reason', 'status_details', 'status_end_at', 'status_changed_at'],
-                    options: [
-                        'actor_type' => 'user',
-                        'actor_id' => $userId,
-                        'comment' => $comment,
-                        'severity' => 'important',
-                        'is_temporary' => $isTemporary,
-                        'deactivation_end_at' => $status_end_at
-                    ]
-                );
+                try {
+                    $this->eventLoggingService->logSimple(
+                        entityType: 'user',
+                        entityId: $userId,
+                        eventType: 'USER_DEACTIVATED',
+                        afterData: [
+                            'status' => false,
+                            'status_reason' => $inactiveReason,
+                            'status_details' => $inactiveReasonDetails,
+                            'status_end_at' => $status_end_at,
+                            'is_temporary' => $isTemporary,
+                            'deactivated_at' => date('c'),
+                            'previous_status' => $oldStatus
+                        ],
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $userId,
+                            'before_data' => [
+                                'status' => $oldStatus,
+                                'status_reason' => $currentUser['status_reason'] ?? null,
+                                'status_details' => $currentUser['status_details'] ?? null,
+                                'status_end_at' => $currentUser['status_end_at'] ?? null
+                            ],
+                            'changed_fields' => ['status', 'status_reason', 'status_details', 'status_end_at', 'status_changed_at'],
+                            'comment' => $comment,
+                            'ip' => Flight::request()->ip ?? null,
+                            'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                            'severity' => 'important'
+                        ]
+                    );
+                } catch (\Exception $e) {
+                    $this->logger->warning('Failed to log USER_DEACTIVATED event', [
+                        'error' => $e->getMessage(),
+                        'user_id' => $userId
+                    ]);
+                }
             }
             
             return true;
