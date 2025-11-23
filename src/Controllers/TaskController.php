@@ -90,6 +90,8 @@ class TaskController
      *                     @OA\Property(property="name", type="string", example="Design Phase"),
      *                     @OA\Property(property="start_planned", type="string", format="date", example="2025-01-01"),
      *                     @OA\Property(property="end_planned", type="string", format="date", example="2025-01-15"),
+     *                     @OA\Property(property="start_time", type="string", format="time", example="08:00:00", nullable=true, description="Planned start time"),
+     *                     @OA\Property(property="end_time", type="string", format="time", example="17:00:00", nullable=true, description="Planned end time"),
      *                     @OA\Property(property="milestone", type="boolean", example=false),
      *                     @OA\Property(property="status", type="string", example="planned"),
      *                     @OA\Property(property="progress_pct", type="integer", example=0),
@@ -158,7 +160,7 @@ class TaskController
             }
 
             // Базовый SQL запрос - task_lead_id и team_members теперь в fw_prj_team_members
-            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE project_id = ?";
+            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE project_id = ?";
             $params = [$projectId];
 
             // Фильтр по статусу
@@ -305,6 +307,8 @@ class TaskController
                     'name' => $task['name'],
                     'start_planned' => $task['start_planned'],
                     'end_planned' => $task['end_planned'],
+                    'start_time' => $task['start_time'] ?? null,
+                    'end_time' => $task['end_time'] ?? null,
                     'milestone' => $task['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
                     'status' => $task['status'],
                     'progress_pct' => (int)$task['progress_pct'],
@@ -427,7 +431,7 @@ class TaskController
         try {
             $connection = $this->database->getConnection();
             
-            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ? AND project_id = ?";
+            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ? AND project_id = ?";
             $result = $connection->executeQuery($sql, [$taskId, $projectId]);
             $task = $result->fetchAssociative();
 
@@ -557,6 +561,8 @@ class TaskController
                 'name' => $task['name'],
                 'start_planned' => $task['start_planned'],
                 'end_planned' => $task['end_planned'],
+                'start_time' => $task['start_time'] ?? null,
+                'end_time' => $task['end_time'] ?? null,
                 'milestone' => $task['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
                 'status' => $task['status'],
                 'progress_pct' => (int)$task['progress_pct'],
@@ -624,6 +630,8 @@ class TaskController
      *             @OA\Property(property="name", type="string", example="Foundation Work", description="Task name (required)"),
      *             @OA\Property(property="start_planned", type="string", format="date", example="2025-09-10", description="Planned start date (required)"),
      *             @OA\Property(property="end_planned", type="string", format="date", example="2025-09-12", description="Planned end date"),
+     *             @OA\Property(property="start_time", type="string", format="time", example="08:00:00", description="Planned start time (default: 08:00:00)"),
+     *             @OA\Property(property="end_time", type="string", format="time", example="17:00:00", description="Planned end time (default: 17:00:00)"),
      *             @OA\Property(property="milestone", type="boolean", example=false, description="Is this a milestone task"),
      *             @OA\Property(property="status", type="string", enum={"planned", "in_progress", "done", "blocked", "delayed"}, example="planned", description="Task status"),
      *             @OA\Property(property="progress_pct", type="integer", minimum=0, maximum=100, example=0, description="Progress percentage"),
@@ -719,9 +727,9 @@ class TaskController
             );
             $nextOrder = (int)$nextOrderResult->fetchOne();
             
-            $sql = "INSERT INTO fw_prj_tasks (task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-            // 15 параметров: task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days
+            $sql = "INSERT INTO fw_prj_tasks (task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            // 17 параметров: task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days
             
             // Обработка wbs_path - всегда сохраняем как JSON строку или NULL
             $wbsPath = null;
@@ -760,6 +768,8 @@ class TaskController
                 $data['name'],
                 $data['start_planned'],
                 $data['end_planned'] ?? null,
+                $data['start_time'] ?? '08:00:00',
+                $data['end_time'] ?? '17:00:00',
                 $data['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
                 $data['status'] ?? 'planned',
                 $data['progress_pct'] ?? 0,
@@ -919,7 +929,7 @@ class TaskController
 
             // Получаем созданную задачу
             $result = $connection->executeQuery(
-                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
+                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
                 [$taskId]
             );
             $task = $result->fetchAssociative();
@@ -994,6 +1004,8 @@ class TaskController
                         'milestone' => $task['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
                         'start_planned' => $task['start_planned'],
                         'end_planned' => $task['end_planned'],
+                        'start_time' => $task['start_time'] ?? null,
+                        'end_time' => $task['end_time'] ?? null,
                         'task_lead_id' => $task['task_lead_id'] ? (int)$task['task_lead_id'] : null,
                         'created_at' => $task['created_at']
                     ],
@@ -1093,6 +1105,8 @@ class TaskController
      *             @OA\Property(property="name", type="string", example="Updated Foundation Work", description="Task name"),
      *             @OA\Property(property="start_planned", type="string", format="date", example="2025-09-11", description="Planned start date"),
      *             @OA\Property(property="end_planned", type="string", format="date", example="2025-09-13", description="Planned end date"),
+     *             @OA\Property(property="start_time", type="string", format="time", example="08:00:00", description="Planned start time"),
+     *             @OA\Property(property="end_time", type="string", format="time", example="17:00:00", description="Planned end time"),
      *             @OA\Property(property="milestone", type="boolean", example=false, description="Is this a milestone task"),
      *             @OA\Property(property="status", type="string", enum={"planned", "in_progress", "done", "blocked", "delayed"}, example="in_progress", description="Task status"),
      *             @OA\Property(property="progress_pct", type="integer", minimum=0, maximum=100, example=50, description="Progress percentage"),
@@ -1182,7 +1196,7 @@ class TaskController
 
             // Получаем текущие данные задачи перед обновлением для логирования
             $beforeResult = $connection->executeQuery(
-                "SELECT id, project_id, name, status, start_planned, end_planned, milestone, progress_pct, actual_start, actual_end
+                "SELECT id, project_id, name, status, start_planned, end_planned, start_time, end_time, milestone, progress_pct, actual_start, actual_end
                  FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
                 [$taskId, $projectId]
             );
@@ -1249,6 +1263,14 @@ class TaskController
             if (isset($data['end_planned'])) {
                 $updateFields[] = "end_planned = ?";
                 $params[] = $data['end_planned'];
+            }
+            if (isset($data['start_time'])) {
+                $updateFields[] = "start_time = ?";
+                $params[] = $data['start_time'];
+            }
+            if (isset($data['end_time'])) {
+                $updateFields[] = "end_time = ?";
+                $params[] = $data['end_time'];
             }
             if (isset($data['milestone'])) {
                 $updateFields[] = "milestone = ?";
@@ -1585,7 +1607,7 @@ class TaskController
 
             // Получаем обновленную задачу
             $result = $connection->executeQuery(
-                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
+                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
                 [$taskId]
             );
             $task = $result->fetchAssociative();
@@ -1669,6 +1691,8 @@ class TaskController
                             'milestone' => $beforeData['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
                             'start_planned' => $beforeData['start_planned'],
                             'end_planned' => $beforeData['end_planned'],
+                            'start_time' => $beforeData['start_time'] ?? null,
+                            'end_time' => $beforeData['end_time'] ?? null,
                             'progress_pct' => (int)$beforeData['progress_pct'],
                             'task_lead_id' => $beforeData['task_lead_id'] ? (int)$beforeData['task_lead_id'] : null
                         ],
@@ -1706,9 +1730,27 @@ class TaskController
                     );
                 }
 
-                // Если изменилось расписание (start_planned или end_planned), логируем событие
-                if ((isset($data['start_planned']) && $beforeData['start_planned'] !== $task['start_planned']) ||
-                    (isset($data['end_planned']) && $beforeData['end_planned'] !== $task['end_planned'])) {
+                // Если изменилось расписание (start_planned, end_planned, start_time или end_time), логируем событие
+                $scheduleChanged = (isset($data['start_planned']) && $beforeData['start_planned'] !== $task['start_planned']) ||
+                    (isset($data['end_planned']) && $beforeData['end_planned'] !== $task['end_planned']) ||
+                    (isset($data['start_time']) && ($beforeData['start_time'] ?? null) !== ($task['start_time'] ?? null)) ||
+                    (isset($data['end_time']) && ($beforeData['end_time'] ?? null) !== ($task['end_time'] ?? null));
+                
+                if ($scheduleChanged) {
+                    $changedFields = [];
+                    if (isset($data['start_planned']) && $beforeData['start_planned'] !== $task['start_planned']) {
+                        $changedFields[] = 'start_planned';
+                    }
+                    if (isset($data['end_planned']) && $beforeData['end_planned'] !== $task['end_planned']) {
+                        $changedFields[] = 'end_planned';
+                    }
+                    if (isset($data['start_time']) && ($beforeData['start_time'] ?? null) !== ($task['start_time'] ?? null)) {
+                        $changedFields[] = 'start_time';
+                    }
+                    if (isset($data['end_time']) && ($beforeData['end_time'] ?? null) !== ($task['end_time'] ?? null)) {
+                        $changedFields[] = 'end_time';
+                    }
+                    
                     $this->eventLoggingService->logSimple(
                         entityType: 'task',
                         entityId: $taskId,
@@ -1716,8 +1758,12 @@ class TaskController
                         afterData: [
                             'start_planned' => $task['start_planned'],
                             'end_planned' => $task['end_planned'],
+                            'start_time' => $task['start_time'] ?? null,
+                            'end_time' => $task['end_time'] ?? null,
                             'previous_start_planned' => $beforeData['start_planned'],
                             'previous_end_planned' => $beforeData['end_planned'],
+                            'previous_start_time' => $beforeData['start_time'] ?? null,
+                            'previous_end_time' => $beforeData['end_time'] ?? null,
                             'task_id' => $taskId,
                             'task_name' => $task['name'],
                             'project_id' => (int)$task['project_id']
@@ -1727,11 +1773,11 @@ class TaskController
                             'actor_id' => $actorId,
                             'before_data' => [
                                 'start_planned' => $beforeData['start_planned'],
-                                'end_planned' => $beforeData['end_planned']
+                                'end_planned' => $beforeData['end_planned'],
+                                'start_time' => $beforeData['start_time'] ?? null,
+                                'end_time' => $beforeData['end_time'] ?? null
                             ],
-                            'changed_fields' => isset($data['start_planned']) && isset($data['end_planned']) 
-                                ? ['start_planned', 'end_planned']
-                                : (isset($data['start_planned']) ? ['start_planned'] : ['end_planned']),
+                            'changed_fields' => $changedFields,
                             'comment' => "Task schedule updated",
                             'ip' => Flight::request()->ip ?? null,
                             'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
@@ -2444,6 +2490,8 @@ class TaskController
             'name' => $task['name'],
             'start_planned' => $task['start_planned'],
             'end_planned' => $task['end_planned'],
+            'start_time' => $task['start_time'] ?? null,
+            'end_time' => $task['end_time'] ?? null,
             'milestone' => $task['milestone'] ?? null, // ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL
             'status' => $task['status'],
             'progress_pct' => (int)$task['progress_pct'],
