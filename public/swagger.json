@@ -5823,6 +5823,48 @@
                                                                 "type": "string",
                                                                 "example": "Active"
                                                             },
+                                                            "purchase_or_lease": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "Purchase",
+                                                                    "Lease"
+                                                                ],
+                                                                "example": "Purchase"
+                                                            },
+                                                            "notes": {
+                                                                "type": "string",
+                                                                "example": "Additional project notes",
+                                                                "nullable": true
+                                                            },
+                                                            "client_id": {
+                                                                "type": "integer",
+                                                                "example": 1,
+                                                                "nullable": true
+                                                            },
+                                                            "client_type": {
+                                                                "type": "string",
+                                                                "example": "pharmacy",
+                                                                "nullable": true
+                                                            },
+                                                            "client_table": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "pharma",
+                                                                    "physician",
+                                                                    "pharmacist",
+                                                                    "medical_clinic"
+                                                                ],
+                                                                "example": "pharma",
+                                                                "nullable": true
+                                                            },
+                                                            "client_data": {
+                                                                "type": "object",
+                                                                "example": {
+                                                                    "name": "Pharmacy Name",
+                                                                    "address": "123 Main St"
+                                                                },
+                                                                "nullable": true
+                                                            },
                                                             "prj_manager": {
                                                                 "type": "integer",
                                                                 "example": 1,
@@ -5961,6 +6003,48 @@
                                         "type": "string",
                                         "example": "Active"
                                     },
+                                    "purchase_or_lease": {
+                                        "type": "string",
+                                        "enum": [
+                                            "Purchase",
+                                            "Lease"
+                                        ],
+                                        "example": "Purchase"
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Additional project notes",
+                                        "nullable": true
+                                    },
+                                    "client_id": {
+                                        "type": "integer",
+                                        "example": 1,
+                                        "nullable": true
+                                    },
+                                    "client_type": {
+                                        "type": "string",
+                                        "example": "pharmacy",
+                                        "nullable": true
+                                    },
+                                    "client_table": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pharma",
+                                            "physician",
+                                            "pharmacist",
+                                            "medical_clinic"
+                                        ],
+                                        "example": "pharma",
+                                        "nullable": true
+                                    },
+                                    "client_data": {
+                                        "type": "object",
+                                        "example": {
+                                            "name": "Pharmacy Name",
+                                            "address": "123 Main St"
+                                        },
+                                        "nullable": true
+                                    },
                                     "prj_manager": {
                                         "type": "integer",
                                         "example": 1
@@ -6027,6 +6111,48 @@
                                                         "status": {
                                                             "type": "string",
                                                             "example": "Active"
+                                                        },
+                                                        "purchase_or_lease": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "Purchase",
+                                                                "Lease"
+                                                            ],
+                                                            "example": "Purchase"
+                                                        },
+                                                        "notes": {
+                                                            "type": "string",
+                                                            "example": "Additional project notes",
+                                                            "nullable": true
+                                                        },
+                                                        "client_id": {
+                                                            "type": "integer",
+                                                            "example": 1,
+                                                            "nullable": true
+                                                        },
+                                                        "client_type": {
+                                                            "type": "string",
+                                                            "example": "pharmacy",
+                                                            "nullable": true
+                                                        },
+                                                        "client_table": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "pharma",
+                                                                "physician",
+                                                                "pharmacist",
+                                                                "medical_clinic"
+                                                            ],
+                                                            "example": "pharma",
+                                                            "nullable": true
+                                                        },
+                                                        "client_data": {
+                                                            "type": "object",
+                                                            "example": {
+                                                                "name": "Pharmacy Name",
+                                                                "address": "123 Main St"
+                                                            },
+                                                            "nullable": true
                                                         },
                                                         "prj_manager": {
                                                             "type": "integer",
@@ -6170,6 +6296,48 @@
                                                             "type": "string",
                                                             "example": "Active"
                                                         },
+                                                        "purchase_or_lease": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "Purchase",
+                                                                "Lease"
+                                                            ],
+                                                            "example": "Purchase"
+                                                        },
+                                                        "notes": {
+                                                            "type": "string",
+                                                            "example": "Additional project notes",
+                                                            "nullable": true
+                                                        },
+                                                        "client_id": {
+                                                            "type": "integer",
+                                                            "example": 1,
+                                                            "nullable": true
+                                                        },
+                                                        "client_type": {
+                                                            "type": "string",
+                                                            "example": "pharmacy",
+                                                            "nullable": true
+                                                        },
+                                                        "client_table": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "pharma",
+                                                                "physician",
+                                                                "pharmacist",
+                                                                "medical_clinic"
+                                                            ],
+                                                            "example": "pharma",
+                                                            "nullable": true
+                                                        },
+                                                        "client_data": {
+                                                            "type": "object",
+                                                            "example": {
+                                                                "name": "Pharmacy Name",
+                                                                "address": "123 Main St"
+                                                            },
+                                                            "nullable": true
+                                                        },
                                                         "prj_manager": {
                                                             "type": "integer",
                                                             "example": 1,
@@ -6293,6 +6461,48 @@
                                     "status": {
                                         "type": "string",
                                         "example": "Active"
+                                    },
+                                    "purchase_or_lease": {
+                                        "type": "string",
+                                        "enum": [
+                                            "Purchase",
+                                            "Lease"
+                                        ],
+                                        "example": "Purchase"
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Additional project notes",
+                                        "nullable": true
+                                    },
+                                    "client_id": {
+                                        "type": "integer",
+                                        "example": 1,
+                                        "nullable": true
+                                    },
+                                    "client_type": {
+                                        "type": "string",
+                                        "example": "pharmacy",
+                                        "nullable": true
+                                    },
+                                    "client_table": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pharma",
+                                            "physician",
+                                            "pharmacist",
+                                            "medical_clinic"
+                                        ],
+                                        "example": "pharma",
+                                        "nullable": true
+                                    },
+                                    "client_data": {
+                                        "type": "object",
+                                        "example": {
+                                            "name": "Pharmacy Name",
+                                            "address": "123 Main St"
+                                        },
+                                        "nullable": true
                                     },
                                     "prj_manager": {
                                         "type": "integer",

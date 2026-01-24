@@ -2823,7 +2823,7 @@
                     {
                         "name": "event_type",
                         "in": "query",
-                        "description": "Filter by event type",
+                        "description": "Deprecated. No longer supported.",
                         "required": false,
                         "schema": {
                             "type": "string"
@@ -3298,7 +3298,7 @@
                 "tags": [
                     "Message Templates"
                 ],
-                "summary": "Get templates by event type",
+                "summary": "Deprecated: Get templates by event type",
                 "description": "\u041f\u043e\u043b\u0443\u0447\u0438\u0442\u044c \u0448\u0430\u0431\u043b\u043e\u043d\u044b \u043f\u043e \u0442\u0438\u043f\u0443 \u0441\u043e\u0431\u044b\u0442\u0438\u044f",
                 "operationId": "65288e4e6cd599dea08c4825d7fb2543",
                 "parameters": [
@@ -5331,6 +5331,152 @@
                 ]
             }
         },
+        "/api/v1/profile/activation-status": {
+            "get": {
+                "tags": [
+                    "Profile"
+                ],
+                "summary": "Check profile activation readiness",
+                "description": "Check if user profile has all required data for activation (personal data, medical, insurance, emergency contacts)",
+                "operationId": "db56cfa4021f6ba444c0804dedb92f4f",
+                "responses": {
+                    "200": {
+                        "description": "Profile activation status retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 0
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Profile activation status retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "is_complete": {
+                                                    "type": "boolean",
+                                                    "example": false
+                                                },
+                                                "missing_fields": {
+                                                    "properties": {
+                                                        "personal": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "string"
+                                                            },
+                                                            "example": [
+                                                                "dob",
+                                                                "gender"
+                                                            ]
+                                                        },
+                                                        "medical": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "string"
+                                                            },
+                                                            "example": [
+                                                                "blood_type"
+                                                            ]
+                                                        },
+                                                        "insurance": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "string"
+                                                            },
+                                                            "example": [
+                                                                "insurance_company",
+                                                                "policy_number"
+                                                            ]
+                                                        },
+                                                        "emergency": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "string"
+                                                            },
+                                                            "example": [
+                                                                "primary_contact_name",
+                                                                "primary_contact_phone"
+                                                            ]
+                                                        }
+                                                    },
+                                                    "type": "object"
+                                                },
+                                                "message": {
+                                                    "type": "string",
+                                                    "example": "Profile is incomplete. Please fill all required fields."
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "401": {
+                        "description": "Unauthorized",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 401
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Unauthorized"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "error_code": {
+                                            "type": "integer",
+                                            "example": 500
+                                        },
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Failed to check profile activation status"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/profile/professional": {
             "get": {
                 "tags": [
@@ -5677,6 +5823,48 @@
                                                                 "type": "string",
                                                                 "example": "Active"
                                                             },
+                                                            "purchase_or_lease": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "Purchase",
+                                                                    "Lease"
+                                                                ],
+                                                                "example": "Purchase"
+                                                            },
+                                                            "notes": {
+                                                                "type": "string",
+                                                                "example": "Additional project notes",
+                                                                "nullable": true
+                                                            },
+                                                            "client_id": {
+                                                                "type": "integer",
+                                                                "example": 1,
+                                                                "nullable": true
+                                                            },
+                                                            "client_type": {
+                                                                "type": "string",
+                                                                "example": "pharmacy",
+                                                                "nullable": true
+                                                            },
+                                                            "client_table": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "pharma",
+                                                                    "physician",
+                                                                    "pharmacist",
+                                                                    "medical_clinic"
+                                                                ],
+                                                                "example": "pharma",
+                                                                "nullable": true
+                                                            },
+                                                            "client_data": {
+                                                                "type": "object",
+                                                                "example": {
+                                                                    "name": "Pharmacy Name",
+                                                                    "address": "123 Main St"
+                                                                },
+                                                                "nullable": true
+                                                            },
                                                             "prj_manager": {
                                                                 "type": "integer",
                                                                 "example": 1,
@@ -5815,6 +6003,48 @@
                                         "type": "string",
                                         "example": "Active"
                                     },
+                                    "purchase_or_lease": {
+                                        "type": "string",
+                                        "enum": [
+                                            "Purchase",
+                                            "Lease"
+                                        ],
+                                        "example": "Purchase"
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Additional project notes",
+                                        "nullable": true
+                                    },
+                                    "client_id": {
+                                        "type": "integer",
+                                        "example": 1,
+                                        "nullable": true
+                                    },
+                                    "client_type": {
+                                        "type": "string",
+                                        "example": "pharmacy",
+                                        "nullable": true
+                                    },
+                                    "client_table": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pharma",
+                                            "physician",
+                                            "pharmacist",
+                                            "medical_clinic"
+                                        ],
+                                        "example": "pharma",
+                                        "nullable": true
+                                    },
+                                    "client_data": {
+                                        "type": "object",
+                                        "example": {
+                                            "name": "Pharmacy Name",
+                                            "address": "123 Main St"
+                                        },
+                                        "nullable": true
+                                    },
                                     "prj_manager": {
                                         "type": "integer",
                                         "example": 1
@@ -5881,6 +6111,48 @@
                                                         "status": {
                                                             "type": "string",
                                                             "example": "Active"
+                                                        },
+                                                        "purchase_or_lease": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "Purchase",
+                                                                "Lease"
+                                                            ],
+                                                            "example": "Purchase"
+                                                        },
+                                                        "notes": {
+                                                            "type": "string",
+                                                            "example": "Additional project notes",
+                                                            "nullable": true
+                                                        },
+                                                        "client_id": {
+                                                            "type": "integer",
+                                                            "example": 1,
+                                                            "nullable": true
+                                                        },
+                                                        "client_type": {
+                                                            "type": "string",
+                                                            "example": "pharmacy",
+                                                            "nullable": true
+                                                        },
+                                                        "client_table": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "pharma",
+                                                                "physician",
+                                                                "pharmacist",
+                                                                "medical_clinic"
+                                                            ],
+                                                            "example": "pharma",
+                                                            "nullable": true
+                                                        },
+                                                        "client_data": {
+                                                            "type": "object",
+                                                            "example": {
+                                                                "name": "Pharmacy Name",
+                                                                "address": "123 Main St"
+                                                            },
+                                                            "nullable": true
                                                         },
                                                         "prj_manager": {
                                                             "type": "integer",
@@ -6024,6 +6296,48 @@
                                                             "type": "string",
                                                             "example": "Active"
                                                         },
+                                                        "purchase_or_lease": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "Purchase",
+                                                                "Lease"
+                                                            ],
+                                                            "example": "Purchase"
+                                                        },
+                                                        "notes": {
+                                                            "type": "string",
+                                                            "example": "Additional project notes",
+                                                            "nullable": true
+                                                        },
+                                                        "client_id": {
+                                                            "type": "integer",
+                                                            "example": 1,
+                                                            "nullable": true
+                                                        },
+                                                        "client_type": {
+                                                            "type": "string",
+                                                            "example": "pharmacy",
+                                                            "nullable": true
+                                                        },
+                                                        "client_table": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "pharma",
+                                                                "physician",
+                                                                "pharmacist",
+                                                                "medical_clinic"
+                                                            ],
+                                                            "example": "pharma",
+                                                            "nullable": true
+                                                        },
+                                                        "client_data": {
+                                                            "type": "object",
+                                                            "example": {
+                                                                "name": "Pharmacy Name",
+                                                                "address": "123 Main St"
+                                                            },
+                                                            "nullable": true
+                                                        },
                                                         "prj_manager": {
                                                             "type": "integer",
                                                             "example": 1,
@@ -6147,6 +6461,48 @@
                                     "status": {
                                         "type": "string",
                                         "example": "Active"
+                                    },
+                                    "purchase_or_lease": {
+                                        "type": "string",
+                                        "enum": [
+                                            "Purchase",
+                                            "Lease"
+                                        ],
+                                        "example": "Purchase"
+                                    },
+                                    "notes": {
+                                        "type": "string",
+                                        "example": "Additional project notes",
+                                        "nullable": true
+                                    },
+                                    "client_id": {
+                                        "type": "integer",
+                                        "example": 1,
+                                        "nullable": true
+                                    },
+                                    "client_type": {
+                                        "type": "string",
+                                        "example": "pharmacy",
+                                        "nullable": true
+                                    },
+                                    "client_table": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pharma",
+                                            "physician",
+                                            "pharmacist",
+                                            "medical_clinic"
+                                        ],
+                                        "example": "pharma",
+                                        "nullable": true
+                                    },
+                                    "client_data": {
+                                        "type": "object",
+                                        "example": {
+                                            "name": "Pharmacy Name",
+                                            "address": "123 Main St"
+                                        },
+                                        "nullable": true
                                     },
                                     "prj_manager": {
                                         "type": "integer",
@@ -6543,6 +6899,11 @@
                                     "user_id": {
                                         "type": "integer",
                                         "example": 47
+                                    },
+                                    "task_id": {
+                                        "description": "Task ID - required, all team members must be assigned to a task",
+                                        "type": "integer",
+                                        "example": 61
                                     },
                                     "role": {
                                         "type": "string",
@@ -7379,6 +7740,20 @@
                                                                 "format": "date",
                                                                 "example": "2025-01-15"
                                                             },
+                                                            "start_time": {
+                                                                "description": "Planned start time",
+                                                                "type": "string",
+                                                                "format": "time",
+                                                                "example": "08:00:00",
+                                                                "nullable": true
+                                                            },
+                                                            "end_time": {
+                                                                "description": "Planned end time",
+                                                                "type": "string",
+                                                                "format": "time",
+                                                                "example": "17:00:00",
+                                                                "nullable": true
+                                                            },
                                                             "milestone": {
                                                                 "type": "boolean",
                                                                 "example": false
@@ -7593,6 +7968,18 @@
                                         "type": "string",
                                         "format": "date",
                                         "example": "2025-09-12"
+                                    },
+                                    "start_time": {
+                                        "description": "Planned start time (default: 08:00:00)",
+                                        "type": "string",
+                                        "format": "time",
+                                        "example": "08:00:00"
+                                    },
+                                    "end_time": {
+                                        "description": "Planned end time (default: 17:00:00)",
+                                        "type": "string",
+                                        "format": "time",
+                                        "example": "17:00:00"
                                     },
                                     "milestone": {
                                         "description": "Is this a milestone task",
@@ -7967,6 +8354,18 @@
                                         "format": "date",
                                         "example": "2025-09-13"
                                     },
+                                    "start_time": {
+                                        "description": "Planned start time",
+                                        "type": "string",
+                                        "format": "time",
+                                        "example": "08:00:00"
+                                    },
+                                    "end_time": {
+                                        "description": "Planned end time",
+                                        "type": "string",
+                                        "format": "time",
+                                        "example": "17:00:00"
+                                    },
                                     "milestone": {
                                         "description": "Is this a milestone task",
                                         "type": "boolean",
@@ -8249,6 +8648,163 @@
                                         },
                                         "data": {
                                             "type": "null"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/tasks/{taskId}/available-workers": {
+            "get": {
+                "tags": [
+                    "Tasks"
+                ],
+                "summary": "Get available workers for task",
+                "description": "Get list of workers available for assignment to a task in the specified date range",
+                "operationId": "d3ee545c4965935fd76e06310ef38aa1",
+                "parameters": [
+                    {
+                        "name": "taskId",
+                        "in": "path",
+                        "description": "Task ID",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "start_date",
+                        "in": "query",
+                        "description": "Start date of task period (YYYY-MM-DD)",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "end_date",
+                        "in": "query",
+                        "description": "End date of task period (YYYY-MM-DD)",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Available workers retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "workers": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "user_id": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            },
+                                                            "first_name": {
+                                                                "type": "string",
+                                                                "example": "John"
+                                                            },
+                                                            "last_name": {
+                                                                "type": "string",
+                                                                "example": "Smith"
+                                                            },
+                                                            "full_name": {
+                                                                "type": "string",
+                                                                "example": "John Smith"
+                                                            },
+                                                            "email": {
+                                                                "type": "string",
+                                                                "example": "john@example.com"
+                                                            },
+                                                            "role_name": {
+                                                                "type": "string",
+                                                                "example": "Foreman"
+                                                            },
+                                                            "role_code": {
+                                                                "type": "string",
+                                                                "example": "foreman"
+                                                            },
+                                                            "avatar_url": {
+                                                                "type": "string",
+                                                                "nullable": true
+                                                            },
+                                                            "status": {
+                                                                "type": "integer",
+                                                                "example": 1
+                                                            }
+                                                        },
+                                                        "type": "object"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid date parameters",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Invalid date format or missing dates"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Task not found",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "error"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task not found"
                                         }
                                     },
                                     "type": "object"
