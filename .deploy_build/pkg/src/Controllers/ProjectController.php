@@ -109,7 +109,8 @@ class ProjectController
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="client_type", type="string", nullable=true, example="pharmacy"),
      *                     @OA\Property(property="client_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="pharma"),
-     *                     @OA\Property(property="client_data", type="object", nullable=true, example={"name":"Pharmacy Name","address":"123 Main St"}),
+     *                     @OA\Property(property="client_name", type="string", nullable=true, example="Pharmacy Name"),
+     *                     @OA\Property(property="client_data", type="object", nullable=true, example={"id":1,"name":"Pharmacy Name","address":"123 Main St"}),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
      *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
@@ -155,7 +156,7 @@ class ProjectController
             // Базовый SQL запрос
             $sql = "SELECT
                         p.id, p.prj_name, p.address, p.date_start, p.date_end,
-                        p.priority, p.status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.description, p.prj_manager, p.created_by, p.created_at, p.updated_at,
+                        p.priority, p.status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.client_name, p.description, p.prj_manager, p.created_by, p.created_at, p.updated_at,
                         u.first_name, u.last_name,
                         creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
                     FROM fw_projects p
@@ -229,6 +230,8 @@ class ProjectController
 
             // Форматируем данные
             $formattedProjects = array_map(function($project) {
+                $clientData = $this->parseClientData($project['client_data'] ?? null);
+                
                 return [
                     'id' => (int)$project['id'],
                     'prj_name' => $project['prj_name'],
@@ -242,7 +245,8 @@ class ProjectController
                     'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                     'client_type' => $project['client_type'] ?? null,
                     'client_table' => $project['client_table'] ?? null,
-                    'client_data' => $project['client_data'] ? (is_string($project['client_data']) ? json_decode($project['client_data'], true) : $project['client_data']) : null,
+                    'client_name' => $this->getClientNameWithFallback($project, $clientData),
+                    'client_data' => $clientData,
                     'description' => $project['description'] ?? null,
                     'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                     'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
@@ -276,13 +280,28 @@ class ProjectController
 
         } catch (Exception $e) {
             $this->logger->error('Failed to retrieve projects', [
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'query_params' => [
+                    'page' => $page,
+                    'limit' => $limit,
+                    'status' => $status,
+                    'priority' => $priority,
+                    'search' => $search,
+                    'prj_manager' => $prjManager
+                ]
             ]);
+
+            // Проверяем, не связана ли ошибка с отсутствующими полями
+            $errorMessage = $e->getMessage();
+            if (strpos($errorMessage, 'Unknown column') !== false) {
+                $this->logger->warning('Possible missing database columns. Please run migration script: scripts/add-project-client-fields.sql');
+            }
 
             Flight::json([
                 'error_code' => 500,
                 'status' => 'error',
-                'message' => 'Failed to retrieve projects',
+                'message' => 'Failed to retrieve projects: ' . $e->getMessage(),
                 'data' => null
             ], 500);
         }
@@ -326,7 +345,8 @@ class ProjectController
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="client_type", type="string", nullable=true, example="pharmacy"),
      *                     @OA\Property(property="client_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="pharma"),
-     *                     @OA\Property(property="client_data", type="object", nullable=true, example={"name":"Pharmacy Name","address":"123 Main St"}),
+     *                     @OA\Property(property="client_name", type="string", nullable=true, example="Pharmacy Name"),
+     *                     @OA\Property(property="client_data", type="object", nullable=true, example={"id":1,"name":"Pharmacy Name","address":"123 Main St"}),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
      *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
@@ -358,7 +378,7 @@ class ProjectController
             
             $sql = "SELECT
                         p.id, p.prj_name, p.address, p.date_start, p.date_end,
-                        p.priority, p.status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.description, p.prj_manager, p.created_by, p.created_at, p.updated_at,
+                        p.priority, p.status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.client_name, p.description, p.prj_manager, p.created_by, p.created_at, p.updated_at,
                         u.first_name, u.last_name,
                         creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
                     FROM fw_projects p
@@ -379,6 +399,8 @@ class ProjectController
                 return;
             }
 
+            $clientData = $this->parseClientData($project['client_data'] ?? null);
+            
             $formattedProject = [
                 'id' => (int)$project['id'],
                 'prj_name' => $project['prj_name'],
@@ -392,7 +414,8 @@ class ProjectController
                 'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                 'client_type' => $project['client_type'] ?? null,
                 'client_table' => $project['client_table'] ?? null,
-                'client_data' => $project['client_data'] ? (is_string($project['client_data']) ? json_decode($project['client_data'], true) : $project['client_data']) : null,
+                'client_name' => $this->getClientNameWithFallback($project, $clientData),
+                'client_data' => $clientData,
                 'description' => $project['description'] ?? null,
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                 'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
@@ -418,13 +441,22 @@ class ProjectController
         } catch (Exception $e) {
             $this->logger->error('Failed to retrieve project', [
                 'id' => $id,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString()
             ]);
+
+            // Проверяем, не связана ли ошибка с отсутствующими полями
+            $errorMessage = $e->getMessage();
+            if (strpos($errorMessage, 'Unknown column') !== false) {
+                $this->logger->warning('Possible missing database columns. Please run migration script: scripts/add-project-client-fields.sql', [
+                    'project_id' => $id
+                ]);
+            }
 
             Flight::json([
                 'error_code' => 500,
                 'status' => 'error',
-                'message' => 'Failed to retrieve project',
+                'message' => 'Failed to retrieve project: ' . $e->getMessage(),
                 'data' => null
             ], 500);
         }
@@ -455,7 +487,8 @@ class ProjectController
      *             @OA\Property(property="client_id", type="integer", nullable=true, example=1),
      *             @OA\Property(property="client_type", type="string", nullable=true, example="pharmacy"),
      *             @OA\Property(property="client_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="pharma"),
-     *             @OA\Property(property="client_data", type="object", nullable=true, example={"name":"Pharmacy Name","address":"123 Main St"}),
+     *             @OA\Property(property="client_name", type="string", nullable=true, example="Pharmacy Name"),
+     *             @OA\Property(property="client_data", type="object", nullable=true, example={"id":1,"name":"Pharmacy Name","address":"123 Main St"}),
      *             @OA\Property(property="prj_manager", type="integer", example=1),
      *             @OA\Property(property="created_by", type="integer", example=47)
      *         )
@@ -482,7 +515,8 @@ class ProjectController
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="client_type", type="string", nullable=true, example="pharmacy"),
      *                     @OA\Property(property="client_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="pharma"),
-     *                     @OA\Property(property="client_data", type="object", nullable=true, example={"name":"Pharmacy Name","address":"123 Main St"}),
+     *                     @OA\Property(property="client_name", type="string", nullable=true, example="Pharmacy Name"),
+     *                     @OA\Property(property="client_data", type="object", nullable=true, example={"id":1,"name":"Pharmacy Name","address":"123 Main St"}),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
      *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
@@ -526,8 +560,14 @@ class ProjectController
 
             $connection = $this->database->getConnection();
             
-            $sql = "INSERT INTO fw_projects (prj_name, address, date_start, date_end, priority, status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, prj_manager, created_by, description)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            // Получаем имя клиента если указаны client_id и client_table
+            $clientName = null;
+            if (!empty($data['client_id']) && !empty($data['client_table'])) {
+                $clientName = $this->getClientName($data['client_table'], (int)$data['client_id']);
+            }
+            
+            $sql = "INSERT INTO fw_projects (prj_name, address, date_start, date_end, priority, status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, prj_manager, created_by, description)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
             $params = [
                 $data['prj_name'],
@@ -541,7 +581,8 @@ class ProjectController
                 $data['client_id'] ?? null,
                 $data['client_type'] ?? null,
                 $data['client_table'] ?? null,
-                isset($data['client_data']) && $data['client_data'] !== null ? json_encode($data['client_data']) : null,
+                $this->encodeClientData($data['client_data'] ?? null),
+                $clientName,
                 $data['prj_manager'] ?? null,
                 $data['created_by'] ?? null,
                 $data['description'] ?? null
@@ -586,7 +627,8 @@ class ProjectController
                         'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                         'client_type' => $project['client_type'] ?? null,
                         'client_table' => $project['client_table'] ?? null,
-                        'client_data' => $project['client_data'] ? (is_string($project['client_data']) ? json_decode($project['client_data'], true) : $project['client_data']) : null,
+                        'client_name' => $this->getClientNameWithFallback($project, $this->parseClientData($project['client_data'] ?? null)),
+                        'client_data' => $this->parseClientData($project['client_data'] ?? null),
                         'description' => $project['description'] ?? null,
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
@@ -644,7 +686,8 @@ class ProjectController
      *             @OA\Property(property="client_id", type="integer", nullable=true, example=1),
      *             @OA\Property(property="client_type", type="string", nullable=true, example="pharmacy"),
      *             @OA\Property(property="client_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="pharma"),
-     *             @OA\Property(property="client_data", type="object", nullable=true, example={"name":"Pharmacy Name","address":"123 Main St"}),
+     *             @OA\Property(property="client_name", type="string", nullable=true, example="Pharmacy Name"),
+     *             @OA\Property(property="client_data", type="object", nullable=true, example={"id":1,"name":"Pharmacy Name","address":"123 Main St"}),
      *             @OA\Property(property="prj_manager", type="integer", example=1),
      *             @OA\Property(property="created_by", type="integer", example=47)
      *         )
@@ -726,7 +769,7 @@ class ProjectController
 
             // Получаем текущие данные проекта перед обновлением для логирования
             $beforeResult = $connection->executeQuery(
-                "SELECT id, prj_name, address, date_start, date_end, priority, status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, description, prj_manager, created_by, created_at, updated_at
+                "SELECT id, prj_name, address, date_start, date_end, priority, status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, description, prj_manager, created_by, created_at, updated_at
                  FROM fw_projects WHERE id = ?",
                 [$id]
             );
@@ -768,21 +811,50 @@ class ProjectController
                 $updateFields[] = "notes = ?";
                 $params[] = $data['notes'];
             }
-            if (isset($data['client_id'])) {
+            // Поля клиента обновляются даже если они null (для очистки клиента)
+            if (array_key_exists('client_id', $data)) {
                 $updateFields[] = "client_id = ?";
                 $params[] = $data['client_id'];
             }
-            if (isset($data['client_type'])) {
+            if (array_key_exists('client_type', $data)) {
                 $updateFields[] = "client_type = ?";
                 $params[] = $data['client_type'];
             }
-            if (isset($data['client_table'])) {
+            if (array_key_exists('client_table', $data)) {
                 $updateFields[] = "client_table = ?";
                 $params[] = $data['client_table'];
             }
-            if (isset($data['client_data'])) {
+            if (array_key_exists('client_data', $data)) {
                 $updateFields[] = "client_data = ?";
-                $params[] = $data['client_data'] !== null ? json_encode($data['client_data']) : null;
+                $encodedClientData = $this->encodeClientData($data['client_data']);
+                $params[] = $encodedClientData;
+                
+                // Логируем что сохраняется в client_data для диагностики
+                $this->logger->debug('Saving client_data to project', [
+                    'project_id' => $id,
+                    'client_id' => $data['client_id'] ?? null,
+                    'client_table' => $data['client_table'] ?? null,
+                    'client_data_raw' => $data['client_data'],
+                    'client_data_encoded' => $encodedClientData,
+                    'client_data_keys' => is_array($data['client_data']) ? array_keys($data['client_data']) : 'not_array'
+                ]);
+            }
+            
+            // Обновляем client_name если изменились client_id или client_table
+            if (array_key_exists('client_id', $data) || array_key_exists('client_table', $data)) {
+                $clientId = array_key_exists('client_id', $data) ? $data['client_id'] : null;
+                $clientTable = array_key_exists('client_table', $data) ? $data['client_table'] : null;
+                
+                // Если client_id или client_table были удалены (null), очищаем client_name
+                if (!$clientId || !$clientTable) {
+                    $updateFields[] = "client_name = ?";
+                    $params[] = null;
+                } else {
+                    // Получаем имя клиента из соответствующей таблицы
+                    $clientName = $this->getClientName($clientTable, (int)$clientId);
+                    $updateFields[] = "client_name = ?";
+                    $params[] = $clientName;
+                }
             }
             if (isset($data['description'])) {
                 $updateFields[] = "description = ?";
@@ -841,7 +913,8 @@ class ProjectController
                     'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                     'client_type' => $project['client_type'] ?? null,
                     'client_table' => $project['client_table'] ?? null,
-                    'client_data' => $project['client_data'] ? (is_string($project['client_data']) ? json_decode($project['client_data'], true) : $project['client_data']) : null,
+                    'client_name' => $this->getClientNameWithFallback($project, $this->parseClientData($project['client_data'] ?? null)),
+                    'client_data' => $this->parseClientData($project['client_data'] ?? null),
                     'description' => $project['description'] ?? null,
                     'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                     'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
@@ -869,7 +942,8 @@ class ProjectController
                             'client_id' => $beforeData['client_id'] ? (int)$beforeData['client_id'] : null,
                             'client_type' => $beforeData['client_type'] ?? null,
                             'client_table' => $beforeData['client_table'] ?? null,
-                            'client_data' => $beforeData['client_data'] ? (is_string($beforeData['client_data']) ? json_decode($beforeData['client_data'], true) : $beforeData['client_data']) : null,
+                            'client_name' => $beforeData['client_name'] ?? null,
+                            'client_data' => $this->parseClientData($beforeData['client_data'] ?? null),
                             'description' => $beforeData['description'] ?? null,
                             'prj_manager' => $beforeData['prj_manager'] ? (int)$beforeData['prj_manager'] : null,
                             'created_by' => $beforeData['created_by'] ? (int)$beforeData['created_by'] : null
@@ -931,7 +1005,8 @@ class ProjectController
                         'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                         'client_type' => $project['client_type'] ?? null,
                         'client_table' => $project['client_table'] ?? null,
-                        'client_data' => $project['client_data'] ? (is_string($project['client_data']) ? json_decode($project['client_data'], true) : $project['client_data']) : null,
+                        'client_name' => $this->getClientNameWithFallback($project, $this->parseClientData($project['client_data'] ?? null)),
+                        'client_data' => $this->parseClientData($project['client_data'] ?? null),
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                         'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
@@ -1154,20 +1229,24 @@ class ProjectController
             ];
         }
 
-        // Валидация client_id
-        if (isset($data['client_id']) && (!is_numeric($data['client_id']) || $data['client_id'] <= 0)) {
-            return [
-                'valid' => false,
-                'message' => 'client_id must be a positive integer'
-            ];
+        // Валидация client_id (может быть null или положительное целое число)
+        if (isset($data['client_id']) && $data['client_id'] !== null) {
+            if (!is_numeric($data['client_id']) || $data['client_id'] <= 0) {
+                return [
+                    'valid' => false,
+                    'message' => 'client_id must be a positive integer or null'
+                ];
+            }
         }
 
-        // Валидация client_table
-        if (isset($data['client_table']) && !in_array($data['client_table'], ['pharma', 'physician', 'pharmacist', 'medical_clinic'], true)) {
-            return [
-                'valid' => false,
-                'message' => 'client_table must be one of: pharma, physician, pharmacist, medical_clinic'
-            ];
+        // Валидация client_table (может быть null или одно из допустимых значений)
+        if (isset($data['client_table']) && $data['client_table'] !== null) {
+            if (!in_array($data['client_table'], ['pharma', 'physician', 'pharmacist', 'medical_clinic'], true)) {
+                return [
+                    'valid' => false,
+                    'message' => 'client_table must be one of: pharma, physician, pharmacist, medical_clinic or null'
+                ];
+            }
         }
 
         // Валидация client_data (должен быть валидным JSON или массивом)
@@ -1352,7 +1431,8 @@ class ProjectController
                 'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                 'client_type' => $project['client_type'] ?? null,
                 'client_table' => $project['client_table'] ?? null,
-                'client_data' => $project['client_data'] ? (is_string($project['client_data']) ? json_decode($project['client_data'], true) : $project['client_data']) : null,
+                'client_name' => $this->getClientNameWithFallback($project, $this->parseClientData($project['client_data'] ?? null)),
+                'client_data' => $this->parseClientData($project['client_data'] ?? null),
                 'description' => $project['description'] ?? null,
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                 'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
@@ -1553,5 +1633,212 @@ class ProjectController
             ]);
             // Не прерываем создание проекта, если копирование папок не удалось
         }
+    }
+
+    /**
+     * Безопасная обработка поля client_data из БД
+     * Обрабатывает случаи когда поле может быть JSON строкой, уже декодированным массивом, или NULL
+     * 
+     * @param mixed $clientData Значение client_data из БД
+     * @return array|null Декодированный массив или null
+     */
+    private function parseClientData($clientData): ?array
+    {
+        // Если null или пустая строка
+        if ($clientData === null || $clientData === '') {
+            return null;
+        }
+
+        // Если уже массив - возвращаем как есть
+        if (is_array($clientData)) {
+            return $clientData;
+        }
+
+        // Если не строка - возвращаем null
+        if (!is_string($clientData)) {
+            $this->logger->warning('Unexpected client_data type', [
+                'type' => gettype($clientData),
+                'value' => $clientData
+            ]);
+            return null;
+        }
+
+        // Пытаемся декодировать JSON
+        $decoded = json_decode($clientData, true);
+        
+        // Проверяем ошибки декодирования
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $this->logger->warning('Failed to decode client_data JSON', [
+                'error' => json_last_error_msg(),
+                'raw_value' => substr($clientData, 0, 200) // Логируем первые 200 символов
+            ]);
+            return null;
+        }
+
+        // Логируем что возвращается из client_data для диагностики
+        if (is_array($decoded)) {
+            $this->logger->debug('Parsed client_data from DB', [
+                'keys' => array_keys($decoded),
+                'keys_count' => count($decoded),
+                'sample' => array_slice($decoded, 0, 3, true) // Первые 3 элемента для примера
+            ]);
+        }
+
+        return $decoded;
+    }
+
+    /**
+     * Безопасное кодирование client_data для сохранения в БД
+     * Обрабатывает случаи когда значение может быть уже строкой JSON, массивом, или NULL
+     * 
+     * @param mixed $clientData Значение client_data для сохранения
+     * @return string|null JSON строка или null
+     */
+    private function encodeClientData($clientData): ?string
+    {
+        // Если null - возвращаем null
+        if ($clientData === null) {
+            return null;
+        }
+
+        // Если уже строка - проверяем, является ли она валидным JSON
+        if (is_string($clientData)) {
+            // Пытаемся декодировать, чтобы проверить валидность
+            $decoded = json_decode($clientData, true);
+            if (json_last_error() === JSON_ERROR_NONE) {
+                // Это валидный JSON - возвращаем как есть
+                return $clientData;
+            } else {
+                // Не валидный JSON - логируем предупреждение и кодируем как строку
+                $this->logger->warning('client_data is string but not valid JSON, encoding as string value', [
+                    'raw_value' => substr($clientData, 0, 200)
+                ]);
+                return json_encode($clientData);
+            }
+        }
+
+        // Если массив или объект - кодируем в JSON
+        if (is_array($clientData) || is_object($clientData)) {
+            $encoded = json_encode($clientData);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                $this->logger->error('Failed to encode client_data to JSON', [
+                    'error' => json_last_error_msg()
+                ]);
+                return null;
+            }
+            return $encoded;
+        }
+
+        // Для других типов - кодируем значение
+        $encoded = json_encode($clientData);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $this->logger->warning('Unexpected client_data type for encoding', [
+                'type' => gettype($clientData)
+            ]);
+            return null;
+        }
+        return $encoded;
+    }
+
+    /**
+     * Получить имя клиента из соответствующей таблицы
+     * 
+     * @param string|null $clientTable Тип таблицы клиента
+     * @param int|null $clientId ID клиента
+     * @return string|null Имя клиента или null
+     */
+    private function getClientName(?string $clientTable, ?int $clientId): ?string
+    {
+        if (!$clientTable || !$clientId) {
+            return null;
+        }
+
+        // Маппинг типов таблиц на их реальные имена в БД и поля name
+        $clientTables = [
+            'pharma' => [
+                'table' => 'pharma',
+                'name_field' => 'operName'
+            ],
+            'physician' => [
+                'table' => 'physician',
+                'name_field' => 'fullName'
+            ],
+            'pharmacist' => [
+                'table' => 'pharmacist',
+                'name_field' => 'fullName'
+            ],
+            'medical_clinic' => [
+                'table' => 'medical_clinic',
+                'name_field' => 'clinicName'
+            ]
+        ];
+
+        if (!isset($clientTables[$clientTable])) {
+            $this->logger->warning('Unknown client_table type', [
+                'client_table' => $clientTable,
+                'client_id' => $clientId
+            ]);
+            return null;
+        }
+
+        try {
+            $connection = $this->database->getConnection();
+            $tableConfig = $clientTables[$clientTable];
+            
+            $sql = "SELECT {$tableConfig['name_field']} as name 
+                    FROM {$tableConfig['table']} 
+                    WHERE id = ? 
+                    LIMIT 1";
+            
+            $result = $connection->executeQuery($sql, [$clientId]);
+            $client = $result->fetchAssociative();
+            
+            return $client['name'] ?? null;
+        } catch (Exception $e) {
+            $this->logger->error('Failed to get client name', [
+                'client_table' => $clientTable,
+                'client_id' => $clientId,
+                'error' => $e->getMessage()
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Получить имя клиента с fallback на client_data
+     * 
+     * @param array $project Данные проекта из БД
+     * @param array|null $clientData Распарсенные данные client_data
+     * @return string|null Имя клиента или null
+     */
+    private function getClientNameWithFallback(array $project, ?array $clientData): ?string
+    {
+        // Сначала пробуем получить из поля client_name в БД
+        $clientName = $project['client_name'] ?? null;
+        
+        if ($clientName) {
+            return $clientName;
+        }
+        
+        // Если client_name не заполнен, пробуем получить из client_data
+        if ($clientData && is_array($clientData)) {
+            // Пробуем разные поля в зависимости от типа клиента
+            // Для pharma - operName
+            // Для physician/pharmacist - fullName
+            // Для medical_clinic - clinicName
+            // Также пробуем общее поле name
+            $clientName = $clientData['operName'] 
+                ?? $clientData['fullName'] 
+                ?? $clientData['clinicName'] 
+                ?? $clientData['name'] 
+                ?? null;
+        }
+        
+        // Если все еще нет имени, но есть client_id и client_table, пробуем получить из БД
+        if (!$clientName && !empty($project['client_id']) && !empty($project['client_table'])) {
+            $clientName = $this->getClientName($project['client_table'], (int)$project['client_id']);
+        }
+        
+        return $clientName;
     }
 }
