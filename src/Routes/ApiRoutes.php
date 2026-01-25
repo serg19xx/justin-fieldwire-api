@@ -16,6 +16,7 @@ use App\Controllers\N8nIntegrationController;
 use App\Controllers\LanguageController;
 use App\Controllers\EventRulesController;
 use App\Controllers\MessageTemplatesController;
+use App\Controllers\ClientController;
 use App\Database\Database;
 use Flight;
 use Monolog\Logger;
@@ -806,6 +807,21 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $projectController = new \App\Controllers\ProjectController($this->logger);
                 $projectController->deleteProject((int)$id);
+            }
+        });
+
+        // Clients routes
+        Flight::route('GET /api/v1/clients/@clientTable', function($clientTable) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $clientController = new \App\Controllers\ClientController($this->logger);
+                $clientController->searchClients($clientTable);
+            }
+        });
+
+        Flight::route('GET /api/v1/clients/@clientTable/@clientId', function($clientTable, $clientId) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $clientController = new \App\Controllers\ClientController($this->logger);
+                $clientController->getClientById($clientTable, (int)$clientId);
             }
         });
 
