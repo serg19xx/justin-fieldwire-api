@@ -35,8 +35,21 @@ RewriteEngine On
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>
 
-# CORS headers are handled by PHP CorsMiddleware
-# Removed from .htaccess to avoid conflicts with Access-Control-Allow-Credentials
+# CORS fallback for /api/ (so preflight and responses have headers even if PHP is slow or fails)
+<IfModule mod_headers.c>
+    SetEnvIf Origin "^(https://([a-z0-9-]+\.)*medicalcontractor\.ca)(:\d+)?$" CORS_ORIGIN=$0
+    SetEnvIf Origin "^(https?://(localhost|127\.0\.0\.1)(:\d+)?)$" CORS_ORIGIN=$0
+    SetEnvIf Request_URI "^/api/" API_REQUEST=1
+    Header always set Access-Control-Allow-Origin %{CORS_ORIGIN}e env=API_REQUEST env=CORS_ORIGIN
+    Header always set Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, PATCH" env=API_REQUEST
+    Header always set Access-Control-Allow-Headers "Content-Type, Authorization, X-Requested-With, Accept, Origin" env=API_REQUEST
+    Header always set Access-Control-Allow-Credentials "true" env=API_REQUEST
+    Header always set Access-Control-Max-Age "86400" env=API_REQUEST
+</IfModule>
+# OPTIONS preflight: respond 200 for /api/ so browser gets CORS headers
+RewriteCond %{REQUEST_METHOD} OPTIONS
+RewriteCond %{REQUEST_URI} ^/api/
+RewriteRule ^ - [L,R=200]
 
 # Prevent access to sensitive files
 <FilesMatch "\.(env|log|sql|md|txt|ini|gitignore|gitattributes)$">
