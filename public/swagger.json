@@ -6157,9 +6157,15 @@
                                                                 "example": "pharma",
                                                                 "nullable": true
                                                             },
+                                                            "client_name": {
+                                                                "type": "string",
+                                                                "example": "Pharmacy Name",
+                                                                "nullable": true
+                                                            },
                                                             "client_data": {
                                                                 "type": "object",
                                                                 "example": {
+                                                                    "id": 1,
                                                                     "name": "Pharmacy Name",
                                                                     "address": "123 Main St"
                                                                 },
@@ -6271,8 +6277,6 @@
                                 "required": [
                                     "prj_name",
                                     "address",
-                                    "date_start",
-                                    "date_end",
                                     "priority",
                                     "created_by"
                                 ],
@@ -6288,12 +6292,14 @@
                                     "date_start": {
                                         "type": "string",
                                         "format": "date",
-                                        "example": "2025-01-01"
+                                        "example": "2025-01-01",
+                                        "nullable": true
                                     },
                                     "date_end": {
                                         "type": "string",
                                         "format": "date",
-                                        "example": "2025-12-31"
+                                        "example": "2025-12-31",
+                                        "nullable": true
                                     },
                                     "priority": {
                                         "type": "string",
@@ -6337,9 +6343,15 @@
                                         "example": "pharma",
                                         "nullable": true
                                     },
+                                    "client_name": {
+                                        "type": "string",
+                                        "example": "Pharmacy Name",
+                                        "nullable": true
+                                    },
                                     "client_data": {
                                         "type": "object",
                                         "example": {
+                                            "id": 1,
                                             "name": "Pharmacy Name",
                                             "address": "123 Main St"
                                         },
@@ -6446,9 +6458,15 @@
                                                             "example": "pharma",
                                                             "nullable": true
                                                         },
+                                                        "client_name": {
+                                                            "type": "string",
+                                                            "example": "Pharmacy Name",
+                                                            "nullable": true
+                                                        },
                                                         "client_data": {
                                                             "type": "object",
                                                             "example": {
+                                                                "id": 1,
                                                                 "name": "Pharmacy Name",
                                                                 "address": "123 Main St"
                                                             },
@@ -6630,9 +6648,15 @@
                                                             "example": "pharma",
                                                             "nullable": true
                                                         },
+                                                        "client_name": {
+                                                            "type": "string",
+                                                            "example": "Pharmacy Name",
+                                                            "nullable": true
+                                                        },
                                                         "client_data": {
                                                             "type": "object",
                                                             "example": {
+                                                                "id": 1,
                                                                 "name": "Pharmacy Name",
                                                                 "address": "123 Main St"
                                                             },
@@ -6796,9 +6820,15 @@
                                         "example": "pharma",
                                         "nullable": true
                                     },
+                                    "client_name": {
+                                        "type": "string",
+                                        "example": "Pharmacy Name",
+                                        "nullable": true
+                                    },
                                     "client_data": {
                                         "type": "object",
                                         "example": {
+                                            "id": 1,
                                             "name": "Pharmacy Name",
                                             "address": "123 Main St"
                                         },
