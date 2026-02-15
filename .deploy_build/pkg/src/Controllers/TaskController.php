@@ -1030,6 +1030,9 @@ class TaskController
                 ]);
             }
 
+            // Пересчёт date_start/date_end проекта по задачам
+            $this->recalculateProjectDates($projectId);
+
             Flight::json([
                 'error_code' => 0,
                 'status' => 'success',
@@ -1824,6 +1827,9 @@ class TaskController
                 ]);
             }
 
+            // Пересчёт date_start/date_end проекта по задачам
+            $this->recalculateProjectDates($projectId);
+
             Flight::json([
                 'error_code' => 0,
                 'status' => 'success',
@@ -1975,6 +1981,9 @@ class TaskController
                     'task_id' => $taskId
                 ]);
             }
+
+            // Пересчёт date_start/date_end проекта по оставшимся задачам
+            $this->recalculateProjectDates($projectId);
 
             Flight::json([
                 'error_code' => 0,
@@ -4019,6 +4028,31 @@ class TaskController
             }
             
             Flight::json($response, 500);
+        }
+    }
+
+    /**
+     * Пересчитать date_start и date_end проекта по задачам (MIN(start_planned), MAX(end_planned)).
+     * Вызывается после создания, обновления или удаления задачи.
+     */
+    private function recalculateProjectDates(int $projectId): void
+    {
+        try {
+            $connection = $this->database->getConnection();
+            $connection->executeStatement(
+                "UPDATE fw_projects p
+                 SET
+                   date_start = (SELECT MIN(start_planned) FROM fw_prj_tasks WHERE project_id = p.id AND start_planned IS NOT NULL),
+                   date_end = (SELECT MAX(end_planned) FROM fw_prj_tasks WHERE project_id = p.id AND end_planned IS NOT NULL),
+                   updated_at = NOW()
+                 WHERE p.id = ?",
+                [$projectId]
+            );
+        } catch (\Exception $e) {
+            $this->logger->warning('Failed to recalculate project dates', [
+                'project_id' => $projectId,
+                'error' => $e->getMessage()
+            ]);
         }
     }
 }

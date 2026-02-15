@@ -475,11 +475,11 @@ class ProjectController
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
-     *             required={"prj_name", "address", "date_start", "date_end", "priority", "created_by"},
+     *             required={"prj_name", "address", "priority", "created_by"},
      *             @OA\Property(property="prj_name", type="string", example="Office Building Construction"),
      *             @OA\Property(property="address", type="string", example="123 Main St, City, State"),
-     *             @OA\Property(property="date_start", type="string", format="date", example="2025-01-01"),
-     *             @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
+     *             @OA\Property(property="date_start", type="string", format="date", nullable=true, example="2025-01-01"),
+     *             @OA\Property(property="date_end", type="string", format="date", nullable=true, example="2025-12-31"),
      *             @OA\Property(property="priority", type="string", example="High"),
      *             @OA\Property(property="status", type="string", example="Active"),
      *             @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
@@ -572,8 +572,8 @@ class ProjectController
             $params = [
                 $data['prj_name'],
                 $data['address'],
-                $data['date_start'],
-                $data['date_end'],
+                $data['date_start'] ?? null,
+                $data['date_end'] ?? null,
                 $data['priority'],
                 $data['status'] ?? null,
                 $data['purchase_or_lease'] ?? 'Purchase',
@@ -787,11 +787,12 @@ class ProjectController
                 $updateFields[] = "address = ?";
                 $params[] = $data['address'];
             }
-            if (isset($data['date_start'])) {
+            // date_start и date_end допускают null (partial update)
+            if (array_key_exists('date_start', $data)) {
                 $updateFields[] = "date_start = ?";
                 $params[] = $data['date_start'];
             }
-            if (isset($data['date_end'])) {
+            if (array_key_exists('date_end', $data)) {
                 $updateFields[] = "date_end = ?";
                 $params[] = $data['date_end'];
             }
@@ -1173,11 +1174,13 @@ class ProjectController
      */
     private function validateProjectData(array $data, bool $isCreate = true): array
     {
-        $requiredFields = ['prj_name', 'address', 'date_start', 'date_end', 'priority', 'created_by'];
+        // date_start and date_end are optional (nullable) - project dates can be derived from tasks
+        $requiredFields = ['prj_name', 'address', 'priority', 'created_by'];
         
         if ($isCreate) {
             foreach ($requiredFields as $field) {
-                if (!isset($data[$field]) || empty(trim($data[$field]))) {
+                $val = $data[$field] ?? null;
+                if ($val === null || (is_string($val) && trim($val) === '')) {
                     return [
                         'valid' => false,
                         'message' => "Field '{$field}' is required"
@@ -1267,23 +1270,27 @@ class ProjectController
             }
         }
 
-        // Валидация дат
-        if (isset($data['date_start']) && !$this->isValidDate($data['date_start'])) {
-            return [
-                'valid' => false,
-                'message' => 'Invalid date_start format. Use YYYY-MM-DD'
-            ];
+        // Валидация дат (date_start и date_end могут быть null)
+        if (isset($data['date_start']) && $data['date_start'] !== null && $data['date_start'] !== '') {
+            if (!is_string($data['date_start']) || !$this->isValidDate($data['date_start'])) {
+                return [
+                    'valid' => false,
+                    'message' => 'Invalid date_start format. Use YYYY-MM-DD or null'
+                ];
+            }
         }
 
-        if (isset($data['date_end']) && !$this->isValidDate($data['date_end'])) {
-            return [
-                'valid' => false,
-                'message' => 'Invalid date_end format. Use YYYY-MM-DD'
-            ];
+        if (isset($data['date_end']) && $data['date_end'] !== null && $data['date_end'] !== '') {
+            if (!is_string($data['date_end']) || !$this->isValidDate($data['date_end'])) {
+                return [
+                    'valid' => false,
+                    'message' => 'Invalid date_end format. Use YYYY-MM-DD or null'
+                ];
+            }
         }
 
-        // Проверка, что дата окончания не раньше даты начала
-        if (isset($data['date_start']) && isset($data['date_end'])) {
+        // Проверка, что дата окончания не раньше даты начала (только если обе заданы)
+        if (!empty($data['date_start']) && !empty($data['date_end'])) {
             if (strtotime($data['date_end']) < strtotime($data['date_start'])) {
                 return [
                     'valid' => false,
