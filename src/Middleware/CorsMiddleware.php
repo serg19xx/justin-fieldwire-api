@@ -20,11 +20,13 @@ class CorsMiddleware
         $configOrigins = $this->config->get('cors.allowed_origins', []);
         $defaultOrigins = [
             'http://localhost:3000',
-            'http://localhost:3001', 
+            'http://localhost:3001',
             'http://127.0.0.1:3000',
             'http://127.0.0.1:3001',
             'https://fieldwire.medicalcontractor.ca',
-            'https://www.fieldwire.medicalcontractor.ca'
+            'https://www.fieldwire.medicalcontractor.ca',
+            'https://medicalcontractor.ca',
+            'https://www.medicalcontractor.ca',
         ];
         
         // Merge config origins with defaults, filter out empty values
@@ -60,7 +62,11 @@ class CorsMiddleware
             // Exact match
             if (in_array($origin, $allowedOrigins, true)) {
                 $originAllowed = true;
-            } 
+            }
+            // Allow any subdomain of medicalcontractor.ca (https only for production)
+            elseif (preg_match('/^https:\/\/([a-z0-9-]+\.)*medicalcontractor\.ca(:\d+)?$/', $origin)) {
+                $originAllowed = true;
+            }
             // For development, allow localhost origins (any port)
             elseif (preg_match('/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/', $origin)) {
                 $originAllowed = true;
