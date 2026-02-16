@@ -35,8 +35,7 @@ RewriteEngine On
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
 </IfModule>
 
-# CORS headers are handled by PHP CorsMiddleware
-# Removed from .htaccess to avoid conflicts with Access-Control-Allow-Credentials
+# CORS is handled only by PHP CorsMiddleware (see Application.php) to avoid wrong header values from .htaccess
 
 # Prevent access to sensitive files
 <FilesMatch "\.(env|log|sql|md|txt|ini|gitignore|gitattributes)$">
