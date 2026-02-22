@@ -6120,8 +6120,9 @@
                                                                 "example": "High"
                                                             },
                                                             "status": {
+                                                                "description": "One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project",
                                                                 "type": "string",
-                                                                "example": "Active"
+                                                                "example": "Project Secured"
                                                             },
                                                             "purchase_or_lease": {
                                                                 "type": "string",
@@ -6168,6 +6169,41 @@
                                                                     "id": 1,
                                                                     "name": "Pharmacy Name",
                                                                     "address": "123 Main St"
+                                                                },
+                                                                "nullable": true
+                                                            },
+                                                            "client2_id": {
+                                                                "type": "integer",
+                                                                "example": 2,
+                                                                "nullable": true
+                                                            },
+                                                            "client2_type": {
+                                                                "type": "string",
+                                                                "example": "physician",
+                                                                "nullable": true
+                                                            },
+                                                            "client2_table": {
+                                                                "type": "string",
+                                                                "enum": [
+                                                                    "pharma",
+                                                                    "physician",
+                                                                    "pharmacist",
+                                                                    "medical_clinic"
+                                                                ],
+                                                                "example": "physician",
+                                                                "nullable": true
+                                                            },
+                                                            "client2_name": {
+                                                                "type": "string",
+                                                                "example": "Second Client Name",
+                                                                "nullable": true
+                                                            },
+                                                            "client2_data": {
+                                                                "type": "object",
+                                                                "example": {
+                                                                    "id": 2,
+                                                                    "name": "Second Client",
+                                                                    "address": "456 Oak St"
                                                                 },
                                                                 "nullable": true
                                                             },
@@ -6277,7 +6313,6 @@
                                 "required": [
                                     "prj_name",
                                     "address",
-                                    "priority",
                                     "created_by"
                                 ],
                                 "properties": {
@@ -6306,8 +6341,9 @@
                                         "example": "High"
                                     },
                                     "status": {
+                                        "description": "One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project",
                                         "type": "string",
-                                        "example": "Active"
+                                        "example": "Project Secured"
                                     },
                                     "purchase_or_lease": {
                                         "type": "string",
@@ -6354,6 +6390,42 @@
                                             "id": 1,
                                             "name": "Pharmacy Name",
                                             "address": "123 Main St"
+                                        },
+                                        "nullable": true
+                                    },
+                                    "client2_id": {
+                                        "description": "Optional second client ID",
+                                        "type": "integer",
+                                        "example": 2,
+                                        "nullable": true
+                                    },
+                                    "client2_type": {
+                                        "type": "string",
+                                        "example": "physician",
+                                        "nullable": true
+                                    },
+                                    "client2_table": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pharma",
+                                            "physician",
+                                            "pharmacist",
+                                            "medical_clinic"
+                                        ],
+                                        "example": "physician",
+                                        "nullable": true
+                                    },
+                                    "client2_name": {
+                                        "type": "string",
+                                        "example": "Second Client Name",
+                                        "nullable": true
+                                    },
+                                    "client2_data": {
+                                        "type": "object",
+                                        "example": {
+                                            "id": 2,
+                                            "name": "Second Client",
+                                            "address": "456 Oak St"
                                         },
                                         "nullable": true
                                     },
@@ -6421,8 +6493,9 @@
                                                             "example": "High"
                                                         },
                                                         "status": {
+                                                            "description": "One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project",
                                                             "type": "string",
-                                                            "example": "Active"
+                                                            "example": "Project Secured"
                                                         },
                                                         "purchase_or_lease": {
                                                             "type": "string",
@@ -6469,6 +6542,41 @@
                                                                 "id": 1,
                                                                 "name": "Pharmacy Name",
                                                                 "address": "123 Main St"
+                                                            },
+                                                            "nullable": true
+                                                        },
+                                                        "client2_id": {
+                                                            "type": "integer",
+                                                            "example": 2,
+                                                            "nullable": true
+                                                        },
+                                                        "client2_type": {
+                                                            "type": "string",
+                                                            "example": "physician",
+                                                            "nullable": true
+                                                        },
+                                                        "client2_table": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "pharma",
+                                                                "physician",
+                                                                "pharmacist",
+                                                                "medical_clinic"
+                                                            ],
+                                                            "example": "physician",
+                                                            "nullable": true
+                                                        },
+                                                        "client2_name": {
+                                                            "type": "string",
+                                                            "example": "Second Client Name",
+                                                            "nullable": true
+                                                        },
+                                                        "client2_data": {
+                                                            "type": "object",
+                                                            "example": {
+                                                                "id": 2,
+                                                                "name": "Second Client",
+                                                                "address": "456 Oak St"
                                                             },
                                                             "nullable": true
                                                         },
@@ -6611,8 +6719,9 @@
                                                             "example": "High"
                                                         },
                                                         "status": {
+                                                            "description": "One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project",
                                                             "type": "string",
-                                                            "example": "Active"
+                                                            "example": "Project Secured"
                                                         },
                                                         "purchase_or_lease": {
                                                             "type": "string",
@@ -6659,6 +6768,41 @@
                                                                 "id": 1,
                                                                 "name": "Pharmacy Name",
                                                                 "address": "123 Main St"
+                                                            },
+                                                            "nullable": true
+                                                        },
+                                                        "client2_id": {
+                                                            "type": "integer",
+                                                            "example": 2,
+                                                            "nullable": true
+                                                        },
+                                                        "client2_type": {
+                                                            "type": "string",
+                                                            "example": "physician",
+                                                            "nullable": true
+                                                        },
+                                                        "client2_table": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "pharma",
+                                                                "physician",
+                                                                "pharmacist",
+                                                                "medical_clinic"
+                                                            ],
+                                                            "example": "physician",
+                                                            "nullable": true
+                                                        },
+                                                        "client2_name": {
+                                                            "type": "string",
+                                                            "example": "Second Client Name",
+                                                            "nullable": true
+                                                        },
+                                                        "client2_data": {
+                                                            "type": "object",
+                                                            "example": {
+                                                                "id": 2,
+                                                                "name": "Second Client",
+                                                                "address": "456 Oak St"
                                                             },
                                                             "nullable": true
                                                         },
@@ -6783,8 +6927,9 @@
                                         "example": "High"
                                     },
                                     "status": {
+                                        "description": "One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project",
                                         "type": "string",
-                                        "example": "Active"
+                                        "example": "Project Secured"
                                     },
                                     "purchase_or_lease": {
                                         "type": "string",
@@ -6831,6 +6976,41 @@
                                             "id": 1,
                                             "name": "Pharmacy Name",
                                             "address": "123 Main St"
+                                        },
+                                        "nullable": true
+                                    },
+                                    "client2_id": {
+                                        "type": "integer",
+                                        "example": 2,
+                                        "nullable": true
+                                    },
+                                    "client2_type": {
+                                        "type": "string",
+                                        "example": "physician",
+                                        "nullable": true
+                                    },
+                                    "client2_table": {
+                                        "type": "string",
+                                        "enum": [
+                                            "pharma",
+                                            "physician",
+                                            "pharmacist",
+                                            "medical_clinic"
+                                        ],
+                                        "example": "physician",
+                                        "nullable": true
+                                    },
+                                    "client2_name": {
+                                        "type": "string",
+                                        "example": "Second Client Name",
+                                        "nullable": true
+                                    },
+                                    "client2_data": {
+                                        "type": "object",
+                                        "example": {
+                                            "id": 2,
+                                            "name": "Second Client",
+                                            "address": "456 Oak St"
                                         },
                                         "nullable": true
                                     },
@@ -6898,8 +7078,9 @@
                                                             "example": "High"
                                                         },
                                                         "status": {
+                                                            "description": "One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project",
                                                             "type": "string",
-                                                            "example": "Active"
+                                                            "example": "Project Secured"
                                                         },
                                                         "prj_manager": {
                                                             "type": "integer",
