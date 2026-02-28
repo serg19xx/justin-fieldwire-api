@@ -1,0 +1,22 @@
+-- Reference: existing table fw_task_templates (do not run CREATE - table already exists).
+-- Task Templates API uses this table. Schema as of 2025:
+--
+-- CREATE TABLE `fw_task_templates` (
+--   `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+--   `name` varchar(255) NOT NULL COMMENT 'Task template name',
+--   `description` text DEFAULT NULL COMMENT 'Optional description of the template',
+--   `category` varchar(100) DEFAULT NULL COMMENT 'Category for grouping templates (e.g., "Planning & Design", "HVAC", "Plumbing")',
+--   `duration_days` int(10) unsigned DEFAULT NULL COMMENT 'Duration in days (if known)',
+--   `start_offset_days` int(11) DEFAULT NULL COMMENT 'Days from project start (NULL = must be set manually)',
+--   `end_offset_days` int(11) DEFAULT NULL COMMENT 'Days from project start for end date (alternative to duration)',
+--   `milestone` varchar(50) DEFAULT NULL COMMENT 'Milestone type: inspection, visit, meeting, review, delivery, approval, other, or NULL for regular task',
+--   `status` varchar(50) DEFAULT 'planned' COMMENT 'Default task status: planned, scheduled, scheduled_accepted, in_progress, partially_completed, delayed_due_to_issue, ready_for_inspection, completed',
+--   `notes` text DEFAULT NULL COMMENT 'Additional notes for the template',
+--   `wbs_path` varchar(100) DEFAULT NULL COMMENT 'Work breakdown structure path (e.g., "1.1.1")',
+--   `task_order` int(10) unsigned DEFAULT NULL COMMENT 'Order in template sequence for sorting',
+--   `created_at` timestamp NOT NULL DEFAULT current_timestamp() COMMENT 'Creation timestamp',
+--   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp() COMMENT 'Last update timestamp',
+--   PRIMARY KEY (`id`),
+--   CONSTRAINT `chk_milestone_type` CHECK (`milestone` is null or `milestone` in ('inspection','visit','meeting','review','delivery','approval','other')),
+--   CONSTRAINT `chk_status_type` CHECK (`status` in ('planned','scheduled','scheduled_accepted','in_progress','partially_completed','delayed_due_to_issue','ready_for_inspection','completed'))
+-- ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Task templates for quick task creation';

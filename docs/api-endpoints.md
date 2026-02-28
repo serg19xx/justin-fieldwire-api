@@ -157,6 +157,39 @@ GET /api/docs
 GET /api/swagger/spec
 ```
 
+### 7. Task Templates API (`/api/v1/task-templates`)
+
+Управление шаблонами задач (таблица `fw_task_templates`). Используется на странице «Task Templates» и при создании задач «From templates».
+
+| Метод | Путь | Описание | Роли |
+|-------|------|----------|------|
+| GET | `/api/v1/task-templates` | Список всех шаблонов | любой авторизованный |
+| GET | `/api/v1/task-templates/:id` | Один шаблон по ID | любой авторизованный |
+| POST | `/api/v1/task-templates` | Создать шаблон | admin, project_manager |
+| PUT | `/api/v1/task-templates/:id` | Обновить шаблон | admin, project_manager |
+| DELETE | `/api/v1/task-templates/:id` | Удалить шаблон | admin, project_manager |
+
+**Формат ответов:** `status`, `message`, `data`. В `data` — `templates` (массив) или `template` (объект).
+
+**Пример запроса (POST):**
+```json
+{
+  "template": {
+    "name": "Foundation Inspection",
+    "description": "Inspection of completed foundation",
+    "category": "Milestones",
+    "duration_days": 1,
+    "start_offset_days": 19,
+    "milestone": "inspection",
+    "status": "planned",
+    "wbs_path": "1.2.1",
+    "task_order": 13
+  }
+}
+```
+
+Подробная спецификация полей и кодов ответов — в описании задачи «Task Templates API — Backend Specification».
+
 ## 🧪 Тестирование с фронтенда
 
 ### JavaScript (Fetch API)
