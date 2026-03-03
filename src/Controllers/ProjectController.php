@@ -29,9 +29,9 @@ class ProjectController
         'Completed Project',
     ];
 
-    /** Allowed project level values (DB enum: note "Bacics" spelling) */
+    /** Allowed project level values (DB enum) */
     private const ALLOWED_PROJECT_LEVELS = [
-        'Bacics',
+        'Basics',
         'Full Service',
         'Medical Nice',
         'High End',
@@ -1381,7 +1381,7 @@ class ProjectController
             }
         }
 
-        // level: one of allowed enum values or null (DB has "Bacics" spelling)
+        // level: one of allowed enum values or null
         if (array_key_exists('level', $data) && $data['level'] !== null && $data['level'] !== '') {
             if (!in_array($data['level'], self::ALLOWED_PROJECT_LEVELS, true)) {
                 return [

@@ -2602,7 +2602,7 @@
                                     "prof_level": {
                                         "type": "string",
                                         "enum": [
-                                            "Basic",
+                                            "Basics",
                                             "Intermidiate",
                                             "Fluent"
                                         ],
@@ -2756,7 +2756,7 @@
                                     "prof_level": {
                                         "type": "string",
                                         "enum": [
-                                            "Basic",
+                                            "Basics",
                                             "Intermidiate",
                                             "Fluent"
                                         ],
@@ -6215,10 +6215,10 @@
                                                             },
                                                             "level": {
                                                                 "type": "string",
-                                                                "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                                                "enum": ["Basics", "Full Service", "Medical Nice", "High End", "Extravagant"],
                                                                 "example": "Full Service",
                                                                 "nullable": true,
-                                                                "description": "Project level (DB spelling: Bacics)"
+                                                                "description": "Project level"
                                                             },
                                                             "prj_manager": {
                                                                 "type": "integer",
@@ -6450,10 +6450,10 @@
                                     },
                                     "level": {
                                         "type": "string",
-                                        "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                        "enum": ["Basics", "Full Service", "Medical Nice", "High End", "Extravagant"],
                                         "example": "Full Service",
                                         "nullable": true,
-                                        "description": "Project level (DB spelling: Bacics)"
+                                        "description": "Project level"
                                     },
                                     "prj_manager": {
                                         "type": "integer",
@@ -6614,10 +6614,10 @@
                                                         },
                                                         "level": {
                                                             "type": "string",
-                                                            "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                                            "enum": ["Basics", "Full Service", "Medical Nice", "High End", "Extravagant"],
                                                             "example": "Full Service",
                                                             "nullable": true,
-                                                            "description": "Project level (DB spelling: Bacics)"
+                                                            "description": "Project level"
                                                         },
                                                         "prj_manager": {
                                                             "type": "integer",
@@ -6853,10 +6853,10 @@
                                                         },
                                                         "level": {
                                                             "type": "string",
-                                                            "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                                            "enum": ["Basics", "Full Service", "Medical Nice", "High End", "Extravagant"],
                                                             "example": "Full Service",
                                                             "nullable": true,
-                                                            "description": "Project level (DB spelling: Bacics)"
+                                                            "description": "Project level"
                                                         },
                                                         "prj_manager": {
                                                             "type": "integer",
@@ -7074,10 +7074,10 @@
                                     },
                                     "level": {
                                         "type": "string",
-                                        "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                        "enum": ["Basics", "Full Service", "Medical Nice", "High End", "Extravagant"],
                                         "example": "Full Service",
                                         "nullable": true,
-                                        "description": "Project level (DB spelling: Bacics)"
+                                        "description": "Project level"
                                     },
                                     "prj_manager": {
                                         "type": "integer",
@@ -7155,10 +7155,10 @@
                                                         },
                                                         "level": {
                                                             "type": "string",
-                                                            "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                                            "enum": ["Basics", "Full Service", "Medical Nice", "High End", "Extravagant"],
                                                             "example": "Full Service",
                                                             "nullable": true,
-                                                            "description": "Project level (DB spelling: Bacics)"
+                                                            "description": "Project level"
                                                         },
                                                         "prj_manager": {
                                                             "type": "integer",

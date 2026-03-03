@@ -190,6 +190,15 @@ GET /api/swagger/spec
 
 Подробная спецификация полей и кодов ответов — в описании задачи «Task Templates API — Backend Specification».
 
+### 8. Projects API — поля `area` и `level`
+
+В объекте проекта (GET/POST/PUT `/api/v1/projects` и `/api/v1/projects/:id`) возвращаются и принимаются поля:
+
+- **`area`** — число или `null` (площадь, например кв. футы); при передаче — неотрицательное целое.
+- **`level`** — строка или `null`; допустимые значения: `Basics`, `Full Service`, `Medical Nice`, `High End`, `Extravagant`.
+
+При неверном `level` API возвращает 400 с сообщением об ошибке.
+
 ## 🧪 Тестирование с фронтенда
 
 ### JavaScript (Fetch API)
