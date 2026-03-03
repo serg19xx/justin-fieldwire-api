@@ -6207,6 +6207,19 @@
                                                                 },
                                                                 "nullable": true
                                                             },
+                                                            "area": {
+                                                                "type": "integer",
+                                                                "example": 5000,
+                                                                "nullable": true,
+                                                                "description": "Area (e.g. sq ft)"
+                                                            },
+                                                            "level": {
+                                                                "type": "string",
+                                                                "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                                                "example": "Full Service",
+                                                                "nullable": true,
+                                                                "description": "Project level (DB spelling: Bacics)"
+                                                            },
                                                             "prj_manager": {
                                                                 "type": "integer",
                                                                 "example": 1,
@@ -6429,6 +6442,19 @@
                                         },
                                         "nullable": true
                                     },
+                                    "area": {
+                                        "type": "integer",
+                                        "example": 5000,
+                                        "nullable": true,
+                                        "description": "Area (e.g. sq ft)"
+                                    },
+                                    "level": {
+                                        "type": "string",
+                                        "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                        "example": "Full Service",
+                                        "nullable": true,
+                                        "description": "Project level (DB spelling: Bacics)"
+                                    },
                                     "prj_manager": {
                                         "type": "integer",
                                         "example": 1
@@ -6579,6 +6605,19 @@
                                                                 "address": "456 Oak St"
                                                             },
                                                             "nullable": true
+                                                        },
+                                                        "area": {
+                                                            "type": "integer",
+                                                            "example": 5000,
+                                                            "nullable": true,
+                                                            "description": "Area (e.g. sq ft)"
+                                                        },
+                                                        "level": {
+                                                            "type": "string",
+                                                            "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                                            "example": "Full Service",
+                                                            "nullable": true,
+                                                            "description": "Project level (DB spelling: Bacics)"
                                                         },
                                                         "prj_manager": {
                                                             "type": "integer",
@@ -6806,6 +6845,19 @@
                                                             },
                                                             "nullable": true
                                                         },
+                                                        "area": {
+                                                            "type": "integer",
+                                                            "example": 5000,
+                                                            "nullable": true,
+                                                            "description": "Area (e.g. sq ft)"
+                                                        },
+                                                        "level": {
+                                                            "type": "string",
+                                                            "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                                            "example": "Full Service",
+                                                            "nullable": true,
+                                                            "description": "Project level (DB spelling: Bacics)"
+                                                        },
                                                         "prj_manager": {
                                                             "type": "integer",
                                                             "example": 1,
@@ -7014,6 +7066,19 @@
                                         },
                                         "nullable": true
                                     },
+                                    "area": {
+                                        "type": "integer",
+                                        "example": 5000,
+                                        "nullable": true,
+                                        "description": "Area (e.g. sq ft)"
+                                    },
+                                    "level": {
+                                        "type": "string",
+                                        "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                        "example": "Full Service",
+                                        "nullable": true,
+                                        "description": "Project level (DB spelling: Bacics)"
+                                    },
                                     "prj_manager": {
                                         "type": "integer",
                                         "example": 1
@@ -7081,6 +7146,19 @@
                                                             "description": "One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project",
                                                             "type": "string",
                                                             "example": "Project Secured"
+                                                        },
+                                                        "area": {
+                                                            "type": "integer",
+                                                            "example": 5000,
+                                                            "nullable": true,
+                                                            "description": "Area (e.g. sq ft)"
+                                                        },
+                                                        "level": {
+                                                            "type": "string",
+                                                            "enum": ["Bacics", "Full Service", "Medical Nice", "High End", "Extravagant"],
+                                                            "example": "Full Service",
+                                                            "nullable": true,
+                                                            "description": "Project level (DB spelling: Bacics)"
                                                         },
                                                         "prj_manager": {
                                                             "type": "integer",
