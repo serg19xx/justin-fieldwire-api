@@ -17,6 +17,27 @@ use OpenApi\Annotations as OA;
  */
 class ProjectController
 {
+    /** Allowed project status values for POST/PUT /api/v1/projects */
+    private const ALLOWED_PROJECT_STATUSES = [
+        'Initial Contact Lead',
+        'Dead Lead',
+        'Waiting On Direction',
+        'Actively Looking For A Location',
+        'Securing Location',
+        'Project Secured',
+        'Construction',
+        'Completed Project',
+    ];
+
+    /** Allowed project level values (DB enum: note "Bacics" spelling) */
+    private const ALLOWED_PROJECT_LEVELS = [
+        'Bacics',
+        'Full Service',
+        'Medical Nice',
+        'High End',
+        'Extravagant',
+    ];
+
     private Logger $logger;
     private Database $database;
     private EventLoggingService $eventLoggingService;
@@ -103,7 +124,7 @@ class ProjectController
      *                     @OA\Property(property="date_start", type="string", format="date", example="2025-01-01"),
      *                     @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *                     @OA\Property(property="priority", type="string", example="High"),
-     *                     @OA\Property(property="status", type="string", example="Active"),
+     *                     @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
      *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
      *                     @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
@@ -111,6 +132,11 @@ class ProjectController
      *                     @OA\Property(property="client_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="pharma"),
      *                     @OA\Property(property="client_name", type="string", nullable=true, example="Pharmacy Name"),
      *                     @OA\Property(property="client_data", type="object", nullable=true, example={"id":1,"name":"Pharmacy Name","address":"123 Main St"}),
+     *                     @OA\Property(property="client2_id", type="integer", nullable=true, example=2),
+     *                     @OA\Property(property="client2_type", type="string", nullable=true, example="physician"),
+     *                     @OA\Property(property="client2_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="physician"),
+     *                     @OA\Property(property="client2_name", type="string", nullable=true, example="Second Client Name"),
+     *                     @OA\Property(property="client2_data", type="object", nullable=true, example={"id":2,"name":"Second Client","address":"456 Oak St"}),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
      *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
@@ -156,7 +182,9 @@ class ProjectController
             // Базовый SQL запрос
             $sql = "SELECT
                         p.id, p.prj_name, p.address, p.date_start, p.date_end,
-                        p.priority, p.status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.client_name, p.description, p.prj_manager, p.created_by, p.created_at, p.updated_at,
+                        p.priority, p.status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.client_name,
+                        p.client2_id, p.client2_type, p.client2_table, p.client2_data, p.client2_name,
+                        p.description, p.area, p.level, p.prj_manager, p.created_by, p.created_at, p.updated_at,
                         u.first_name, u.last_name,
                         creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
                     FROM fw_projects p
@@ -231,7 +259,7 @@ class ProjectController
             // Форматируем данные
             $formattedProjects = array_map(function($project) {
                 $clientData = $this->parseClientData($project['client_data'] ?? null);
-                
+                $client2Data = $this->parseClientData($project['client2_data'] ?? null);
                 return [
                     'id' => (int)$project['id'],
                     'prj_name' => $project['prj_name'],
@@ -247,14 +275,21 @@ class ProjectController
                     'client_table' => $project['client_table'] ?? null,
                     'client_name' => $this->getClientNameWithFallback($project, $clientData),
                     'client_data' => $clientData,
+                    'client2_id' => $project['client2_id'] ? (int)$project['client2_id'] : null,
+                    'client2_type' => $project['client2_type'] ?? null,
+                    'client2_table' => $project['client2_table'] ?? null,
+                    'client2_name' => $this->getClient2NameWithFallback($project, $client2Data),
+                    'client2_data' => $client2Data,
                     'description' => $project['description'] ?? null,
+                    'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
+                    'level' => $project['level'] ?? null,
                     'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                     'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
-                    'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
-                        ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name'] 
+                    'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
+                        ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name']
                         : null,
-                    'manager_name' => $project['first_name'] && $project['last_name'] 
-                        ? $project['first_name'] . ' ' . $project['last_name'] 
+                    'manager_name' => $project['first_name'] && $project['last_name']
+                        ? $project['first_name'] . ' ' . $project['last_name']
                         : null,
                     'created_at' => $project['created_at'],
                     'updated_at' => $project['updated_at']
@@ -339,7 +374,7 @@ class ProjectController
      *                     @OA\Property(property="date_start", type="string", format="date", example="2025-01-01"),
      *                     @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *                     @OA\Property(property="priority", type="string", example="High"),
-     *                     @OA\Property(property="status", type="string", example="Active"),
+     *                     @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
      *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
      *                     @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
@@ -347,6 +382,11 @@ class ProjectController
      *                     @OA\Property(property="client_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="pharma"),
      *                     @OA\Property(property="client_name", type="string", nullable=true, example="Pharmacy Name"),
      *                     @OA\Property(property="client_data", type="object", nullable=true, example={"id":1,"name":"Pharmacy Name","address":"123 Main St"}),
+     *                     @OA\Property(property="client2_id", type="integer", nullable=true, example=2),
+     *                     @OA\Property(property="client2_type", type="string", nullable=true, example="physician"),
+     *                     @OA\Property(property="client2_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="physician"),
+     *                     @OA\Property(property="client2_name", type="string", nullable=true, example="Second Client Name"),
+     *                     @OA\Property(property="client2_data", type="object", nullable=true, example={"id":2,"name":"Second Client","address":"456 Oak St"}),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
      *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
@@ -378,7 +418,9 @@ class ProjectController
             
             $sql = "SELECT
                         p.id, p.prj_name, p.address, p.date_start, p.date_end,
-                        p.priority, p.status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.client_name, p.description, p.prj_manager, p.created_by, p.created_at, p.updated_at,
+                        p.priority, p.status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.client_name,
+                        p.client2_id, p.client2_type, p.client2_table, p.client2_data, p.client2_name,
+                        p.description, p.area, p.level, p.prj_manager, p.created_by, p.created_at, p.updated_at,
                         u.first_name, u.last_name,
                         creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
                     FROM fw_projects p
@@ -400,6 +442,7 @@ class ProjectController
             }
 
             $clientData = $this->parseClientData($project['client_data'] ?? null);
+            $client2Data = $this->parseClientData($project['client2_data'] ?? null);
             
             $formattedProject = [
                 'id' => (int)$project['id'],
@@ -416,14 +459,21 @@ class ProjectController
                 'client_table' => $project['client_table'] ?? null,
                 'client_name' => $this->getClientNameWithFallback($project, $clientData),
                 'client_data' => $clientData,
+                'client2_id' => $project['client2_id'] ? (int)$project['client2_id'] : null,
+                'client2_type' => $project['client2_type'] ?? null,
+                'client2_table' => $project['client2_table'] ?? null,
+                'client2_name' => $this->getClient2NameWithFallback($project, $client2Data),
+                'client2_data' => $client2Data,
                 'description' => $project['description'] ?? null,
+                'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
+                'level' => $project['level'] ?? null,
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                 'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
-                'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
-                    ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name'] 
+                'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
+                    ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name']
                     : null,
-                'manager_name' => $project['first_name'] && $project['last_name'] 
-                    ? $project['first_name'] . ' ' . $project['last_name'] 
+                'manager_name' => $project['first_name'] && $project['last_name']
+                    ? $project['first_name'] . ' ' . $project['last_name']
                     : null,
                 'created_at' => $project['created_at'],
                 'updated_at' => $project['updated_at']
@@ -475,13 +525,13 @@ class ProjectController
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
-     *             required={"prj_name", "address", "priority", "created_by"},
+     *             required={"prj_name", "address", "created_by"},
      *             @OA\Property(property="prj_name", type="string", example="Office Building Construction"),
      *             @OA\Property(property="address", type="string", example="123 Main St, City, State"),
      *             @OA\Property(property="date_start", type="string", format="date", nullable=true, example="2025-01-01"),
      *             @OA\Property(property="date_end", type="string", format="date", nullable=true, example="2025-12-31"),
      *             @OA\Property(property="priority", type="string", example="High"),
-     *             @OA\Property(property="status", type="string", example="Active"),
+     *             @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
      *             @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
      *             @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *             @OA\Property(property="client_id", type="integer", nullable=true, example=1),
@@ -489,6 +539,11 @@ class ProjectController
      *             @OA\Property(property="client_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="pharma"),
      *             @OA\Property(property="client_name", type="string", nullable=true, example="Pharmacy Name"),
      *             @OA\Property(property="client_data", type="object", nullable=true, example={"id":1,"name":"Pharmacy Name","address":"123 Main St"}),
+     *             @OA\Property(property="client2_id", type="integer", nullable=true, example=2, description="Optional second client ID"),
+     *             @OA\Property(property="client2_type", type="string", nullable=true, example="physician"),
+     *             @OA\Property(property="client2_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="physician"),
+     *             @OA\Property(property="client2_name", type="string", nullable=true, example="Second Client Name"),
+     *             @OA\Property(property="client2_data", type="object", nullable=true, example={"id":2,"name":"Second Client","address":"456 Oak St"}),
      *             @OA\Property(property="prj_manager", type="integer", example=1),
      *             @OA\Property(property="created_by", type="integer", example=47)
      *         )
@@ -508,8 +563,7 @@ class ProjectController
      *                     @OA\Property(property="date_start", type="string", format="date", example="2025-01-01"),
      *                     @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *                     @OA\Property(property="priority", type="string", example="High"),
-     *                     @OA\Property(property="status", type="string", example="Active"),
-     *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
+     *                     @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
      *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
      *                     @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
@@ -517,6 +571,11 @@ class ProjectController
      *                     @OA\Property(property="client_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="pharma"),
      *                     @OA\Property(property="client_name", type="string", nullable=true, example="Pharmacy Name"),
      *                     @OA\Property(property="client_data", type="object", nullable=true, example={"id":1,"name":"Pharmacy Name","address":"123 Main St"}),
+     *                     @OA\Property(property="client2_id", type="integer", nullable=true, example=2),
+     *                     @OA\Property(property="client2_type", type="string", nullable=true, example="physician"),
+     *                     @OA\Property(property="client2_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="physician"),
+     *                     @OA\Property(property="client2_name", type="string", nullable=true, example="Second Client Name"),
+     *                     @OA\Property(property="client2_data", type="object", nullable=true, example={"id":2,"name":"Second Client","address":"456 Oak St"}),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
      *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
@@ -565,16 +624,20 @@ class ProjectController
             if (!empty($data['client_id']) && !empty($data['client_table'])) {
                 $clientName = $this->getClientName($data['client_table'], (int)$data['client_id']);
             }
+            $client2Name = null;
+            if (!empty($data['client2_id']) && !empty($data['client2_table'])) {
+                $client2Name = $this->getClientName($data['client2_table'], (int)$data['client2_id']);
+            }
             
-            $sql = "INSERT INTO fw_projects (prj_name, address, date_start, date_end, priority, status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, prj_manager, created_by, description)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            $sql = "INSERT INTO fw_projects (prj_name, address, date_start, date_end, priority, status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, client2_id, client2_type, client2_table, client2_data, client2_name, area, level, prj_manager, created_by, description)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
             $params = [
                 $data['prj_name'],
                 $data['address'],
                 $data['date_start'] ?? null,
                 $data['date_end'] ?? null,
-                $data['priority'],
+                $data['priority'] ?? null,
                 $data['status'] ?? null,
                 $data['purchase_or_lease'] ?? 'Purchase',
                 $data['notes'] ?? null,
@@ -583,6 +646,13 @@ class ProjectController
                 $data['client_table'] ?? null,
                 $this->encodeClientData($data['client_data'] ?? null),
                 $clientName,
+                $data['client2_id'] ?? null,
+                $data['client2_type'] ?? null,
+                $data['client2_table'] ?? null,
+                $this->encodeClientData($data['client2_data'] ?? null),
+                $client2Name,
+                isset($data['area']) && $data['area'] !== null ? (int)$data['area'] : null,
+                $data['level'] ?? null,
                 $data['prj_manager'] ?? null,
                 $data['created_by'] ?? null,
                 $data['description'] ?? null
@@ -629,11 +699,18 @@ class ProjectController
                         'client_table' => $project['client_table'] ?? null,
                         'client_name' => $this->getClientNameWithFallback($project, $this->parseClientData($project['client_data'] ?? null)),
                         'client_data' => $this->parseClientData($project['client_data'] ?? null),
+                        'client2_id' => $project['client2_id'] ? (int)$project['client2_id'] : null,
+                        'client2_type' => $project['client2_type'] ?? null,
+                        'client2_table' => $project['client2_table'] ?? null,
+                        'client2_name' => $this->getClient2NameWithFallback($project, $this->parseClientData($project['client2_data'] ?? null)),
+                        'client2_data' => $this->parseClientData($project['client2_data'] ?? null),
                         'description' => $project['description'] ?? null,
+                        'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
+                        'level' => $project['level'] ?? null,
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
-                        'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
-                            ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name'] 
+                        'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
+                            ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name']
                             : null,
                         'created_at' => $project['created_at'],
                         'updated_at' => $project['updated_at']
@@ -680,7 +757,7 @@ class ProjectController
      *             @OA\Property(property="date_start", type="string", format="date", example="2025-01-01"),
      *             @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *             @OA\Property(property="priority", type="string", example="High"),
-     *             @OA\Property(property="status", type="string", example="Active"),
+     *             @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
      *             @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
      *             @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *             @OA\Property(property="client_id", type="integer", nullable=true, example=1),
@@ -688,6 +765,11 @@ class ProjectController
      *             @OA\Property(property="client_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="pharma"),
      *             @OA\Property(property="client_name", type="string", nullable=true, example="Pharmacy Name"),
      *             @OA\Property(property="client_data", type="object", nullable=true, example={"id":1,"name":"Pharmacy Name","address":"123 Main St"}),
+     *             @OA\Property(property="client2_id", type="integer", nullable=true, example=2),
+     *             @OA\Property(property="client2_type", type="string", nullable=true, example="physician"),
+     *             @OA\Property(property="client2_table", type="string", enum={"pharma","physician","pharmacist","medical_clinic"}, nullable=true, example="physician"),
+     *             @OA\Property(property="client2_name", type="string", nullable=true, example="Second Client Name"),
+     *             @OA\Property(property="client2_data", type="object", nullable=true, example={"id":2,"name":"Second Client","address":"456 Oak St"}),
      *             @OA\Property(property="prj_manager", type="integer", example=1),
      *             @OA\Property(property="created_by", type="integer", example=47)
      *         )
@@ -707,7 +789,7 @@ class ProjectController
      *                     @OA\Property(property="date_start", type="string", format="date", example="2025-01-01"),
      *                     @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *                     @OA\Property(property="priority", type="string", example="High"),
-     *                     @OA\Property(property="status", type="string", example="Active"),
+     *                     @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
      *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
@@ -769,7 +851,7 @@ class ProjectController
 
             // Получаем текущие данные проекта перед обновлением для логирования
             $beforeResult = $connection->executeQuery(
-                "SELECT id, prj_name, address, date_start, date_end, priority, status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, description, prj_manager, created_by, created_at, updated_at
+                "SELECT id, prj_name, address, date_start, date_end, priority, status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, client2_id, client2_type, client2_table, client2_data, client2_name, description, area, level, prj_manager, created_by, created_at, updated_at
                  FROM fw_projects WHERE id = ?",
                 [$id]
             );
@@ -857,6 +939,34 @@ class ProjectController
                     $params[] = $clientName;
                 }
             }
+            if (array_key_exists('client2_id', $data)) {
+                $updateFields[] = "client2_id = ?";
+                $params[] = $data['client2_id'];
+            }
+            if (array_key_exists('client2_type', $data)) {
+                $updateFields[] = "client2_type = ?";
+                $params[] = $data['client2_type'];
+            }
+            if (array_key_exists('client2_table', $data)) {
+                $updateFields[] = "client2_table = ?";
+                $params[] = $data['client2_table'];
+            }
+            if (array_key_exists('client2_data', $data)) {
+                $updateFields[] = "client2_data = ?";
+                $params[] = $this->encodeClientData($data['client2_data']);
+            }
+            if (array_key_exists('client2_id', $data) || array_key_exists('client2_table', $data)) {
+                $client2Id = array_key_exists('client2_id', $data) ? $data['client2_id'] : null;
+                $client2Table = array_key_exists('client2_table', $data) ? $data['client2_table'] : null;
+                if (!$client2Id || !$client2Table) {
+                    $updateFields[] = "client2_name = ?";
+                    $params[] = null;
+                } else {
+                    $client2Name = $this->getClientName($client2Table, (int)$client2Id);
+                    $updateFields[] = "client2_name = ?";
+                    $params[] = $client2Name;
+                }
+            }
             if (isset($data['description'])) {
                 $updateFields[] = "description = ?";
                 $params[] = $data['description'];
@@ -868,6 +978,14 @@ class ProjectController
             if (isset($data['created_by'])) {
                 $updateFields[] = "created_by = ?";
                 $params[] = $data['created_by'];
+            }
+            if (array_key_exists('area', $data)) {
+                $updateFields[] = "area = ?";
+                $params[] = $data['area'] !== null ? (int)$data['area'] : null;
+            }
+            if (array_key_exists('level', $data)) {
+                $updateFields[] = "level = ?";
+                $params[] = $data['level'];
             }
 
             if (empty($updateFields)) {
@@ -916,6 +1034,11 @@ class ProjectController
                     'client_table' => $project['client_table'] ?? null,
                     'client_name' => $this->getClientNameWithFallback($project, $this->parseClientData($project['client_data'] ?? null)),
                     'client_data' => $this->parseClientData($project['client_data'] ?? null),
+                    'client2_id' => $project['client2_id'] ? (int)$project['client2_id'] : null,
+                    'client2_type' => $project['client2_type'] ?? null,
+                    'client2_table' => $project['client2_table'] ?? null,
+                    'client2_name' => $this->getClient2NameWithFallback($project, $this->parseClientData($project['client2_data'] ?? null)),
+                    'client2_data' => $this->parseClientData($project['client2_data'] ?? null),
                     'description' => $project['description'] ?? null,
                     'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                     'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
@@ -945,7 +1068,14 @@ class ProjectController
                             'client_table' => $beforeData['client_table'] ?? null,
                             'client_name' => $beforeData['client_name'] ?? null,
                             'client_data' => $this->parseClientData($beforeData['client_data'] ?? null),
+                            'client2_id' => $beforeData['client2_id'] ? (int)$beforeData['client2_id'] : null,
+                            'client2_type' => $beforeData['client2_type'] ?? null,
+                            'client2_table' => $beforeData['client2_table'] ?? null,
+                            'client2_name' => $beforeData['client2_name'] ?? null,
+                            'client2_data' => $this->parseClientData($beforeData['client2_data'] ?? null),
                             'description' => $beforeData['description'] ?? null,
+                            'area' => isset($beforeData['area']) && $beforeData['area'] !== null ? (int)$beforeData['area'] : null,
+                            'level' => $beforeData['level'] ?? null,
                             'prj_manager' => $beforeData['prj_manager'] ? (int)$beforeData['prj_manager'] : null,
                             'created_by' => $beforeData['created_by'] ? (int)$beforeData['created_by'] : null
                         ],
@@ -1008,10 +1138,18 @@ class ProjectController
                         'client_table' => $project['client_table'] ?? null,
                         'client_name' => $this->getClientNameWithFallback($project, $this->parseClientData($project['client_data'] ?? null)),
                         'client_data' => $this->parseClientData($project['client_data'] ?? null),
+                        'client2_id' => $project['client2_id'] ? (int)$project['client2_id'] : null,
+                        'client2_type' => $project['client2_type'] ?? null,
+                        'client2_table' => $project['client2_table'] ?? null,
+                        'client2_name' => $this->getClient2NameWithFallback($project, $this->parseClientData($project['client2_data'] ?? null)),
+                        'client2_data' => $this->parseClientData($project['client2_data'] ?? null),
+                        'description' => $project['description'] ?? null,
+                        'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
+                        'level' => $project['level'] ?? null,
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
-                        'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name'] 
-                            ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name'] 
+                        'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
+                            ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name']
                             : null,
                         'created_at' => $project['created_at'],
                         'updated_at' => $project['updated_at']
@@ -1175,7 +1313,7 @@ class ProjectController
     private function validateProjectData(array $data, bool $isCreate = true): array
     {
         // date_start and date_end are optional (nullable) - project dates can be derived from tasks
-        $requiredFields = ['prj_name', 'address', 'priority', 'created_by'];
+        $requiredFields = ['prj_name', 'address', 'created_by'];
         
         if ($isCreate) {
             foreach ($requiredFields as $field) {
@@ -1211,11 +1349,19 @@ class ProjectController
             ];
         }
 
-        if (isset($data['status']) && strlen($data['status']) > 100) {
-            return [
-                'valid' => false,
-                'message' => 'Status must not exceed 100 characters'
-            ];
+        if (isset($data['status'])) {
+            if (strlen($data['status']) > 100) {
+                return [
+                    'valid' => false,
+                    'message' => 'Status must not exceed 100 characters'
+                ];
+            }
+            if (!in_array($data['status'], self::ALLOWED_PROJECT_STATUSES, true)) {
+                return [
+                    'valid' => false,
+                    'message' => 'Invalid status. Allowed: ' . implode(', ', self::ALLOWED_PROJECT_STATUSES)
+                ];
+            }
         }
 
         if (isset($data['purchase_or_lease']) && !in_array($data['purchase_or_lease'], ['Purchase', 'Lease'], true)) {
@@ -1223,6 +1369,26 @@ class ProjectController
                 'valid' => false,
                 'message' => 'purchase_or_lease must be either Purchase or Lease'
             ];
+        }
+
+        // area: non-negative integer or null
+        if (array_key_exists('area', $data) && $data['area'] !== null) {
+            if (!is_numeric($data['area']) || (int)$data['area'] < 0) {
+                return [
+                    'valid' => false,
+                    'message' => 'area must be a non-negative integer or null'
+                ];
+            }
+        }
+
+        // level: one of allowed enum values or null (DB has "Bacics" spelling)
+        if (array_key_exists('level', $data) && $data['level'] !== null && $data['level'] !== '') {
+            if (!in_array($data['level'], self::ALLOWED_PROJECT_LEVELS, true)) {
+                return [
+                    'valid' => false,
+                    'message' => 'Invalid level. Allowed: ' . implode(', ', self::ALLOWED_PROJECT_LEVELS)
+                ];
+            }
         }
 
         if (isset($data['notes']) && strlen($data['notes']) > 1000) {
@@ -1266,6 +1432,40 @@ class ProjectController
                 return [
                     'valid' => false,
                     'message' => 'client_data must be a valid JSON object or array'
+                ];
+            }
+        }
+
+        // Валидация client2_* (все поля необязательные; проверка только при передаче)
+        if (isset($data['client2_id']) && $data['client2_id'] !== null) {
+            if (!is_numeric($data['client2_id']) || $data['client2_id'] <= 0) {
+                return [
+                    'valid' => false,
+                    'message' => 'client2_id must be a positive integer or null'
+                ];
+            }
+        }
+        if (isset($data['client2_table']) && $data['client2_table'] !== null) {
+            if (!in_array($data['client2_table'], ['pharma', 'physician', 'pharmacist', 'medical_clinic'], true)) {
+                return [
+                    'valid' => false,
+                    'message' => 'client2_table must be one of: pharma, physician, pharmacist, medical_clinic or null'
+                ];
+            }
+        }
+        if (isset($data['client2_data']) && $data['client2_data'] !== null) {
+            if (is_string($data['client2_data'])) {
+                $decoded = json_decode($data['client2_data'], true);
+                if (json_last_error() !== JSON_ERROR_NONE) {
+                    return [
+                        'valid' => false,
+                        'message' => 'client2_data must be valid JSON'
+                    ];
+                }
+            } elseif (!is_array($data['client2_data']) && !is_object($data['client2_data'])) {
+                return [
+                    'valid' => false,
+                    'message' => 'client2_data must be a valid JSON object or array'
                 ];
             }
         }
@@ -1440,6 +1640,11 @@ class ProjectController
                 'client_table' => $project['client_table'] ?? null,
                 'client_name' => $this->getClientNameWithFallback($project, $this->parseClientData($project['client_data'] ?? null)),
                 'client_data' => $this->parseClientData($project['client_data'] ?? null),
+                'client2_id' => $project['client2_id'] ? (int)$project['client2_id'] : null,
+                'client2_type' => $project['client2_type'] ?? null,
+                'client2_table' => $project['client2_table'] ?? null,
+                'client2_name' => $this->getClient2NameWithFallback($project, $this->parseClientData($project['client2_data'] ?? null)),
+                'client2_data' => $this->parseClientData($project['client2_data'] ?? null),
                 'description' => $project['description'] ?? null,
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                 'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
@@ -1846,6 +2051,31 @@ class ProjectController
             $clientName = $this->getClientName($project['client_table'], (int)$project['client_id']);
         }
         
+        return $clientName;
+    }
+
+    /**
+     * Get client2 display name with fallback (client2_name, client2_data, or lookup by client2_id/client2_table)
+     * @param array $project Row with client2_* keys
+     * @param array|null $client2Data Parsed client2_data
+     * @return string|null
+     */
+    private function getClient2NameWithFallback(array $project, ?array $client2Data): ?string
+    {
+        $clientName = $project['client2_name'] ?? null;
+        if ($clientName) {
+            return $clientName;
+        }
+        if ($client2Data && is_array($client2Data)) {
+            $clientName = $client2Data['operName']
+                ?? $client2Data['fullName']
+                ?? $client2Data['clinicName']
+                ?? $client2Data['name']
+                ?? null;
+        }
+        if (!$clientName && !empty($project['client2_id']) && !empty($project['client2_table'])) {
+            $clientName = $this->getClientName($project['client2_table'], (int)$project['client2_id']);
+        }
         return $clientName;
     }
 }

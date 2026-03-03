@@ -11298,6 +11298,308 @@
                     }
                 ]
             }
+        },
+        "/api/v1/task-templates": {
+            "get": {
+                "tags": [
+                    "Task Templates"
+                ],
+                "summary": "List all task templates",
+                "description": "Returns all task templates for the current tenant. Used on Task Templates page and when creating tasks from templates.",
+                "operationId": "taskTemplatesList",
+                "responses": {
+                    "200": {
+                        "description": "Task templates retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task templates retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "templates": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "$ref": "#/components/schemas/TaskTemplate"
+                                                    }
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Task Templates"
+                ],
+                "summary": "Create task template",
+                "description": "Create a new task template. Requires admin or project_manager role.",
+                "operationId": "taskTemplatesCreate",
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "template": {
+                                        "$ref": "#/components/schemas/TaskTemplateInput"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "201": {
+                        "description": "Task template created successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task template created successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "template": {
+                                                    "$ref": "#/components/schemas/TaskTemplate"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Request body empty or invalid JSON"
+                    },
+                    "422": {
+                        "description": "Validation failed"
+                    },
+                    "403": {
+                        "description": "Access denied (admin or project_manager required)"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/task-templates/{id}": {
+            "get": {
+                "tags": [
+                    "Task Templates"
+                ],
+                "summary": "Get task template by ID",
+                "description": "Returns a single task template by ID.",
+                "operationId": "taskTemplatesGet",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "description": "Task template ID"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Task template retrieved successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task template retrieved successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "template": {
+                                                    "$ref": "#/components/schemas/TaskTemplate"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Template not found"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "put": {
+                "tags": [
+                    "Task Templates"
+                ],
+                "summary": "Update task template",
+                "description": "Update an existing task template (partial update). Requires admin or project_manager role.",
+                "operationId": "taskTemplatesUpdate",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "description": "Task template ID"
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "properties": {
+                                    "template": {
+                                        "$ref": "#/components/schemas/TaskTemplateInput"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Task template updated successfully",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "properties": {
+                                        "status": {
+                                            "type": "string",
+                                            "example": "success"
+                                        },
+                                        "message": {
+                                            "type": "string",
+                                            "example": "Task template updated successfully"
+                                        },
+                                        "data": {
+                                            "properties": {
+                                                "template": {
+                                                    "$ref": "#/components/schemas/TaskTemplate"
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    },
+                                    "type": "object"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Template not found"
+                    },
+                    "422": {
+                        "description": "Validation failed"
+                    },
+                    "403": {
+                        "description": "Access denied"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "delete": {
+                "tags": [
+                    "Task Templates"
+                ],
+                "summary": "Delete task template",
+                "description": "Delete a task template. Requires admin or project_manager role.",
+                "operationId": "taskTemplatesDelete",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        },
+                        "description": "Task template ID"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "Task template deleted successfully"
+                    },
+                    "404": {
+                        "description": "Template not found"
+                    },
+                    "403": {
+                        "description": "Access denied"
+                    },
+                    "500": {
+                        "description": "Internal server error"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
         }
     },
     "components": {
@@ -11369,6 +11671,42 @@
                         "type": "string",
                         "format": "date-time"
                     }
+                },
+                "type": "object"
+            },
+            "TaskTemplate": {
+                "properties": {
+                    "id": { "type": "integer", "example": 1 },
+                    "name": { "type": "string", "example": "Site Survey" },
+                    "description": { "type": "string", "nullable": true },
+                    "category": { "type": "string", "nullable": true, "example": "Site Preparation" },
+                    "duration_days": { "type": "integer", "nullable": true, "example": 1 },
+                    "start_offset_days": { "type": "integer", "nullable": true, "example": 0 },
+                    "end_offset_days": { "type": "integer", "nullable": true },
+                    "milestone": { "type": "string", "nullable": true, "enum": ["inspection", "visit", "meeting", "review", "delivery", "approval", "other"] },
+                    "status": { "type": "string", "example": "planned", "enum": ["planned", "scheduled", "scheduled_accepted", "in_progress", "partially_completed", "delayed_due_to_issue", "ready_for_inspection", "completed"] },
+                    "notes": { "type": "string", "nullable": true },
+                    "wbs_path": { "type": "string", "nullable": true, "example": "1.1" },
+                    "task_order": { "type": "integer", "nullable": true, "example": 1 },
+                    "created_at": { "type": "string", "format": "date-time" },
+                    "updated_at": { "type": "string", "format": "date-time" }
+                },
+                "type": "object"
+            },
+            "TaskTemplateInput": {
+                "description": "Template payload for create/update (name required on create)",
+                "properties": {
+                    "name": { "type": "string", "maxLength": 255, "example": "Foundation Inspection" },
+                    "description": { "type": "string", "nullable": true },
+                    "category": { "type": "string", "nullable": true, "maxLength": 100 },
+                    "duration_days": { "type": "integer", "nullable": true, "minimum": 0 },
+                    "start_offset_days": { "type": "integer", "nullable": true },
+                    "end_offset_days": { "type": "integer", "nullable": true },
+                    "milestone": { "type": "string", "nullable": true, "enum": ["inspection", "visit", "meeting", "review", "delivery", "approval", "other"] },
+                    "status": { "type": "string", "enum": ["planned", "scheduled", "scheduled_accepted", "in_progress", "partially_completed", "delayed_due_to_issue", "ready_for_inspection", "completed"] },
+                    "notes": { "type": "string", "nullable": true },
+                    "wbs_path": { "type": "string", "nullable": true, "maxLength": 100 },
+                    "task_order": { "type": "integer", "nullable": true, "minimum": 0 }
                 },
                 "type": "object"
             }
@@ -11450,6 +11788,10 @@
         {
             "name": "Message Templates",
             "description": "Message Templates"
+        },
+        {
+            "name": "Task Templates",
+            "description": "Task templates for quick task creation (fw_task_templates)"
         },
         {
             "name": "Dependencies",
