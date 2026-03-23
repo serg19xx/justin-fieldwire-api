@@ -6,6 +6,7 @@ cp -f ./src/Middleware/AuthMiddleware.php ./.deploy_build/pkg/src/Middleware/Aut
 cp -f ./src/Controllers/AuthController.php ./.deploy_build/pkg/src/Controllers/AuthController.php
 cp -f ./src/Routes/ApiRoutes.php ./.deploy_build/pkg/src/Routes/ApiRoutes.php
 cp -f ./src/Controllers/TwoFactorController.php ./.deploy_build/pkg/src/Controllers/TwoFactorController.php
+cp -f ./src/Controllers/TaskTemplateController.php ./.deploy_build/pkg/src/Controllers/TaskTemplateController.php
 cp -f ./src/Services/EmailService.php ./.deploy_build/pkg/src/Services/EmailService.php
 
 echo "Regenerating autoload..."

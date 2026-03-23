@@ -148,7 +148,12 @@ class ApiRoutes
                                 'dependencies_update' => 'PUT /api/v1/dependencies/{dependency_id}',
                                 'dependencies_delete' => 'DELETE /api/v1/dependencies/{dependency_id}',
                                 'dependencies_project' => 'GET /api/v1/projects/{project_id}/dependencies',
-                                'dependencies_task' => 'GET /api/v1/tasks/{task_id}/dependencies'
+                                'dependencies_task' => 'GET /api/v1/tasks/{task_id}/dependencies',
+                                'task_templates_list' => 'GET /api/v1/task-templates',
+                                'task_templates_get' => 'GET /api/v1/task-templates/{id}',
+                                'task_templates_create' => 'POST /api/v1/task-templates',
+                                'task_templates_update' => 'PUT /api/v1/task-templates/{id}',
+                                'task_templates_delete' => 'DELETE /api/v1/task-templates/{id}'
                             ]
                         ]
                     ]
@@ -564,6 +569,34 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $driverController = new \App\Controllers\DriverController($this->logger);
                 $driverController->deleteDriver($id);
+            }
+        });
+
+        // Task templates routes (GET: any authenticated; POST/PUT/DELETE: admin, project_manager)
+        $taskTemplateController = new \App\Controllers\TaskTemplateController($this->logger);
+        Flight::route('GET /api/v1/task-templates', function() use ($authMiddleware, $taskTemplateController) {
+            if ($authMiddleware->handle()) {
+                $taskTemplateController->index();
+            }
+        });
+        Flight::route('GET /api/v1/task-templates/@id', function($id) use ($authMiddleware, $taskTemplateController) {
+            if ($authMiddleware->handle()) {
+                $taskTemplateController->get((int) $id);
+            }
+        });
+        Flight::route('POST /api/v1/task-templates', function() use ($authMiddleware, $taskTemplateController) {
+            if ($authMiddleware->handle()) {
+                $taskTemplateController->create();
+            }
+        });
+        Flight::route('PUT /api/v1/task-templates/@id', function($id) use ($authMiddleware, $taskTemplateController) {
+            if ($authMiddleware->handle()) {
+                $taskTemplateController->update((int) $id);
+            }
+        });
+        Flight::route('DELETE /api/v1/task-templates/@id', function($id) use ($authMiddleware, $taskTemplateController) {
+            if ($authMiddleware->handle()) {
+                $taskTemplateController->delete((int) $id);
             }
         });
 

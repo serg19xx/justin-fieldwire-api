@@ -28,6 +28,15 @@ class ProjectController
         'Construction',
         'Completed Project',
     ];
+    
+    /** Allowed system lifecycle statuses for projects */
+    private const ALLOWED_PROJECT_SYS_STATUSES = [
+        'Draft',
+        'Active',
+        'Closing',
+        'Suspended',
+        'Done',
+    ];
 
     /** Allowed project level values (DB enum) */
     private const ALLOWED_PROJECT_LEVELS = [
@@ -109,6 +118,13 @@ class ProjectController
      *         required=false,
      *         @OA\Schema(type="integer", example=1)
      *     ),
+     *     @OA\Parameter(
+     *         name="user_id",
+     *         in="query",
+     *         description="Filter projects where this user is involved (project manager or task assignee)",
+     *         required=false,
+     *         @OA\Schema(type="integer", example=47)
+     *     ),
      *     @OA\Response(
      *         response=200,
      *         description="Projects retrieved successfully",
@@ -125,6 +141,7 @@ class ProjectController
      *                     @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *                     @OA\Property(property="priority", type="string", example="High"),
      *                     @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
+     *                     @OA\Property(property="sys_status", type="string", nullable=true, enum={"Draft","Active","Closing","Suspended","Done"}, example="Active"),
      *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
      *                     @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
@@ -176,13 +193,14 @@ class ProjectController
             $priority = $request->query['priority'] ?? null;
             $search = $request->query['search'] ?? null;
             $prjManager = $request->query['prj_manager'] ?? null;
+            $userId = $request->query['user_id'] ?? null;
 
             $offset = ($page - 1) * $limit;
 
             // Базовый SQL запрос
             $sql = "SELECT
                         p.id, p.prj_name, p.address, p.date_start, p.date_end,
-                        p.priority, p.status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.client_name,
+                        p.priority, p.status, p.sys_status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.client_name,
                         p.client2_id, p.client2_type, p.client2_table, p.client2_data, p.client2_name,
                         p.description, p.area, p.level, p.prj_manager, p.created_by, p.created_at, p.updated_at,
                         u.first_name, u.last_name,
@@ -220,6 +238,21 @@ class ProjectController
                 $params[] = (int)$prjManager;
             }
 
+            // Фильтр по вовлеченности пользователя в проект
+            if ($userId !== null && $userId !== '' && is_numeric($userId)) {
+                $sql .= " AND (
+                    p.prj_manager = ?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM fw_prj_team_members tm
+                        WHERE tm.project_id = p.id
+                          AND tm.user_id = ?
+                    )
+                )";
+                $params[] = (int)$userId;
+                $params[] = (int)$userId;
+            }
+
             // Подсчет общего количества
             $countSql = "SELECT COUNT(*) as total FROM fw_projects p WHERE 1=1";
             $countParams = [];
@@ -246,6 +279,20 @@ class ProjectController
                 $countParams[] = (int)$prjManager;
             }
 
+            if ($userId !== null && $userId !== '' && is_numeric($userId)) {
+                $countSql .= " AND (
+                    p.prj_manager = ?
+                    OR EXISTS (
+                        SELECT 1
+                        FROM fw_prj_team_members tm
+                        WHERE tm.project_id = p.id
+                          AND tm.user_id = ?
+                    )
+                )";
+                $countParams[] = (int)$userId;
+                $countParams[] = (int)$userId;
+            }
+
             $connection = $this->database->getConnection();
             $countResult = $connection->executeQuery($countSql, $countParams);
             $total = $countResult->fetchOne();
@@ -268,6 +315,7 @@ class ProjectController
                     'date_end' => $project['date_end'],
                     'priority' => $project['priority'],
                     'status' => $project['status'],
+                    'sys_status' => $project['sys_status'] ?? null,
                     'purchase_or_lease' => $project['purchase_or_lease'],
                     'notes' => $project['notes'] ?? null,
                     'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
@@ -323,7 +371,8 @@ class ProjectController
                     'status' => $status,
                     'priority' => $priority,
                     'search' => $search,
-                    'prj_manager' => $prjManager
+                    'prj_manager' => $prjManager,
+                    'user_id' => $userId
                 ]
             ]);
 
@@ -375,6 +424,7 @@ class ProjectController
      *                     @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *                     @OA\Property(property="priority", type="string", example="High"),
      *                     @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
+     *                     @OA\Property(property="sys_status", type="string", nullable=true, enum={"Draft","Active","Closing","Suspended","Done"}, example="Active"),
      *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
      *                     @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
@@ -418,7 +468,7 @@ class ProjectController
             
             $sql = "SELECT
                         p.id, p.prj_name, p.address, p.date_start, p.date_end,
-                        p.priority, p.status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.client_name,
+                        p.priority, p.status, p.sys_status, p.purchase_or_lease, p.notes, p.client_id, p.client_type, p.client_table, p.client_data, p.client_name,
                         p.client2_id, p.client2_type, p.client2_table, p.client2_data, p.client2_name,
                         p.description, p.area, p.level, p.prj_manager, p.created_by, p.created_at, p.updated_at,
                         u.first_name, u.last_name,
@@ -452,6 +502,7 @@ class ProjectController
                 'date_end' => $project['date_end'],
                 'priority' => $project['priority'],
                 'status' => $project['status'],
+                'sys_status' => $project['sys_status'] ?? null,
                 'purchase_or_lease' => $project['purchase_or_lease'],
                 'notes' => $project['notes'] ?? null,
                 'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
@@ -532,6 +583,7 @@ class ProjectController
      *             @OA\Property(property="date_end", type="string", format="date", nullable=true, example="2025-12-31"),
      *             @OA\Property(property="priority", type="string", example="High"),
      *             @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
+     *             @OA\Property(property="sys_status", type="string", nullable=true, enum={"Draft","Active","Closing","Suspended","Done"}, example="Draft", description="System lifecycle status used by app logic"),
      *             @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
      *             @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *             @OA\Property(property="client_id", type="integer", nullable=true, example=1),
@@ -564,6 +616,7 @@ class ProjectController
      *                     @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *                     @OA\Property(property="priority", type="string", example="High"),
      *                     @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
+     *                     @OA\Property(property="sys_status", type="string", nullable=true, enum={"Draft","Active","Closing","Suspended","Done"}, example="Draft"),
      *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
      *                     @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
@@ -604,6 +657,7 @@ class ProjectController
         try {
             $request = Flight::request();
             $data = json_decode($request->getBody(), true);
+            $data = $this->normalizeProjectSysStatusInput($data);
 
             // Валидация данных
             $validation = $this->validateProjectData($data);
@@ -629,8 +683,10 @@ class ProjectController
                 $client2Name = $this->getClientName($data['client2_table'], (int)$data['client2_id']);
             }
             
-            $sql = "INSERT INTO fw_projects (prj_name, address, date_start, date_end, priority, status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, client2_id, client2_type, client2_table, client2_data, client2_name, area, level, prj_manager, created_by, description)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+            $sysStatus = array_key_exists('sys_status', $data) ? $data['sys_status'] : 'Draft';
+            
+            $sql = "INSERT INTO fw_projects (prj_name, address, date_start, date_end, priority, status, sys_status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, client2_id, client2_type, client2_table, client2_data, client2_name, area, level, prj_manager, created_by, description)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
             $params = [
                 $data['prj_name'],
@@ -639,6 +695,7 @@ class ProjectController
                 $data['date_end'] ?? null,
                 $data['priority'] ?? null,
                 $data['status'] ?? null,
+                $sysStatus,
                 $data['purchase_or_lease'] ?? 'Purchase',
                 $data['notes'] ?? null,
                 $data['client_id'] ?? null,
@@ -692,6 +749,7 @@ class ProjectController
                         'date_end' => $project['date_end'],
                         'priority' => $project['priority'],
                         'status' => $project['status'],
+                        'sys_status' => $project['sys_status'] ?? null,
                         'purchase_or_lease' => $project['purchase_or_lease'],
                         'notes' => $project['notes'] ?? null,
                         'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
@@ -758,6 +816,7 @@ class ProjectController
      *             @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *             @OA\Property(property="priority", type="string", example="High"),
      *             @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
+     *             @OA\Property(property="sys_status", type="string", nullable=true, enum={"Draft","Active","Closing","Suspended","Done"}, example="Active", description="System lifecycle status used by app logic"),
      *             @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
      *             @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *             @OA\Property(property="client_id", type="integer", nullable=true, example=1),
@@ -790,6 +849,7 @@ class ProjectController
      *                     @OA\Property(property="date_end", type="string", format="date", example="2025-12-31"),
      *                     @OA\Property(property="priority", type="string", example="High"),
      *                     @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
+     *                     @OA\Property(property="sys_status", type="string", nullable=true, enum={"Draft","Active","Closing","Suspended","Done"}, example="Active"),
      *                     @OA\Property(property="prj_manager", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="created_by", type="integer", nullable=true, example=47),
      *                     @OA\Property(property="created_by_name", type="string", nullable=true, example="John Doe"),
@@ -818,6 +878,7 @@ class ProjectController
         try {
             $request = Flight::request();
             $data = json_decode($request->getBody(), true);
+            $data = $this->normalizeProjectSysStatusInput($data);
 
             $connection = $this->database->getConnection();
             
@@ -851,7 +912,7 @@ class ProjectController
 
             // Получаем текущие данные проекта перед обновлением для логирования
             $beforeResult = $connection->executeQuery(
-                "SELECT id, prj_name, address, date_start, date_end, priority, status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, client2_id, client2_type, client2_table, client2_data, client2_name, description, area, level, prj_manager, created_by, created_at, updated_at
+                "SELECT id, prj_name, address, date_start, date_end, priority, status, sys_status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, client2_id, client2_type, client2_table, client2_data, client2_name, description, area, level, prj_manager, created_by, created_at, updated_at
                  FROM fw_projects WHERE id = ?",
                 [$id]
             );
@@ -885,6 +946,10 @@ class ProjectController
             if (isset($data['status'])) {
                 $updateFields[] = "status = ?";
                 $params[] = $data['status'];
+            }
+            if (array_key_exists('sys_status', $data)) {
+                $updateFields[] = "sys_status = ?";
+                $params[] = $data['sys_status'];
             }
             if (isset($data['purchase_or_lease'])) {
                 $updateFields[] = "purchase_or_lease = ?";
@@ -1027,6 +1092,7 @@ class ProjectController
                     'date_end' => $project['date_end'],
                     'priority' => $project['priority'],
                     'status' => $project['status'],
+                    'sys_status' => $project['sys_status'] ?? null,
                     'purchase_or_lease' => $project['purchase_or_lease'],
                     'notes' => $project['notes'] ?? null,
                     'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
@@ -1061,6 +1127,7 @@ class ProjectController
                             'date_end' => $beforeData['date_end'],
                             'priority' => $beforeData['priority'],
                             'status' => $beforeData['status'],
+                            'sys_status' => $beforeData['sys_status'] ?? null,
                             'purchase_or_lease' => $beforeData['purchase_or_lease'],
                             'notes' => $beforeData['notes'] ?? null,
                             'client_id' => $beforeData['client_id'] ? (int)$beforeData['client_id'] : null,
@@ -1131,6 +1198,7 @@ class ProjectController
                         'date_end' => $project['date_end'],
                         'priority' => $project['priority'],
                         'status' => $project['status'],
+                        'sys_status' => $project['sys_status'] ?? null,
                         'purchase_or_lease' => $project['purchase_or_lease'],
                         'notes' => $project['notes'] ?? null,
                         'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
@@ -1363,6 +1431,28 @@ class ProjectController
                 ];
             }
         }
+        
+        if (array_key_exists('sys_status', $data)) {
+            if ($data['sys_status'] !== null && $data['sys_status'] !== '') {
+                if (!is_string($data['sys_status'])) {
+                    return [
+                        'valid' => false,
+                        'message' => 'sys_status must be a string or null'
+                    ];
+                }
+                if (!in_array($data['sys_status'], self::ALLOWED_PROJECT_SYS_STATUSES, true)) {
+                    return [
+                        'valid' => false,
+                        'message' => 'Invalid sys_status. Allowed: ' . implode(', ', self::ALLOWED_PROJECT_SYS_STATUSES)
+                    ];
+                }
+            } elseif ($data['sys_status'] === '') {
+                return [
+                    'valid' => false,
+                    'message' => 'sys_status cannot be an empty string'
+                ];
+            }
+        }
 
         if (isset($data['purchase_or_lease']) && !in_array($data['purchase_or_lease'], ['Purchase', 'Lease'], true)) {
             return [
@@ -1516,6 +1606,32 @@ class ProjectController
         }
 
         return ['valid' => true];
+    }
+
+    private function normalizeProjectSysStatusInput(array $data): array
+    {
+        if (!array_key_exists('sys_status', $data)) {
+            return $data;
+        }
+
+        if ($data['sys_status'] === null || !is_string($data['sys_status'])) {
+            return $data;
+        }
+
+        $normalized = strtolower(trim($data['sys_status']));
+        $map = [
+            'draft' => 'Draft',
+            'active' => 'Active',
+            'closing' => 'Closing',
+            'suspended' => 'Suspended',
+            'done' => 'Done',
+        ];
+
+        if (isset($map[$normalized])) {
+            $data['sys_status'] = $map[$normalized];
+        }
+
+        return $data;
     }
 
     /**

@@ -74,6 +74,13 @@ class TaskController
      *         required=false,
      *         @OA\Schema(type="string")
      *     ),
+     *     @OA\Parameter(
+     *         name="user_id",
+     *         in="query",
+     *         description="Filter tasks assigned to this user (task lead, member, invited with user_id)",
+     *         required=false,
+     *         @OA\Schema(type="integer", example=47)
+     *     ),
      *     @OA\Response(
      *         response=200,
      *         description="Tasks retrieved successfully",
@@ -141,6 +148,7 @@ class TaskController
             $status = $request->query['status'] ?? null;
             $milestone = $request->query['milestone'] ?? null;
             $search = $request->query['search'] ?? null;
+            $userId = $request->query['user_id'] ?? null;
 
             // Проверяем, существует ли проект
             $connection = $this->database->getConnection();
@@ -193,6 +201,19 @@ class TaskController
             if ($search) {
                 $sql .= " AND name LIKE ?";
                 $params[] = "%{$search}%";
+            }
+
+            // Фильтр задач по назначению пользователя
+            if ($userId !== null && $userId !== '' && is_numeric($userId)) {
+                $sql .= " AND EXISTS (
+                    SELECT 1
+                    FROM fw_prj_team_members tm
+                    WHERE tm.project_id = ?
+                      AND tm.task_id = fw_prj_tasks.id
+                      AND tm.user_id = ?
+                )";
+                $params[] = $projectId;
+                $params[] = (int)$userId;
             }
 
             // Добавляем сортировку
