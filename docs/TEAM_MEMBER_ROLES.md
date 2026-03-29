@@ -156,3 +156,13 @@ ORDER BY assigned_at DESC;
 
 - `role_in_project` is task-context role when `task_id` is set.
 - Project-level team records may also exist in the same table (usually with `task_id IS NULL`), so always include `task_id` in task assignment queries.
+
+## Project team JSON: roster vs task team
+
+- **`GET /api/v1/projects/{id}/tasks/{taskId}/team`** — one object per `fw_prj_team_members` row: `id` is the **membership row id**, `user_id` is the user (or null for some invited rows), `role_in_project`, `assigned_at`.
+- **`GET /api/v1/projects/{id}/team`** — paginated roster; legacy names `team_member_id`, `project_role`, `added_at` remain. The same payload also includes **aliases** for SPA parity: `role_in_project`, `assigned_at`, `user_id` (same as user `id`). The **membership row id** is `team_member_id` (use it for `PUT/DELETE .../team/{team_member_id}`).
+
+## Project `sys_status` (API)
+
+- Stored as DB enum: `Draft`, `Active`, `Closing`, `Suspended`, `Done` (PascalCase).
+- JSON field name: `sys_status`. If the client expects lowercase lifecycle keys, normalize in the SPA (see `readSysStatusFromApiRow` + mapping helpers).

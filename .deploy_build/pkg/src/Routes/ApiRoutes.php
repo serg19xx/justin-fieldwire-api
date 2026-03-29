@@ -11,6 +11,7 @@ use App\Controllers\RegistrationController;
 use App\Controllers\ProjectController;
 use App\Controllers\TaskController;
 use App\Controllers\ProjectTeamController;
+use App\Controllers\ScheduleWeekController;
 use App\Controllers\EventLogController;
 use App\Controllers\N8nIntegrationController;
 use App\Controllers\LanguageController;
@@ -221,6 +222,18 @@ class ApiRoutes
             Flight::route('GET /api/v1/profile', function() use ($profileController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
                     $profileController->getProfile();
+                }
+            });
+
+            $scheduleWeekController = new ScheduleWeekController($this->logger);
+            Flight::route('GET /api/v1/me/schedule', function() use ($scheduleWeekController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $scheduleWeekController->getMySchedule();
+                }
+            });
+            Flight::route('GET /api/v1/users/@user_id/schedule', function($user_id) use ($scheduleWeekController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $scheduleWeekController->getUserSchedule((int) $user_id);
                 }
             });
             
@@ -1097,6 +1110,28 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $teamController = new \App\Controllers\ProjectTeamController($this->logger);
                 Flight::json($teamController->removeTeamMember((int)$project_id, (int)$team_member_id));
+            }
+        });
+
+        $scheduleWeekController = new ScheduleWeekController($this->logger);
+        Flight::route('GET /api/v1/projects/@project_id/schedule-weeks', function($project_id) use ($authMiddleware, $scheduleWeekController) {
+            if ($authMiddleware->handle()) {
+                $scheduleWeekController->getWeek((int) $project_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/schedule-weeks', function($project_id) use ($authMiddleware, $scheduleWeekController) {
+            if ($authMiddleware->handle()) {
+                $scheduleWeekController->ensureDraftWeek((int) $project_id);
+            }
+        });
+        Flight::route('PUT /api/v1/projects/@project_id/schedule-weeks/@week_id/entries', function($project_id, $week_id) use ($authMiddleware, $scheduleWeekController) {
+            if ($authMiddleware->handle()) {
+                $scheduleWeekController->replaceEntries((int) $project_id, (int) $week_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/schedule-weeks/@week_id/publish', function($project_id, $week_id) use ($authMiddleware, $scheduleWeekController) {
+            if ($authMiddleware->handle()) {
+                $scheduleWeekController->publishWeek((int) $project_id, (int) $week_id);
             }
         });
 

@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Support\UserRoleFields;
 use App\Services\TwilioService;
 use App\Services\EmailService;
 use App\Services\EventLoggingService;
@@ -73,6 +74,11 @@ class ProfileController
      *                     @OA\Property(property="name", type="string", example="John Doe"),
      *                     @OA\Property(property="phone", type="string", example="+1234567890"),
      *                     @OA\Property(property="job_title", type="string", example="Field Worker"),
+     *                     @OA\Property(property="role_id", type="integer", nullable=true, example=12),
+     *                     @OA\Property(property="role_code", type="string", example="worker"),
+     *                     @OA\Property(property="role_name", type="string", example="Worker"),
+     *                     @OA\Property(property="role_category", type="string", enum={"global","project","task"}, example="task"),
+     *                     @OA\Property(property="role_description", type="string", nullable=true),
      *                     @OA\Property(property="status", type="string", example="active"),
      *                     @OA\Property(property="avatar_url", type="string", example="http://localhost:8000/api/v1/avatar?file=avatar.png"),
      *                     @OA\Property(property="full_img_url", type="string", example="http://localhost:8000/api/v1/full-image?file=full_image.png"),
@@ -143,6 +149,7 @@ class ProfileController
                         'name' => ($user['first_name'] ?? '') . ' ' . ($user['last_name'] ?? ''),
                         'phone' => $user['phone'] ?? null,
                         'job_title' => $user['job_title'] ?? null,
+                        ...UserRoleFields::fromUserRow($user),
                         'status' => (bool)$user['status'],
                         'status_changed_at' => $user['status_changed_at'] ?? null,
                         'status_end_at' => $user['status_end_at'] ?? null,
@@ -153,8 +160,6 @@ class ProfileController
                         'full_img_url' => isset($user['full_img_url']) ? $user['full_img_url'] : null,
                         'two_factor_enabled' => (bool)($user['two_factor_enabled'] ?? false),
                         'last_login' => $user['last_login'] ?? null,
-                        'status_changed_at' => $user['status_changed_at'] ?? null,
-                        'status_end_at' => $user['status_end_at'] ?? null,
                         'dob' => $user['dob'] ?? null,
                         'gender' => $user['gender'] ?? null,
                         'nationality' => $user['nationality'] ?? null,

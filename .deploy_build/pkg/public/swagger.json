@@ -4895,6 +4895,32 @@
                                                             "type": "string",
                                                             "example": "Field Worker"
                                                         },
+                                                        "role_id": {
+                                                            "type": "integer",
+                                                            "example": 12,
+                                                            "nullable": true
+                                                        },
+                                                        "role_code": {
+                                                            "type": "string",
+                                                            "example": "worker"
+                                                        },
+                                                        "role_name": {
+                                                            "type": "string",
+                                                            "example": "Worker"
+                                                        },
+                                                        "role_category": {
+                                                            "type": "string",
+                                                            "enum": [
+                                                                "global",
+                                                                "project",
+                                                                "task"
+                                                            ],
+                                                            "example": "task"
+                                                        },
+                                                        "role_description": {
+                                                            "type": "string",
+                                                            "nullable": true
+                                                        },
                                                         "status": {
                                                             "type": "string",
                                                             "example": "active"
@@ -8227,6 +8253,325 @@
                 ]
             }
         },
+        "/api/v1/projects/{project_id}/schedule-weeks": {
+            "get": {
+                "tags": [
+                    "Schedule"
+                ],
+                "summary": "Get schedule week and entries",
+                "description": "GET /api/v1/projects/{projectId}/schedule-weeks?week_start=YYYY-MM-DD",
+                "operationId": "eff2ca9f9463626455b7125ed2cf1943",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "week_start",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "404": {
+                        "description": "Project not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Schedule"
+                ],
+                "summary": "Create or return draft schedule week",
+                "description": "POST /api/v1/projects/{projectId}/schedule-weeks \u2014 ensure a draft week row exists\nBody: { \"week_start\": \"YYYY-MM-DD\" } (any day in the week; normalized to Monday)",
+                "operationId": "713909491c45306137e725d31015f4ae",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "week_start"
+                                ],
+                                "properties": {
+                                    "week_start": {
+                                        "type": "string",
+                                        "format": "date",
+                                        "example": "2026-03-23"
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Draft already existed; same data shape as create (schedule_week + entries)"
+                    },
+                    "201": {
+                        "description": "Draft created; schedule_week + entries (empty array if none yet)"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "409": {
+                        "description": "Week already published"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/projects/{project_id}/schedule-weeks/{week_id}/entries": {
+            "put": {
+                "tags": [
+                    "Schedule"
+                ],
+                "summary": "Replace all draft entries for a week",
+                "description": "PUT /api/v1/projects/{projectId}/schedule-weeks/{weekId}/entries\nBody: { \"entries\": [ { \"user_id\", \"task_id\", \"work_date\", \"day_part\" }, ... ] }",
+                "operationId": "c4ba7f48823824db982949fffd5d8a15",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "week_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "entries"
+                                ],
+                                "properties": {
+                                    "entries": {
+                                        "type": "array",
+                                        "items": {
+                                            "properties": {
+                                                "user_id": {
+                                                    "type": "integer"
+                                                },
+                                                "task_id": {
+                                                    "type": "integer"
+                                                },
+                                                "work_date": {
+                                                    "type": "string",
+                                                    "format": "date"
+                                                },
+                                                "day_part": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                        "am",
+                                                        "pm",
+                                                        "full"
+                                                    ]
+                                                }
+                                            },
+                                            "type": "object"
+                                        }
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "409": {
+                        "description": "Not draft or duplicate slot"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/projects/{project_id}/schedule-weeks/{week_id}/publish": {
+            "post": {
+                "tags": [
+                    "Schedule"
+                ],
+                "summary": "Publish schedule week",
+                "description": "POST /api/v1/projects/{projectId}/schedule-weeks/{weekId}/publish",
+                "operationId": "f0c714a792af9aba6b20b0851c6b6b58",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "week_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "409": {
+                        "description": "Not draft"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/me/schedule": {
+            "get": {
+                "tags": [
+                    "Schedule"
+                ],
+                "summary": "Current user schedule (published weeks only)",
+                "description": "GET /api/v1/me/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD",
+                "operationId": "d98700ece5b26afcdff8cf0f8f28cf90",
+                "parameters": [
+                    {
+                        "name": "from",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "to",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
+        "/api/v1/users/{user_id}/schedule": {
+            "get": {
+                "tags": [
+                    "Schedule"
+                ],
+                "summary": "User schedule across projects (published weeks only)",
+                "description": "GET /api/v1/users/{userId}/schedule?from=&to= \u2014 published slots across all projects (PM / admin).",
+                "operationId": "ac1426b8db08b6a8474842479bd8598f",
+                "parameters": [
+                    {
+                        "name": "user_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "from",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    },
+                    {
+                        "name": "to",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "format": "date"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "404": {
+                        "description": "User not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/projects/{project_id}/tasks": {
             "get": {
                 "tags": [
@@ -11524,6 +11869,10 @@
         {
             "name": "Roles",
             "description": "Role management endpoints"
+        },
+        {
+            "name": "Schedule",
+            "description": "Weekly worker\u2013task schedule (draft / published)"
         },
         {
             "name": "Tasks",

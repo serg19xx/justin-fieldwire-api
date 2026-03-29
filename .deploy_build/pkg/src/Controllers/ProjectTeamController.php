@@ -863,9 +863,13 @@ class ProjectTeamController
             'task_id' => isset($member['task_id']) && $member['task_id'] !== null ? (int) $member['task_id'] : null,
             'project_role' => $member['role'],
             'added_at' => $member['added_at'],
+            // Aliases aligned with GET .../tasks/{taskId}/team and SPA ProjectTeamMember type
+            'role_in_project' => $member['role'],
+            'assigned_at' => $member['added_at'],
             
             // User basic info
             'id' => (int) $member['id'],
+            'user_id' => isset($member['id']) ? (int) $member['id'] : null,
             'email' => $member['email'],
             'first_name' => $member['first_name'],
             'last_name' => $member['last_name'],

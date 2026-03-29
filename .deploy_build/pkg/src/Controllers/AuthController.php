@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Support\UserRoleFields;
 use App\Services\UserAuditService;
 use App\Services\EventLoggingService;
 use Doctrine\DBAL\Exception;
@@ -254,11 +255,7 @@ class AuthController
                         'avatar_url' => $user['avatar_url'] ?? null,
                         'two_factor_enabled' => false,
                         'last_login' => $user['last_login'] ?? null,
-                        'role_id' => $user['role_id'] ?? null,
-                        'role_code' => $user['role_code'] ?? null,
-                        'role_name' => $user['role_name'] ?? null,
-                        'role_category' => $user['role_category'] ?? null,
-                        'role_description' => $user['role_description'] ?? null
+                        ...UserRoleFields::fromUserRow($user),
                     ],
                     'requires_2fa' => false,
                     'token' => $token,
