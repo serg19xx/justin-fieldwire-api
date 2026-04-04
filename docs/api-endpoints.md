@@ -182,7 +182,7 @@ GET /api/swagger/spec
     "start_offset_days": 19,
     "milestone": "inspection",
     "status": "planned",
-    "wbs_path": "1.2.1",
+    "address": "123 Main St",
     "task_order": 13
   }
 }

@@ -546,12 +546,38 @@ class ScheduleWeekController
         return null;
     }
 
+    /**
+     * Match TaskController::formatTaskAddressForResponse for nested task in schedule entries.
+     */
+    private function formatTaskAddressForSchedule(?string $raw): ?string
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            return null;
+        }
+        $decoded = json_decode($trimmed, true);
+        if (is_string($decoded)) {
+            return $decoded === '' ? null : $decoded;
+        }
+        if (is_array($decoded)) {
+            $enc = json_encode($decoded, JSON_UNESCAPED_UNICODE);
+
+            return ($enc === false || $enc === '') ? null : $enc;
+        }
+
+        return $trimmed;
+    }
+
     /** @return list<array<string, mixed>> Same entry shape for /me/schedule and /users/{id}/schedule */
     private function buildPublishedScheduleEntries(Connection $conn, int $userId, string $from, string $to): array
     {
         $sql = '
             SELECT s.id, s.project_id, s.user_id, s.task_id, s.work_date, s.day_part, s.schedule_week_id,
                    t.name AS task_name, t.status AS task_status, t.project_id AS task_project_id,
+                   t.address AS task_address,
                    p.prj_name AS project_name
             FROM fw_worker_task_schedules s
             INNER JOIN fw_schedule_weeks w ON w.id = s.schedule_week_id
@@ -581,6 +607,11 @@ class ScheduleWeekController
                     'name' => $r['task_name'],
                     'project_id' => (int) $r['task_project_id'],
                     'status' => $r['task_status'],
+                    'address' => $this->formatTaskAddressForSchedule(
+                        isset($r['task_address']) && $r['task_address'] !== '' && $r['task_address'] !== null
+                            ? (string) $r['task_address']
+                            : null
+                    ),
                 ],
             ];
         }

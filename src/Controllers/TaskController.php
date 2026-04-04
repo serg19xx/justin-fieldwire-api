@@ -17,6 +17,8 @@ use OpenApi\Annotations as OA;
  */
 class TaskController
 {
+    private const TASK_ADDRESS_MAX_LEN = 500;
+
     private Logger $logger;
     private Database $database;
     private EventLoggingService $eventLoggingService;
@@ -34,6 +36,73 @@ class TaskController
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * Plain string for DB from request body. Prefer `address`; legacy clients may send `wbs_path`.
+     */
+    private function normalizeTaskAddressForStorage(array $data): ?string
+    {
+        $raw = null;
+        if (array_key_exists('address', $data)) {
+            $raw = $data['address'];
+        } elseif (array_key_exists('wbs_path', $data)) {
+            $raw = $data['wbs_path'];
+        } else {
+            return null;
+        }
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (is_string($raw)) {
+            $s = trim($raw);
+
+            return $s === '' ? null : $this->truncateTaskAddress($s);
+        }
+        if (is_array($raw)) {
+            $enc = json_encode($raw, JSON_UNESCAPED_UNICODE);
+
+            return ($enc === false || $enc === '') ? null : $this->truncateTaskAddress($enc);
+        }
+
+        return null;
+    }
+
+    private function truncateTaskAddress(string $s): string
+    {
+        if (function_exists('mb_strlen') && function_exists('mb_substr') && mb_strlen($s) > self::TASK_ADDRESS_MAX_LEN) {
+            return mb_substr($s, 0, self::TASK_ADDRESS_MAX_LEN);
+        }
+        if (strlen($s) > self::TASK_ADDRESS_MAX_LEN) {
+            return substr($s, 0, self::TASK_ADDRESS_MAX_LEN);
+        }
+
+        return $s;
+    }
+
+    /**
+     * API response value: string or null. Supports legacy rows stored as JSON-encoded strings.
+     */
+    private function formatTaskAddressForResponse(?string $raw): ?string
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            return null;
+        }
+        $decoded = json_decode($trimmed, true);
+        if (is_string($decoded)) {
+            return $decoded === '' ? null : $decoded;
+        }
+        if (is_array($decoded)) {
+            $enc = json_encode($decoded, JSON_UNESCAPED_UNICODE);
+
+            return ($enc === false || $enc === '') ? null : $enc;
+        }
+
+        return $trimmed;
     }
 
     /**
@@ -70,7 +139,7 @@ class TaskController
      *     @OA\Parameter(
      *         name="search",
      *         in="query",
-     *         description="Search by task name",
+     *         description="Search by task name, notes, or address",
      *         required=false,
      *         @OA\Schema(type="string")
      *     ),
@@ -93,7 +162,7 @@ class TaskController
      *                     @OA\Property(property="id", type="integer", example=1),
      *                     @OA\Property(property="task_order", type="integer", example=1),
      *                     @OA\Property(property="project_id", type="integer", example=1),
-     *                     @OA\Property(property="wbs_path", type="string", example="1.1.1"),
+     *                     @OA\Property(property="address", type="string", nullable=true, example="123 Main St", description="Site / object address"),
      *                     @OA\Property(property="name", type="string", example="Design Phase"),
      *                     @OA\Property(property="start_planned", type="string", format="date", example="2025-01-01"),
      *                     @OA\Property(property="end_planned", type="string", format="date", example="2025-01-15"),
@@ -168,7 +237,7 @@ class TaskController
             }
 
             // Базовый SQL запрос - task_lead_id и team_members теперь в fw_prj_team_members
-            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE project_id = ?";
+            $sql = "SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE project_id = ?";
             $params = [$projectId];
 
             // Фильтр по статусу
@@ -197,10 +266,13 @@ class TaskController
                 }
             }
 
-            // Поиск по названию
+            // Поиск по названию, заметкам и адресу
             if ($search) {
-                $sql .= " AND name LIKE ?";
-                $params[] = "%{$search}%";
+                $term = '%' . $search . '%';
+                $sql .= " AND (name LIKE ? OR notes LIKE ? OR address LIKE ?)";
+                $params[] = $term;
+                $params[] = $term;
+                $params[] = $term;
             }
 
             // Фильтр задач по назначению пользователя
@@ -324,7 +396,7 @@ class TaskController
                     'id' => (int)$task['id'],
                     'task_order' => (int)$task['task_order'],
                     'project_id' => (int)$task['project_id'],
-                    'wbs_path' => isset($task['wbs_path']) && $task['wbs_path'] ? json_decode($task['wbs_path'], true) : null,
+                    'address' => $this->formatTaskAddressForResponse(isset($task['address']) ? (string) $task['address'] : null),
                     'name' => $task['name'],
                     'start_planned' => $task['start_planned'],
                     'end_planned' => $task['end_planned'],
@@ -452,7 +524,7 @@ class TaskController
         try {
             $connection = $this->database->getConnection();
             
-            $sql = "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ? AND project_id = ?";
+            $sql = "SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ? AND project_id = ?";
             $result = $connection->executeQuery($sql, [$taskId, $projectId]);
             $task = $result->fetchAssociative();
 
@@ -578,7 +650,7 @@ class TaskController
                 'id' => (int)$task['id'],
                 'task_order' => (int)$task['task_order'],
                 'project_id' => (int)$task['project_id'],
-                'wbs_path' => $task['wbs_path'] ? json_decode($task['wbs_path'], true) : null,
+                'address' => $this->formatTaskAddressForResponse(isset($task['address']) ? (string) $task['address'] : null),
                 'name' => $task['name'],
                 'start_planned' => $task['start_planned'],
                 'end_planned' => $task['end_planned'],
@@ -647,7 +719,7 @@ class TaskController
      *         required=true,
      *         @OA\JsonContent(
      *             required={"name", "start_planned", "task_lead_id"},
-     *             @OA\Property(property="wbs_path", type="string", example="1.1.1", description="Work Breakdown Structure path"),
+     *             @OA\Property(property="address", type="string", nullable=true, example="123 Main St", description="Site / object address (legacy body key: wbs_path)"),
      *             @OA\Property(property="name", type="string", example="Foundation Work", description="Task name (required)"),
      *             @OA\Property(property="start_planned", type="string", format="date", example="2025-09-10", description="Planned start date (required)"),
      *             @OA\Property(property="end_planned", type="string", format="date", example="2025-09-12", description="Planned end date"),
@@ -748,25 +820,11 @@ class TaskController
             );
             $nextOrder = (int)$nextOrderResult->fetchOne();
             
-            $sql = "INSERT INTO fw_prj_tasks (task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days) 
+            $sql = "INSERT INTO fw_prj_tasks (task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days) 
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-            // 17 параметров: task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days
-            
-            // Обработка wbs_path - всегда сохраняем как JSON строку или NULL
-            $wbsPath = null;
-            if (isset($data['wbs_path']) && $data['wbs_path'] !== '' && $data['wbs_path'] !== null) {
-                // Убираем лишние пробелы
-                $wbsValue = is_string($data['wbs_path']) ? trim($data['wbs_path']) : $data['wbs_path'];
-                
-                if ($wbsValue !== '' && $wbsValue !== null) {
-                    if (is_array($wbsValue)) {
-                        $wbsPath = json_encode($wbsValue);
-                    } else {
-                        // Если это строка, оборачиваем её в JSON
-                        $wbsPath = json_encode($wbsValue);
-                    }
-                }
-            }
+            // task_order, project_id, address, name, ...
+
+            $address = $this->normalizeTaskAddressForStorage($data);
 
             // Обработка team_members - все пользователи должны быть прикреплены к задачам
             // Не проверяем наличие в команде проекта, так как все должны быть назначены на задачи
@@ -785,7 +843,7 @@ class TaskController
             $params = [
                 $nextOrder,
                 $projectId,
-                $wbsPath,
+                $address,
                 $data['name'],
                 $data['start_planned'],
                 $data['end_planned'] ?? null,
@@ -950,7 +1008,7 @@ class TaskController
 
             // Получаем созданную задачу
             $result = $connection->executeQuery(
-                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
+                "SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
                 [$taskId]
             );
             $task = $result->fetchAssociative();
@@ -1125,7 +1183,7 @@ class TaskController
      *     @OA\RequestBody(
      *         required=true,
      *         @OA\JsonContent(
-     *             @OA\Property(property="wbs_path", type="string", example="1.1.2", description="Work Breakdown Structure path"),
+     *             @OA\Property(property="address", type="string", nullable=true, example="456 Oak Ave", description="Site / object address (legacy body key: wbs_path)"),
      *             @OA\Property(property="name", type="string", example="Updated Foundation Work", description="Task name"),
      *             @OA\Property(property="start_planned", type="string", format="date", example="2025-09-11", description="Planned start date"),
      *             @OA\Property(property="end_planned", type="string", format="date", example="2025-09-13", description="Planned end date"),
@@ -1260,21 +1318,9 @@ class TaskController
             $updateFields = [];
             $params = [];
 
-            if (isset($data['wbs_path'])) {
-                $updateFields[] = "wbs_path = ?";
-                // Обработка wbs_path - всегда сохраняем как JSON строку или NULL
-                $wbsPath = null;
-                if ($data['wbs_path'] !== '' && $data['wbs_path'] !== null) {
-                    $wbsValue = is_string($data['wbs_path']) ? trim($data['wbs_path']) : $data['wbs_path'];
-                    if ($wbsValue !== '' && $wbsValue !== null) {
-                        if (is_array($wbsValue)) {
-                            $wbsPath = json_encode($wbsValue);
-                        } else {
-                            $wbsPath = json_encode($wbsValue);
-                        }
-                    }
-                }
-                $params[] = $wbsPath;
+            if (array_key_exists('address', $data) || array_key_exists('wbs_path', $data)) {
+                $updateFields[] = 'address = ?';
+                $params[] = $this->normalizeTaskAddressForStorage($data);
             }
             if (isset($data['name'])) {
                 $updateFields[] = "name = ?";
@@ -1631,7 +1677,7 @@ class TaskController
 
             // Получаем обновленную задачу
             $result = $connection->executeQuery(
-                "SELECT id, task_order, project_id, wbs_path, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
+                "SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
                 [$taskId]
             );
             $task = $result->fetchAssociative();
@@ -2304,6 +2350,15 @@ class TaskController
             ];
         }
 
+        foreach (['address', 'wbs_path'] as $addrField) {
+            if (isset($data[$addrField]) && is_string($data[$addrField]) && strlen($data[$addrField]) > self::TASK_ADDRESS_MAX_LEN) {
+                return [
+                    'valid' => false,
+                    'message' => 'address must not exceed ' . self::TASK_ADDRESS_MAX_LEN . ' characters',
+                ];
+            }
+        }
+
         // Валидация дат
         if (isset($data['start_planned']) && !$this->isValidDate($data['start_planned'])) {
             return [
@@ -2516,7 +2571,7 @@ class TaskController
             'id' => (int)$task['id'],
             'task_order' => (int)$task['task_order'],
             'project_id' => (int)$task['project_id'],
-            'wbs_path' => isset($task['wbs_path']) && $task['wbs_path'] ? json_decode($task['wbs_path'], true) : null,
+            'address' => $this->formatTaskAddressForResponse(isset($task['address']) ? (string) $task['address'] : null),
             'name' => $task['name'],
             'start_planned' => $task['start_planned'],
             'end_planned' => $task['end_planned'],

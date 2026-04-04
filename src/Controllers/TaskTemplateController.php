@@ -14,6 +14,8 @@ use Monolog\Logger;
  */
 class TaskTemplateController
 {
+    private const TEMPLATE_ADDRESS_MAX_LEN = 500;
+
     private Logger $logger;
     private Database $database;
 
@@ -77,6 +79,50 @@ class TaskTemplateController
         return true;
     }
 
+    /**
+     * Normalize `address` for DB (call after merging legacy `wbs_path` into `address` if needed).
+     *
+     * @param array<string, mixed> $template
+     */
+    private function extractTemplateAddress(array $template): ?string
+    {
+        if (!array_key_exists('address', $template)) {
+            return null;
+        }
+        $raw = $template['address'];
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (!is_string($raw)) {
+            return null;
+        }
+        $s = trim($raw);
+        if ($s === '') {
+            return null;
+        }
+        if (function_exists('mb_strlen') && function_exists('mb_substr') && mb_strlen($s) > self::TEMPLATE_ADDRESS_MAX_LEN) {
+            return mb_substr($s, 0, self::TEMPLATE_ADDRESS_MAX_LEN);
+        }
+        if (strlen($s) > self::TEMPLATE_ADDRESS_MAX_LEN) {
+            return substr($s, 0, self::TEMPLATE_ADDRESS_MAX_LEN);
+        }
+
+        return $s;
+    }
+
+    /**
+     * @param array<string, mixed> $template
+     * @return array<string, mixed>
+     */
+    private function mergeLegacyWbsPathIntoAddress(array $template): array
+    {
+        if (array_key_exists('wbs_path', $template) && !array_key_exists('address', $template)) {
+            $template['address'] = $template['wbs_path'];
+        }
+
+        return $template;
+    }
+
     private function formatTemplateRow(array $row): array
     {
         return [
@@ -90,7 +136,7 @@ class TaskTemplateController
             'milestone' => $row['milestone'],
             'status' => $row['status'],
             'notes' => $row['notes'],
-            'wbs_path' => $row['wbs_path'],
+            'address' => $row['address'] ?? null,
             'task_order' => $row['task_order'] !== null ? (int) $row['task_order'] : null,
             'created_at' => $row['created_at'],
             'updated_at' => $row['updated_at'],
@@ -147,8 +193,8 @@ class TaskTemplateController
             }
         }
 
-        if (array_key_exists('wbs_path', $template) && $template['wbs_path'] !== null && strlen($template['wbs_path']) > 100) {
-            $errors['wbs_path'] = ['wbs_path must not exceed 100 characters'];
+        if (array_key_exists('address', $template) && $template['address'] !== null && is_string($template['address']) && strlen($template['address']) > self::TEMPLATE_ADDRESS_MAX_LEN) {
+            $errors['address'] = ['address must not exceed ' . self::TEMPLATE_ADDRESS_MAX_LEN . ' characters'];
         }
 
         if (array_key_exists('task_order', $template) && $template['task_order'] !== null) {
@@ -191,7 +237,7 @@ class TaskTemplateController
             $conn = $this->database->getConnection();
             $result = $conn->executeQuery(
                 "SELECT id, name, description, category, duration_days, start_offset_days, end_offset_days,
-                        milestone, status, notes, wbs_path, task_order, created_at, updated_at
+                        milestone, status, notes, address, task_order, created_at, updated_at
                  FROM fw_task_templates
                  ORDER BY task_order ASC, id ASC"
             );
@@ -222,7 +268,7 @@ class TaskTemplateController
             $conn = $this->database->getConnection();
             $result = $conn->executeQuery(
                 "SELECT id, name, description, category, duration_days, start_offset_days, end_offset_days,
-                        milestone, status, notes, wbs_path, task_order, created_at, updated_at
+                        milestone, status, notes, address, task_order, created_at, updated_at
                  FROM fw_task_templates WHERE id = ?",
                 [$id]
             );
@@ -262,7 +308,7 @@ class TaskTemplateController
 
         try {
             $body = $this->getRequestBody();
-            $template = $body['template'] ?? $body;
+            $template = $this->mergeLegacyWbsPathIntoAddress($body['template'] ?? $body);
 
             if (empty($template) && empty($body)) {
                 Flight::json([
@@ -292,20 +338,20 @@ class TaskTemplateController
             $milestone = isset($template['milestone']) && $template['milestone'] !== '' ? $template['milestone'] : null;
             $status = $template['status'] ?? 'planned';
             $notes = $template['notes'] ?? null;
-            $wbsPath = $template['wbs_path'] ?? null;
+            $address = $this->extractTemplateAddress($template);
             $taskOrder = isset($template['task_order']) ? (int) $template['task_order'] : null;
 
             $conn = $this->database->getConnection();
             $conn->executeStatement(
-                "INSERT INTO fw_task_templates (name, description, category, duration_days, start_offset_days, end_offset_days, milestone, status, notes, wbs_path, task_order)
+                "INSERT INTO fw_task_templates (name, description, category, duration_days, start_offset_days, end_offset_days, milestone, status, notes, address, task_order)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [$name, $description, $category, $durationDays, $startOffsetDays, $endOffsetDays, $milestone, $status, $notes, $wbsPath, $taskOrder]
+                [$name, $description, $category, $durationDays, $startOffsetDays, $endOffsetDays, $milestone, $status, $notes, $address, $taskOrder]
             );
             $id = (int) $conn->lastInsertId();
 
             $result = $conn->executeQuery(
                 "SELECT id, name, description, category, duration_days, start_offset_days, end_offset_days,
-                        milestone, status, notes, wbs_path, task_order, created_at, updated_at
+                        milestone, status, notes, address, task_order, created_at, updated_at
                  FROM fw_task_templates WHERE id = ?",
                 [$id]
             );
@@ -348,7 +394,7 @@ class TaskTemplateController
             }
 
             $body = $this->getRequestBody();
-            $template = $body['template'] ?? $body;
+            $template = $this->mergeLegacyWbsPathIntoAddress($body['template'] ?? $body);
 
             $errors = $this->validateTemplate($template, false);
             if (!empty($errors)) {
@@ -360,7 +406,7 @@ class TaskTemplateController
                 return;
             }
 
-            $allowed = ['name', 'description', 'category', 'duration_days', 'start_offset_days', 'end_offset_days', 'milestone', 'status', 'notes', 'wbs_path', 'task_order'];
+            $allowed = ['name', 'description', 'category', 'duration_days', 'start_offset_days', 'end_offset_days', 'milestone', 'status', 'notes', 'address', 'task_order'];
             $updates = [];
             $params = [];
 
@@ -378,6 +424,9 @@ class TaskTemplateController
                 } elseif (in_array($field, ['duration_days', 'task_order'], true)) {
                     $updates[] = "{$field} = ?";
                     $params[] = $v === null ? null : (int) $v;
+                } elseif ($field === 'address') {
+                    $updates[] = 'address = ?';
+                    $params[] = $this->extractTemplateAddress($template);
                 } else {
                     $updates[] = "{$field} = ?";
                     $params[] = $v;
@@ -387,7 +436,7 @@ class TaskTemplateController
             if (empty($updates)) {
                 $result = $conn->executeQuery(
                     "SELECT id, name, description, category, duration_days, start_offset_days, end_offset_days,
-                            milestone, status, notes, wbs_path, task_order, created_at, updated_at
+                            milestone, status, notes, address, task_order, created_at, updated_at
                      FROM fw_task_templates WHERE id = ?",
                     [$id]
                 );
@@ -406,7 +455,7 @@ class TaskTemplateController
 
             $result = $conn->executeQuery(
                 "SELECT id, name, description, category, duration_days, start_offset_days, end_offset_days,
-                        milestone, status, notes, wbs_path, task_order, created_at, updated_at
+                        milestone, status, notes, address, task_order, created_at, updated_at
                  FROM fw_task_templates WHERE id = ?",
                 [$id]
             );

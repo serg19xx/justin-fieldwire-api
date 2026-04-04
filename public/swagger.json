@@ -8618,7 +8618,7 @@
                     {
                         "name": "search",
                         "in": "query",
-                        "description": "Search by task name",
+                        "description": "Search by task name, notes, or address",
                         "required": false,
                         "schema": {
                             "type": "string"
@@ -8672,9 +8672,11 @@
                                                                 "type": "integer",
                                                                 "example": 1
                                                             },
-                                                            "wbs_path": {
+                                                            "address": {
+                                                                "description": "Site / object address",
                                                                 "type": "string",
-                                                                "example": "1.1.1"
+                                                                "example": "123 Main St",
+                                                                "nullable": true
                                                             },
                                                             "name": {
                                                                 "type": "string",
@@ -8897,10 +8899,11 @@
                                     "task_lead_id"
                                 ],
                                 "properties": {
-                                    "wbs_path": {
-                                        "description": "Work Breakdown Structure path",
+                                    "address": {
+                                        "description": "Site / object address (legacy body key: wbs_path)",
                                         "type": "string",
-                                        "example": "1.1.1"
+                                        "example": "123 Main St",
+                                        "nullable": true
                                     },
                                     "name": {
                                         "description": "Task name (required)",
@@ -9282,10 +9285,11 @@
                         "application/json": {
                             "schema": {
                                 "properties": {
-                                    "wbs_path": {
-                                        "description": "Work Breakdown Structure path",
+                                    "address": {
+                                        "description": "Site / object address (legacy body key: wbs_path)",
                                         "type": "string",
-                                        "example": "1.1.2"
+                                        "example": "456 Oak Ave",
+                                        "nullable": true
                                     },
                                     "name": {
                                         "description": "Task name",

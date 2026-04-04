@@ -89,7 +89,7 @@ Sets `published`, `published_at`, `published_by`. Re-validates every stored entr
 
 ### GET `/api/v1/me/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD`
 
-Published weeks only. Each entry includes `schedule_week_id`, `user_id`, nested `task` (`id`, `name`, `project_id`, `status`), and **`project_name`** (from `fw_projects.prj_name`) for UI hints.
+Published weeks only. Each entry includes `schedule_week_id`, `user_id`, nested `task` (`id`, `name`, `project_id`, `status`, **`address`**), and **`project_name`** (from `fw_projects.prj_name`) for UI hints.
 
 **Range:** `from` and `to` are inclusive; span must not exceed **62** calendar days (otherwise **400**).
 
