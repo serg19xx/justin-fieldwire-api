@@ -23,8 +23,10 @@
 ## Validation
 
 - Task must exist in the project (`fw_prj_tasks.project_id`).
-- Worker must be assigned on that task: row in `fw_prj_team_members` with matching `project_id`, `task_id`, `user_id` (same model as task assignees / lead).
-- `work_date` must fall in the week window **Monday–Sunday** of the schedule week’s `week_start`.
+- **Task roster (assignee)** matches task API semantics: a user counts as on the task if there is any row in **`fw_prj_team_members`** with the same **`project_id`**, **`task_id`**, and **`user_id`** (covers **task lead** and **members**; same source as **`task_lead_id` / `team_members`** on PATCH task). Legacy **`assignees`** / **`fw_prj_task_assignees`** are not used by this API if unused elsewhere.
+- **`PUT …/entries` auto-roster:** inside **one transaction**, before writing slots, the server ensures every distinct **`(user_id, task_id)`** from the payload is on the task roster. If the user is **not** yet on the task but **is** on the project roster (`fw_prj_team_members` for that `project_id`, any `task_id` including `NULL`), the server **inserts** a **member** row the same way as successful task create/PATCH (`role_in_project = 'member'`, with **`ON DUPLICATE KEY UPDATE`** where applicable). **Milestone** tasks do **not** get extra member rows (task model keeps a single lead row); scheduling someone who is not already on that roster returns **400** with an explicit message. If the user is **not** on the project roster, or is archived / missing, the server returns **400** with **`cannot add user … to task …`** (no silent partial success).
+- `work_date` must fall in the week window **Monday–Sunday** of the schedule week’s `week_start` (ISO week anchored on stored Monday).
+- Validation errors for **`entries[]`** include **`entries[i]`** plus **`user_id`**, **`task_id`**, and **`work_date`** where those fields are present for easier PM debugging.
 
 ## Endpoints
 
@@ -84,7 +86,7 @@ Body:
 }
 ```
 
-Replaces all rows for that week in a transaction. **409** if week is not `draft`, or duplicate slot in payload / DB unique violation.
+Replaces all rows for that week in **one transaction** (roster ensures, then delete-all for the week, then insert). **409** if week is not `draft`, or duplicate **`(user_id, work_date, day_part)`** in the payload / DB unique violation. **400** if any entry fails validation or roster rules (see **Validation** above).
 
 ### POST `/api/v1/projects/{projectId}/schedule-weeks/{weekId}/publish`
 

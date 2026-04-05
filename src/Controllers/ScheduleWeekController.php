@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\TaskRosterForScheduleService;
 use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
@@ -204,6 +205,7 @@ class ScheduleWeekController
     /**
      * PUT /api/v1/projects/{projectId}/schedule-weeks/{weekId}/entries
      * Body: { "entries": [ { "user_id", "task_id", "work_date", "day_part", "assignment_note?" }, ... ] }
+     * Ensures each (user_id, task_id) is on the task roster in fw_prj_team_members (may INSERT member) before saving slots; see docs/SCHEDULE_WEEKS_API.md.
      *
      * @OA\Put(
      *     path="/api/v1/projects/{project_id}/schedule-weeks/{week_id}/entries",
@@ -230,6 +232,7 @@ class ScheduleWeekController
      *         )
      *     ),
      *     @OA\Response(response=200, description="OK"),
+     *     @OA\Response(response=400, description="Validation or cannot add user to task roster"),
      *     @OA\Response(response=409, description="Not draft or duplicate slot")
      * )
      */
@@ -266,6 +269,8 @@ class ScheduleWeekController
             return;
         }
 
+        $roster = new TaskRosterForScheduleService();
+
         $normalized = [];
         $slotKeys = [];
         foreach ($entries as $i => $row) {
@@ -278,33 +283,40 @@ class ScheduleWeekController
             $wdate = $row['work_date'] ?? null;
             $dp = $row['day_part'] ?? null;
             if ($wid <= 0 || $tid <= 0 || !$wdate || !is_string($wdate) || !$dp || !is_string($dp)) {
-                $this->error("entries[{$i}]: user_id, task_id, work_date, day_part required", 400);
+                $this->error($this->entryValidationMessage($i, $row, 'user_id, task_id, work_date, day_part required'), 400);
+                return;
+            }
+            if (!$roster->userExistsActive($conn, $wid)) {
+                $this->error($this->entryValidationMessage($i, $row, 'user not found or archived'), 400);
                 return;
             }
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $wdate)) {
-                $this->error("entries[{$i}]: work_date must be YYYY-MM-DD", 400);
+                $this->error($this->entryValidationMessage($i, $row, 'work_date must be YYYY-MM-DD'), 400);
                 return;
             }
             $dp = strtolower(trim($dp));
             if (!in_array($dp, self::DAY_PARTS, true)) {
-                $this->error('day_part must be one of: am, pm, full', 400);
+                $this->error($this->entryValidationMessage($i, $row, 'day_part must be one of: am, pm, full'), 400);
                 return;
             }
             if (!$this->workDateInScheduleWeek((string) $week['week_start'], $wdate)) {
-                $this->error("entries[{$i}]: work_date must fall within the schedule week (Monday–Sunday of week_start)", 400);
+                $this->error(
+                    $this->entryValidationMessage(
+                        $i,
+                        $row,
+                        'work_date must fall within the schedule week (Monday–Sunday of week_start)'
+                    ),
+                    400
+                );
                 return;
             }
             if (!$this->taskBelongsToProject($conn, $tid, $projectId)) {
-                $this->error("entries[{$i}]: task not found in this project", 400);
-                return;
-            }
-            if (!$this->userIsTaskAssignee($conn, $wid, $tid, $projectId)) {
-                $this->error("entries[{$i}]: user is not assigned to this task", 400);
+                $this->error($this->entryValidationMessage($i, $row, 'task not found in this project'), 400);
                 return;
             }
             $noteRaw = $row['assignment_note'] ?? null;
             if ($noteRaw !== null && $noteRaw !== '' && !is_string($noteRaw)) {
-                $this->error("entries[{$i}]: assignment_note must be a string or null", 400);
+                $this->error($this->entryValidationMessage($i, $row, 'assignment_note must be a string or null'), 400);
                 return;
             }
             $assignmentNote = null;
@@ -314,7 +326,11 @@ class ScheduleWeekController
                     $assignmentNote = null;
                 } elseif ($this->stringCharLength($assignmentNote) > self::ASSIGNMENT_NOTE_MAX_LEN) {
                     $this->error(
-                        'entries[' . $i . ']: assignment_note must not exceed ' . self::ASSIGNMENT_NOTE_MAX_LEN . ' characters',
+                        $this->entryValidationMessage(
+                            $i,
+                            $row,
+                            'assignment_note must not exceed ' . self::ASSIGNMENT_NOTE_MAX_LEN . ' characters'
+                        ),
                         400
                     );
                     return;
@@ -322,7 +338,11 @@ class ScheduleWeekController
             }
             $k = $wid . '|' . $wdate . '|' . $dp;
             if (isset($slotKeys[$k])) {
-                $this->error('Duplicate slot in payload: same user_id, work_date, day_part', 409);
+                $this->error(
+                    "Duplicate slot in payload (user_id={$wid}, work_date={$wdate}, day_part={$dp}): "
+                    . 'same user_id, work_date, day_part',
+                    409
+                );
                 return;
             }
             $slotKeys[$k] = true;
@@ -335,8 +355,22 @@ class ScheduleWeekController
             ];
         }
 
+        $pairKeys = [];
+        foreach ($normalized as $e) {
+            $pk = $e['user_id'] . '|' . $e['task_id'];
+            $pairKeys[$pk] = [$e['user_id'], $e['task_id']];
+        }
+
         try {
             $conn->beginTransaction();
+            foreach ($pairKeys as [$pairUserId, $pairTaskId]) {
+                $rosterErr = $roster->ensureUserOnTaskForScheduleSlot($conn, $projectId, $pairTaskId, $pairUserId);
+                if ($rosterErr !== null) {
+                    $conn->rollBack();
+                    $this->error($rosterErr, 400);
+                    return;
+                }
+            }
             $conn->executeStatement(
                 'DELETE FROM fw_worker_task_schedules WHERE schedule_week_id = ?',
                 [$weekId]
@@ -432,18 +466,37 @@ class ScheduleWeekController
             'SELECT user_id, task_id, work_date, day_part FROM fw_worker_task_schedules WHERE schedule_week_id = ?',
             [$weekId]
         )->fetchAllAssociative();
-        foreach ($rows as $i => $row) {
+        $roster = new TaskRosterForScheduleService();
+        foreach ($rows as $row) {
             $ws = (string) $week['week_start'];
             if (!$this->workDateInScheduleWeek($ws, (string) $row['work_date'])) {
-                $this->error("Invalid entry at index {$i}: work_date outside week", 400);
+                $uid = (int) $row['user_id'];
+                $tid = (int) $row['task_id'];
+                $wd = (string) $row['work_date'];
+                $this->error(
+                    "Invalid entry (user_id={$uid}, task_id={$tid}, work_date={$wd}): work_date outside week",
+                    400
+                );
                 return;
             }
             if (!$this->taskBelongsToProject($conn, (int) $row['task_id'], $projectId)) {
-                $this->error("Invalid entry at index {$i}: task not in project", 400);
+                $uid = (int) $row['user_id'];
+                $tid = (int) $row['task_id'];
+                $wd = (string) $row['work_date'];
+                $this->error(
+                    "Invalid entry (user_id={$uid}, task_id={$tid}, work_date={$wd}): task not in project",
+                    400
+                );
                 return;
             }
-            if (!$this->userIsTaskAssignee($conn, (int) $row['user_id'], (int) $row['task_id'], $projectId)) {
-                $this->error("Invalid entry at index {$i}: user not assignee", 400);
+            if (!$roster->isUserOnTask($conn, $projectId, (int) $row['task_id'], (int) $row['user_id'])) {
+                $uid = (int) $row['user_id'];
+                $tid = (int) $row['task_id'];
+                $wd = (string) $row['work_date'];
+                $this->error(
+                    "Invalid entry (user_id={$uid}, task_id={$tid}, work_date={$wd}): user is not on the task roster",
+                    400
+                );
                 return;
             }
         }
@@ -883,15 +936,16 @@ class ScheduleWeekController
         return (bool) $id;
     }
 
-    private function userIsTaskAssignee(Connection $conn, int $userId, int $taskId, int $projectId): bool
+    /**
+     * @param array<string, mixed> $row
+     */
+    private function entryValidationMessage(int $index, array $row, string $detail): string
     {
-        $one = $conn->executeQuery(
-            'SELECT 1 FROM fw_prj_team_members
-             WHERE project_id = ? AND task_id = ? AND user_id = ? LIMIT 1',
-            [$projectId, $taskId, $userId]
-        )->fetchOne();
+        $wid = isset($row['user_id']) ? (int) $row['user_id'] : 0;
+        $tid = isset($row['task_id']) ? (int) $row['task_id'] : 0;
+        $wd = isset($row['work_date']) && is_string($row['work_date']) ? $row['work_date'] : '?';
 
-        return (bool) $one;
+        return "entries[{$index}] (user_id={$wid}, task_id={$tid}, work_date={$wd}): {$detail}";
     }
 
     private function stringCharLength(string $s): int

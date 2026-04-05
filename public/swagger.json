@@ -8508,7 +8508,7 @@
                     "Schedule"
                 ],
                 "summary": "Replace all draft entries for a week",
-                "description": "PUT /api/v1/projects/{projectId}/schedule-weeks/{weekId}/entries\nBody: { \"entries\": [ { \"user_id\", \"task_id\", \"work_date\", \"day_part\", \"assignment_note?\" }, ... ] }",
+                "description": "PUT /api/v1/projects/{projectId}/schedule-weeks/{weekId}/entries\nBody: { \"entries\": [ { \"user_id\", \"task_id\", \"work_date\", \"day_part\", \"assignment_note?\" }, ... ] }\nEnsures each (user_id, task_id) is on the task roster in fw_prj_team_members (may INSERT member) before saving slots; see docs/SCHEDULE_WEEKS_API.md.",
                 "operationId": "c4ba7f48823824db982949fffd5d8a15",
                 "parameters": [
                     {
@@ -8578,6 +8578,9 @@
                 "responses": {
                     "200": {
                         "description": "OK"
+                    },
+                    "400": {
+                        "description": "Validation or cannot add user to task roster"
                     },
                     "409": {
                         "description": "Not draft or duplicate slot"
