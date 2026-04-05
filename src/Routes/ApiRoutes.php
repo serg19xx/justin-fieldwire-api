@@ -12,6 +12,7 @@ use App\Controllers\ProjectController;
 use App\Controllers\TaskController;
 use App\Controllers\ProjectTeamController;
 use App\Controllers\ScheduleWeekController;
+use App\Controllers\ScheduleEntryMessageController;
 use App\Controllers\EventLogController;
 use App\Controllers\N8nIntegrationController;
 use App\Controllers\LanguageController;
@@ -1132,6 +1133,34 @@ class ApiRoutes
         Flight::route('POST /api/v1/projects/@project_id/schedule-weeks/@week_id/publish', function($project_id, $week_id) use ($authMiddleware, $scheduleWeekController) {
             if ($authMiddleware->handle()) {
                 $scheduleWeekController->publishWeek((int) $project_id, (int) $week_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/schedule-weeks/@week_id/reopen-as-draft', function($project_id, $week_id) use ($authMiddleware, $scheduleWeekController) {
+            if ($authMiddleware->handle()) {
+                $scheduleWeekController->reopenAsDraft((int) $project_id, (int) $week_id);
+            }
+        });
+
+        $scheduleEntryMessageController = new ScheduleEntryMessageController($this->logger);
+        Flight::route('GET /api/v1/projects/@project_id/schedule-entries/@schedule_entry_id/messages', function($project_id, $schedule_entry_id) use ($authMiddleware, $scheduleEntryMessageController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryMessageController->index((int) $project_id, (int) $schedule_entry_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/schedule-entries/@schedule_entry_id/messages', function($project_id, $schedule_entry_id) use ($authMiddleware, $scheduleEntryMessageController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryMessageController->create((int) $project_id, (int) $schedule_entry_id);
+            }
+        });
+        // Alias (same handler): some clients use worker-task-schedules in the path
+        Flight::route('GET /api/v1/projects/@project_id/worker-task-schedules/@schedule_entry_id/messages', function($project_id, $schedule_entry_id) use ($authMiddleware, $scheduleEntryMessageController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryMessageController->index((int) $project_id, (int) $schedule_entry_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/worker-task-schedules/@schedule_entry_id/messages', function($project_id, $schedule_entry_id) use ($authMiddleware, $scheduleEntryMessageController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryMessageController->create((int) $project_id, (int) $schedule_entry_id);
             }
         });
 

@@ -25,6 +25,8 @@ class ScheduleWeekController
     /** Inclusive window max length for schedule range queries (`from`…`to`). */
     private const MAX_SCHEDULE_RANGE_DAYS = 62;
 
+    private const ASSIGNMENT_NOTE_MAX_LEN = 2000;
+
     public function __construct(
         private readonly Logger $logger
     ) {
@@ -201,7 +203,7 @@ class ScheduleWeekController
 
     /**
      * PUT /api/v1/projects/{projectId}/schedule-weeks/{weekId}/entries
-     * Body: { "entries": [ { "user_id", "task_id", "work_date", "day_part" }, ... ] }
+     * Body: { "entries": [ { "user_id", "task_id", "work_date", "day_part", "assignment_note?" }, ... ] }
      *
      * @OA\Put(
      *     path="/api/v1/projects/{project_id}/schedule-weeks/{week_id}/entries",
@@ -221,7 +223,8 @@ class ScheduleWeekController
      *                     @OA\Property(property="user_id", type="integer"),
      *                     @OA\Property(property="task_id", type="integer"),
      *                     @OA\Property(property="work_date", type="string", format="date"),
-     *                     @OA\Property(property="day_part", type="string", enum={"am","pm","full"})
+     *                     @OA\Property(property="day_part", type="string", enum={"am","pm","full"}),
+     *                     @OA\Property(property="assignment_note", type="string", nullable=true, maxLength=2000, description="Optional slot note")
      *                 )
      *             )
      *         )
@@ -299,13 +302,37 @@ class ScheduleWeekController
                 $this->error("entries[{$i}]: user is not assigned to this task", 400);
                 return;
             }
+            $noteRaw = $row['assignment_note'] ?? null;
+            if ($noteRaw !== null && $noteRaw !== '' && !is_string($noteRaw)) {
+                $this->error("entries[{$i}]: assignment_note must be a string or null", 400);
+                return;
+            }
+            $assignmentNote = null;
+            if (is_string($noteRaw)) {
+                $assignmentNote = trim($noteRaw);
+                if ($assignmentNote === '') {
+                    $assignmentNote = null;
+                } elseif ($this->stringCharLength($assignmentNote) > self::ASSIGNMENT_NOTE_MAX_LEN) {
+                    $this->error(
+                        'entries[' . $i . ']: assignment_note must not exceed ' . self::ASSIGNMENT_NOTE_MAX_LEN . ' characters',
+                        400
+                    );
+                    return;
+                }
+            }
             $k = $wid . '|' . $wdate . '|' . $dp;
             if (isset($slotKeys[$k])) {
                 $this->error('Duplicate slot in payload: same user_id, work_date, day_part', 409);
                 return;
             }
             $slotKeys[$k] = true;
-            $normalized[] = ['user_id' => $wid, 'task_id' => $tid, 'work_date' => $wdate, 'day_part' => $dp];
+            $normalized[] = [
+                'user_id' => $wid,
+                'task_id' => $tid,
+                'work_date' => $wdate,
+                'day_part' => $dp,
+                'assignment_note' => $assignmentNote,
+            ];
         }
 
         try {
@@ -322,6 +349,7 @@ class ScheduleWeekController
                     'task_id' => $e['task_id'],
                     'work_date' => $e['work_date'],
                     'day_part' => $e['day_part'],
+                    'assignment_note' => $e['assignment_note'],
                 ]);
             }
             $conn->commit();
@@ -420,10 +448,22 @@ class ScheduleWeekController
             }
         }
 
-        $conn->executeStatement(
-            'UPDATE fw_schedule_weeks SET status = ?, published_at = NOW(3), published_by = ?, updated_at = NOW(3) WHERE id = ?',
-            ['published', $actorId, $weekId]
-        );
+        try {
+            $conn->beginTransaction();
+            $this->replacePublishedSnapshot($conn, $weekId);
+            $conn->executeStatement(
+                'UPDATE fw_schedule_weeks SET status = ?, published_at = NOW(3), published_by = ?, updated_at = NOW(3) WHERE id = ?',
+                ['published', $actorId, $weekId]
+            );
+            $conn->commit();
+        } catch (\Throwable $e) {
+            if ($conn->isTransactionActive()) {
+                $conn->rollBack();
+            }
+            $this->logger->error('publishWeek failed', ['error' => $e->getMessage(), 'week_id' => $weekId]);
+            $this->error('Failed to publish schedule week', 500);
+            return;
+        }
 
         // TODO: emit SCHEDULE_WEEK_PUBLISHED
 
@@ -442,12 +482,96 @@ class ScheduleWeekController
     }
 
     /**
+     * POST /api/v1/projects/{projectId}/schedule-weeks/{weekId}/reopen-as-draft
+     *
+     * @OA\Post(
+     *     path="/api/v1/projects/{project_id}/schedule-weeks/{week_id}/reopen-as-draft",
+     *     tags={"Schedule"},
+     *     summary="Reopen a published week as draft (same row, clear publish metadata)",
+     *     description="Body may be empty. Live entries are unchanged. Workers still see the last published snapshot via GET /me/schedule until the week is published again.",
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(name="project_id", in="path", required=true, @OA\Schema(type="integer")),
+     *     @OA\Parameter(name="week_id", in="path", required=true, @OA\Schema(type="integer")),
+     *     @OA\Response(response=200, description="OK — same shape as GET week (schedule_week + entries)"),
+     *     @OA\Response(response=400, description="Week is already draft"),
+     *     @OA\Response(response=403, description="Forbidden"),
+     *     @OA\Response(response=404, description="Not found")
+     * )
+     */
+    public function reopenAsDraft(int $projectId, int $weekId): void
+    {
+        $conn = Database::getConnection();
+        if (!$this->projectExists($conn, $projectId)) {
+            $this->error('Project not found', 404);
+            return;
+        }
+        $actorId = (int) Flight::get('current_user')['id'];
+        if (!$this->canManageSchedule($conn, $actorId, $projectId)) {
+            $this->error('Forbidden', 403);
+            return;
+        }
+
+        $week = $conn->executeQuery(
+            'SELECT id, project_id, week_start, status, published_at, published_by, created_at, updated_at
+             FROM fw_schedule_weeks WHERE id = ? AND project_id = ?',
+            [$weekId, $projectId]
+        )->fetchAssociative();
+        if (!$week) {
+            $this->error('Schedule week not found', 404);
+            return;
+        }
+        if (($week['status'] ?? '') !== 'published') {
+            $this->error('Week is not published; only a published week can be reopened as draft', 400);
+            return;
+        }
+
+        $conn->executeStatement(
+            'UPDATE fw_schedule_weeks SET status = ?, published_at = NULL, published_by = NULL, updated_at = NOW(3) WHERE id = ?',
+            ['draft', $weekId]
+        );
+
+        $weekFull = $conn->executeQuery(
+            'SELECT id, project_id, week_start, status, published_at, published_by, created_at, updated_at
+             FROM fw_schedule_weeks WHERE id = ?',
+            [$weekId]
+        )->fetchAssociative();
+
+        $entries = $this->fetchEntryRowsForWeek($conn, $weekId);
+
+        Flight::json([
+            'error_code' => 0,
+            'status' => 'success',
+            'message' => 'Schedule week reopened as draft',
+            'data' => [
+                'schedule_week' => $this->formatWeekRow($weekFull ?: $week),
+                'entries' => array_map(fn ($r) => $this->formatEntryRow($r), $entries),
+            ],
+        ]);
+    }
+
+    /** Replace rows in fw_worker_task_schedule_snapshots from current live slots for the week. */
+    private function replacePublishedSnapshot(Connection $conn, int $weekId): void
+    {
+        $conn->executeStatement(
+            'DELETE FROM fw_worker_task_schedule_snapshots WHERE schedule_week_id = ?',
+            [$weekId]
+        );
+        $conn->executeStatement(
+            'INSERT INTO fw_worker_task_schedule_snapshots
+                (worker_task_schedule_id, schedule_week_id, project_id, user_id, task_id, work_date, day_part, assignment_note, snapshot_at)
+             SELECT id, schedule_week_id, project_id, user_id, task_id, work_date, day_part, assignment_note, NOW(3)
+             FROM fw_worker_task_schedules WHERE schedule_week_id = ?',
+            [$weekId]
+        );
+    }
+
+    /**
      * GET /api/v1/me/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD
      *
      * @OA\Get(
      *     path="/api/v1/me/schedule",
      *     tags={"Schedule"},
-     *     summary="Current user schedule (published weeks only)",
+     *     summary="Current user schedule (last published snapshot per week)",
      *     security={{"bearerAuth": {}}},
      *     @OA\Parameter(name="from", in="query", required=true, @OA\Schema(type="string", format="date")),
      *     @OA\Parameter(name="to", in="query", required=true, @OA\Schema(type="string", format="date")),
@@ -482,7 +606,7 @@ class ScheduleWeekController
      * @OA\Get(
      *     path="/api/v1/users/{user_id}/schedule",
      *     tags={"Schedule"},
-     *     summary="User schedule across projects (published weeks only)",
+     *     summary="User schedule across projects (last published snapshot per week)",
      *     security={{"bearerAuth": {}}},
      *     @OA\Parameter(name="user_id", in="path", required=true, @OA\Schema(type="integer")),
      *     @OA\Parameter(name="from", in="query", required=true, @OA\Schema(type="string", format="date")),
@@ -546,19 +670,52 @@ class ScheduleWeekController
         return null;
     }
 
-    /** @return list<array<string, mixed>> Same entry shape for /me/schedule and /users/{id}/schedule */
+    /**
+     * Match TaskController::formatTaskAddressForResponse for nested task in schedule entries.
+     */
+    private function formatTaskAddressForSchedule(?string $raw): ?string
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        $trimmed = trim($raw);
+        if ($trimmed === '') {
+            return null;
+        }
+        $decoded = json_decode($trimmed, true);
+        if (is_string($decoded)) {
+            return $decoded === '' ? null : $decoded;
+        }
+        if (is_array($decoded)) {
+            $enc = json_encode($decoded, JSON_UNESCAPED_UNICODE);
+
+            return ($enc === false || $enc === '') ? null : $enc;
+        }
+
+        return $trimmed;
+    }
+
+    /**
+     * Entries from `fw_worker_task_schedule_snapshots` (refreshed on publish) so workers keep seeing the last
+     * published plan after the PM reopens the week as draft.
+     *
+     * @return list<array<string, mixed>> Same shape for /me/schedule and /users/{id}/schedule.
+     *         `id` and `worker_task_schedule_id` match `fw_worker_task_schedules.id` when snapshot was built after
+     *         `worker_task_schedule_id` column exists; otherwise `id` falls back to snapshot row PK until republish.
+     */
     private function buildPublishedScheduleEntries(Connection $conn, int $userId, string $from, string $to): array
     {
         $sql = '
-            SELECT s.id, s.project_id, s.user_id, s.task_id, s.work_date, s.day_part, s.schedule_week_id,
+            SELECT s.id AS snapshot_row_id, s.worker_task_schedule_id, s.project_id, s.user_id, s.task_id, s.work_date, s.day_part, s.schedule_week_id,
+                   s.assignment_note,
                    t.name AS task_name, t.status AS task_status, t.project_id AS task_project_id,
+                   t.address AS task_address,
                    p.prj_name AS project_name
-            FROM fw_worker_task_schedules s
+            FROM fw_worker_task_schedule_snapshots s
             INNER JOIN fw_schedule_weeks w ON w.id = s.schedule_week_id
             INNER JOIN fw_prj_tasks t ON t.id = s.task_id
             INNER JOIN fw_projects p ON p.id = s.project_id
             WHERE s.user_id = ?
-              AND w.status = \'published\'
               AND s.work_date >= ?
               AND s.work_date <= ?
             ORDER BY s.work_date, CASE s.day_part WHEN \'am\' THEN 1 WHEN \'pm\' THEN 2 WHEN \'full\' THEN 3 ELSE 4 END, s.id
@@ -567,20 +724,34 @@ class ScheduleWeekController
 
         $out = [];
         foreach ($rows as $r) {
+            $snapshotRowId = (int) $r['snapshot_row_id'];
+            $liveSlotId = isset($r['worker_task_schedule_id']) && $r['worker_task_schedule_id'] !== null
+                ? (int) $r['worker_task_schedule_id']
+                : null;
+            $unifiedId = $liveSlotId ?? $snapshotRowId;
             $out[] = [
-                'id' => (int) $r['id'],
+                'id' => $unifiedId,
+                'worker_task_schedule_id' => $liveSlotId,
                 'project_id' => (int) $r['project_id'],
                 'user_id' => (int) $r['user_id'],
                 'task_id' => (int) $r['task_id'],
                 'work_date' => $r['work_date'],
                 'day_part' => $r['day_part'],
                 'schedule_week_id' => (int) $r['schedule_week_id'],
+                'assignment_note' => isset($r['assignment_note']) && $r['assignment_note'] !== null && $r['assignment_note'] !== ''
+                    ? (string) $r['assignment_note']
+                    : null,
                 'project_name' => $r['project_name'] !== null && $r['project_name'] !== '' ? (string) $r['project_name'] : null,
                 'task' => [
                     'id' => (int) $r['task_id'],
                     'name' => $r['task_name'],
                     'project_id' => (int) $r['task_project_id'],
                     'status' => $r['task_status'],
+                    'address' => $this->formatTaskAddressForSchedule(
+                        isset($r['task_address']) && $r['task_address'] !== '' && $r['task_address'] !== null
+                            ? (string) $r['task_address']
+                            : null
+                    ),
                 ],
             ];
         }
@@ -723,6 +894,15 @@ class ScheduleWeekController
         return (bool) $one;
     }
 
+    private function stringCharLength(string $s): int
+    {
+        if (function_exists('mb_strlen')) {
+            return mb_strlen($s);
+        }
+
+        return strlen($s);
+    }
+
     private function formatWeekRow(array $week): array
     {
         return [
@@ -739,24 +919,35 @@ class ScheduleWeekController
         ];
     }
 
+    /** `id` / `worker_task_schedule_id` = `fw_worker_task_schedules.id` (no other column). */
     private function formatEntryRow(array $r): array
     {
+        $slotPk = (int) $r['id'];
+
         return [
-            'id' => (int) $r['id'],
+            'id' => $slotPk,
+            'worker_task_schedule_id' => $slotPk,
             'user_id' => (int) $r['user_id'],
             'task_id' => (int) $r['task_id'],
             'work_date' => $r['work_date'],
             'day_part' => $r['day_part'],
             'schedule_week_id' => (int) $r['schedule_week_id'],
             'project_id' => (int) $r['project_id'],
+            'assignment_note' => isset($r['assignment_note']) && $r['assignment_note'] !== null && $r['assignment_note'] !== ''
+                ? (string) $r['assignment_note']
+                : null,
         ];
     }
 
-    /** @return list<array<string, mixed>> */
+    /**
+     * Live slot rows for a week. {@see formatEntryRow} maps `id` → JSON `entries[].id` = PK `fw_worker_task_schedules.id` only.
+     *
+     * @return list<array<string, mixed>>
+     */
     private function fetchEntryRowsForWeek(Connection $conn, int $weekId): array
     {
         return $conn->executeQuery(
-            'SELECT id, user_id, task_id, work_date, day_part, schedule_week_id, project_id
+            'SELECT id, user_id, task_id, work_date, day_part, schedule_week_id, project_id, assignment_note
              FROM fw_worker_task_schedules
              WHERE schedule_week_id = ?
              ORDER BY work_date, CASE day_part WHEN \'am\' THEN 1 WHEN \'pm\' THEN 2 WHEN \'full\' THEN 3 ELSE 4 END, id',

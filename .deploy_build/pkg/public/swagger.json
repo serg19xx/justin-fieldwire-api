@@ -8253,6 +8253,153 @@
                 ]
             }
         },
+        "/api/v1/projects/{project_id}/schedule-entries/{schedule_entry_id}/messages": {
+            "get": {
+                "tags": [
+                    "Schedule"
+                ],
+                "summary": "List messages for one schedule entry and channel",
+                "description": "GET /api/v1/projects/{projectId}/schedule-entries/{scheduleEntryId}/messages?channel=foreman|pm&limit=&before_id=",
+                "operationId": "1c2f3bd36154cca31a1a7a7eb0f76350",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "schedule_entry_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "channel",
+                        "in": "query",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "enum": [
+                                "foreman",
+                                "pm"
+                            ]
+                        }
+                    },
+                    {
+                        "name": "limit",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "before_id",
+                        "in": "query",
+                        "required": false,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK"
+                    },
+                    "400": {
+                        "description": "Invalid channel or pagination"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "404": {
+                        "description": "Not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            },
+            "post": {
+                "tags": [
+                    "Schedule"
+                ],
+                "summary": "Post a message to foreman or PM channel",
+                "description": "POST /api/v1/projects/{projectId}/schedule-entries/{scheduleEntryId}/messages",
+                "operationId": "f8c0513524e70ace7e5f78cb1810b790",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "schedule_entry_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "requestBody": {
+                    "required": true,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "required": [
+                                    "channel",
+                                    "body"
+                                ],
+                                "properties": {
+                                    "channel": {
+                                        "type": "string",
+                                        "enum": [
+                                            "foreman",
+                                            "pm"
+                                        ]
+                                    },
+                                    "body": {
+                                        "type": "string",
+                                        "maxLength": 4000
+                                    }
+                                },
+                                "type": "object"
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "200": {
+                        "description": "Created"
+                    },
+                    "400": {
+                        "description": "Validation"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "404": {
+                        "description": "Not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/projects/{project_id}/schedule-weeks": {
             "get": {
                 "tags": [
@@ -8361,7 +8508,7 @@
                     "Schedule"
                 ],
                 "summary": "Replace all draft entries for a week",
-                "description": "PUT /api/v1/projects/{projectId}/schedule-weeks/{weekId}/entries\nBody: { \"entries\": [ { \"user_id\", \"task_id\", \"work_date\", \"day_part\" }, ... ] }",
+                "description": "PUT /api/v1/projects/{projectId}/schedule-weeks/{weekId}/entries\nBody: { \"entries\": [ { \"user_id\", \"task_id\", \"work_date\", \"day_part\", \"assignment_note?\" }, ... ] }",
                 "operationId": "c4ba7f48823824db982949fffd5d8a15",
                 "parameters": [
                     {
@@ -8411,6 +8558,12 @@
                                                         "pm",
                                                         "full"
                                                     ]
+                                                },
+                                                "assignment_note": {
+                                                    "description": "Optional slot note",
+                                                    "type": "string",
+                                                    "maxLength": 2000,
+                                                    "nullable": true
                                                 }
                                             },
                                             "type": "object"
@@ -8478,12 +8631,59 @@
                 ]
             }
         },
+        "/api/v1/projects/{project_id}/schedule-weeks/{week_id}/reopen-as-draft": {
+            "post": {
+                "tags": [
+                    "Schedule"
+                ],
+                "summary": "Reopen a published week as draft (same row, clear publish metadata)",
+                "description": "Body may be empty. Live entries are unchanged. Workers still see the last published snapshot via GET /me/schedule until the week is published again.",
+                "operationId": "a4ca4dad817dbe9d7105d9df2f1125ea",
+                "parameters": [
+                    {
+                        "name": "project_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "name": "week_id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "integer"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK \u2014 same shape as GET week (schedule_week + entries)"
+                    },
+                    "400": {
+                        "description": "Week is already draft"
+                    },
+                    "403": {
+                        "description": "Forbidden"
+                    },
+                    "404": {
+                        "description": "Not found"
+                    }
+                },
+                "security": [
+                    {
+                        "bearerAuth": []
+                    }
+                ]
+            }
+        },
         "/api/v1/me/schedule": {
             "get": {
                 "tags": [
                     "Schedule"
                 ],
-                "summary": "Current user schedule (published weeks only)",
+                "summary": "Current user schedule (last published snapshot per week)",
                 "description": "GET /api/v1/me/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD",
                 "operationId": "d98700ece5b26afcdff8cf0f8f28cf90",
                 "parameters": [
@@ -8523,7 +8723,7 @@
                 "tags": [
                     "Schedule"
                 ],
-                "summary": "User schedule across projects (published weeks only)",
+                "summary": "User schedule across projects (last published snapshot per week)",
                 "description": "GET /api/v1/users/{userId}/schedule?from=&to= \u2014 published slots across all projects (PM / admin).",
                 "operationId": "ac1426b8db08b6a8474842479bd8598f",
                 "parameters": [
@@ -8618,7 +8818,7 @@
                     {
                         "name": "search",
                         "in": "query",
-                        "description": "Search by task name",
+                        "description": "Search by task name, notes, or address",
                         "required": false,
                         "schema": {
                             "type": "string"
@@ -8672,9 +8872,11 @@
                                                                 "type": "integer",
                                                                 "example": 1
                                                             },
-                                                            "wbs_path": {
+                                                            "address": {
+                                                                "description": "Site / object address",
                                                                 "type": "string",
-                                                                "example": "1.1.1"
+                                                                "example": "123 Main St",
+                                                                "nullable": true
                                                             },
                                                             "name": {
                                                                 "type": "string",
@@ -8897,10 +9099,11 @@
                                     "task_lead_id"
                                 ],
                                 "properties": {
-                                    "wbs_path": {
-                                        "description": "Work Breakdown Structure path",
+                                    "address": {
+                                        "description": "Site / object address (legacy body key: wbs_path)",
                                         "type": "string",
-                                        "example": "1.1.1"
+                                        "example": "123 Main St",
+                                        "nullable": true
                                     },
                                     "name": {
                                         "description": "Task name (required)",
@@ -9282,10 +9485,11 @@
                         "application/json": {
                             "schema": {
                                 "properties": {
-                                    "wbs_path": {
-                                        "description": "Work Breakdown Structure path",
+                                    "address": {
+                                        "description": "Site / object address (legacy body key: wbs_path)",
                                         "type": "string",
-                                        "example": "1.1.2"
+                                        "example": "456 Oak Ave",
+                                        "nullable": true
                                     },
                                     "name": {
                                         "description": "Task name",

@@ -1,0 +1,11 @@
+-- One-off repair when a message row was tied to the wrong slot (wrong URL / id mix-up on client).
+-- Replace IDs with your real fw_worker_task_schedules.id for that slot and fw_worker_task_schedule_messages.id.
+--
+-- Example: message id 5 should belong to slot 45, not 43:
+-- UPDATE fw_worker_task_schedule_messages
+-- SET worker_task_schedule_id = 45
+-- WHERE id = 5
+--   AND worker_task_schedule_id = 43;
+--
+-- Verify before commit:
+-- SELECT id, worker_task_schedule_id, channel, author_user_id, LEFT(body, 40) FROM fw_worker_task_schedule_messages WHERE id IN (5);
