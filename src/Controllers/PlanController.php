@@ -52,6 +52,7 @@ class PlanController
      *                 @OA\Property(property="id", type="integer"),
      *                 @OA\Property(property="name", type="string"),
      *                 @OA\Property(property="parent_id", type="integer", nullable=true),
+     *                 @OA\Property(property="edited", type="integer", description="1=user may rename/move/delete; 0=system folder, locked"),
      *                 @OA\Property(property="created_at", type="string"),
      *                 @OA\Property(property="updated_at", type="string"),
      *                 @OA\Property(property="children", type="array", @OA\Items(type="object")),
@@ -96,7 +97,7 @@ class PlanController
             
             // Получаем все папки
             $rows = $connection->executeQuery(
-                'SELECT id, name, parent_id, created_at, updated_at FROM fw_plan_folders WHERE project_id = ? ORDER BY id ASC',
+                'SELECT id, name, parent_id, edited, created_at, updated_at FROM fw_plan_folders WHERE project_id = ? ORDER BY id ASC',
                 [$projectId]
             )->fetchAllAssociative();
 
@@ -138,6 +139,7 @@ class PlanController
                     'id' => $folderId,
                     'name' => $row['name'],
                     'parent_id' => $row['parent_id'] !== null ? (int)$row['parent_id'] : null,
+                    'edited' => (int)$row['edited'],
                     'created_at' => $row['created_at'],
                     'updated_at' => $row['updated_at'],
                     'children' => [],
@@ -194,7 +196,7 @@ class PlanController
 
             // Папка
             $folder = $connection->executeQuery(
-                'SELECT id, name, parent_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$folderId]
             )->fetchAssociative();
 
@@ -210,7 +212,7 @@ class PlanController
 
             // Подпапки
             $subfolders = $connection->executeQuery(
-                'SELECT id, name, parent_id, created_at, updated_at FROM fw_plan_folders WHERE parent_id = ? ORDER BY id ASC',
+                'SELECT id, name, parent_id, edited, created_at, updated_at FROM fw_plan_folders WHERE parent_id = ? ORDER BY id ASC',
                 [$folderId]
             )->fetchAllAssociative();
 
@@ -225,6 +227,7 @@ class PlanController
                 'id' => (int)$folder['id'],
                 'name' => $folder['name'],
                 'parent_id' => $folder['parent_id'] !== null ? (int)$folder['parent_id'] : null,
+                'edited' => (int)$folder['edited'],
                 'created_at' => $folder['created_at'],
                 'updated_at' => $folder['updated_at']
             ];
@@ -234,6 +237,7 @@ class PlanController
                     'id' => (int)$f['id'],
                     'name' => $f['name'],
                     'parent_id' => $f['parent_id'] !== null ? (int)$f['parent_id'] : null,
+                    'edited' => (int)$f['edited'],
                     'created_at' => $f['created_at'],
                     'updated_at' => $f['updated_at']
                 ];
@@ -377,9 +381,9 @@ class PlanController
                 return;
             }
 
-            // Создаем папку
+            // Создаем папку (edited=1: пользователь может переименовывать/перемещать/удалять)
             $connection->executeStatement(
-                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())',
+                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at, edited) VALUES (?, ?, ?, NOW(), NOW(), 1)',
                 [$name, $parentId, $projectId]
             );
 
@@ -387,7 +391,7 @@ class PlanController
 
             // Получаем созданную папку
             $newFolder = $connection->executeQuery(
-                'SELECT id, name, parent_id, project_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, project_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$folderId]
             )->fetchAssociative();
 
@@ -396,6 +400,7 @@ class PlanController
                 'name' => $newFolder['name'],
                 'parent_id' => $newFolder['parent_id'] !== null ? (int)$newFolder['parent_id'] : null,
                 'project_id' => (int)$newFolder['project_id'],
+                'edited' => (int)$newFolder['edited'],
                 'created_at' => $newFolder['created_at'],
                 'updated_at' => $newFolder['updated_at']
             ], 201);
@@ -445,7 +450,7 @@ class PlanController
 
             // Проверяем существование папки
             $folder = $connection->executeQuery(
-                'SELECT id, name, parent_id, project_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, project_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$folderId]
             )->fetchAssociative();
 
@@ -453,6 +458,15 @@ class PlanController
                 Flight::json([
                     'error' => 'Folder not found'
                 ], 404);
+                return;
+            }
+
+            if ((int)$folder['edited'] === 0) {
+                Flight::json([
+                    'error' => 'Forbidden',
+                    'message' => 'This folder cannot be deleted',
+                    'code' => 'FOLDER_NOT_EDITABLE'
+                ], 403);
                 return;
             }
 
@@ -473,6 +487,7 @@ class PlanController
                         'name' => $folder['name'],
                         'parent_id' => $folder['parent_id'] !== null ? (int)$folder['parent_id'] : null,
                         'project_id' => (int)$folder['project_id'],
+                        'edited' => (int)$folder['edited'],
                         'created_at' => $folder['created_at'],
                         'updated_at' => $folder['updated_at']
                     ]
@@ -1302,6 +1317,15 @@ class PlanController
                 return;
             }
 
+            if ((int)$folder['edited'] === 0) {
+                Flight::json([
+                    'error' => 'Forbidden',
+                    'message' => 'This folder cannot be moved',
+                    'code' => 'FOLDER_NOT_EDITABLE'
+                ], 403);
+                return;
+            }
+
             // If parent_id is provided, check if it exists
             if ($parentId !== null) {
                 // Check if trying to move folder to itself
@@ -1364,7 +1388,7 @@ class PlanController
 
             // Get updated folder data
             $updatedFolder = $connection->executeQuery(
-                'SELECT id, name, parent_id, project_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, project_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$folderId]
             )->fetchAssociative();
 
@@ -1373,6 +1397,7 @@ class PlanController
                 'name' => $updatedFolder['name'],
                 'parent_id' => $updatedFolder['parent_id'] !== null ? (int)$updatedFolder['parent_id'] : null,
                 'project_id' => (int)$updatedFolder['project_id'],
+                'edited' => (int)$updatedFolder['edited'],
                 'created_at' => $updatedFolder['created_at'],
                 'updated_at' => $updatedFolder['updated_at'],
                 'children' => []
@@ -1487,9 +1512,9 @@ class PlanController
             // Check for name conflict and resolve it (always check for copy operation)
             $finalName = $this->resolveFolderNameConflict($connection, $parentId, $finalName);
 
-            // Create new folder
+            // Create new folder (копия создаётся как пользовательская, edited=1)
             $connection->executeStatement(
-                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())',
+                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at, edited) VALUES (?, ?, ?, NOW(), NOW(), 1)',
                 [$finalName, $parentId, $sourceFolder['project_id']]
             );
 
@@ -1500,7 +1525,7 @@ class PlanController
 
             // Get created folder data
             $newFolder = $connection->executeQuery(
-                'SELECT id, name, parent_id, project_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, project_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$newFolderId]
             )->fetchAssociative();
 
@@ -1509,6 +1534,7 @@ class PlanController
                 'name' => $newFolder['name'],
                 'parent_id' => $newFolder['parent_id'] !== null ? (int)$newFolder['parent_id'] : null,
                 'project_id' => (int)$newFolder['project_id'],
+                'edited' => (int)$newFolder['edited'],
                 'created_at' => $newFolder['created_at'],
                 'updated_at' => $newFolder['updated_at'],
                 'children' => []
@@ -1614,9 +1640,9 @@ class PlanController
         )->fetchAllAssociative();
 
         foreach ($subfolders as $subfolder) {
-            // Create new subfolder
+            // Create new subfolder (копии подпапок — редактируемые)
             $connection->executeStatement(
-                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())',
+                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at, edited) VALUES (?, ?, ?, NOW(), NOW(), 1)',
                 [$subfolder['name'], $destinationFolderId, $subfolder['project_id']]
             );
 
@@ -1893,6 +1919,15 @@ class PlanController
                 return;
             }
 
+            if ((int)$folder['edited'] === 0) {
+                Flight::json([
+                    'error' => 'Forbidden',
+                    'message' => 'This folder cannot be renamed',
+                    'code' => 'FOLDER_NOT_EDITABLE'
+                ], 403);
+                return;
+            }
+
             // Check for name conflict in same parent
             $existingFolder = $connection->executeQuery(
                 'SELECT id FROM fw_plan_folders WHERE parent_id ' . ($folder['parent_id'] === null ? 'IS NULL' : '= ?') . ' AND name = ? AND id != ?',
@@ -1916,7 +1951,7 @@ class PlanController
 
             // Get updated folder data
             $updatedFolder = $connection->executeQuery(
-                'SELECT id, name, parent_id, project_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, project_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$folderId]
             )->fetchAssociative();
 
@@ -1925,6 +1960,7 @@ class PlanController
                 'name' => $updatedFolder['name'],
                 'parent_id' => $updatedFolder['parent_id'] !== null ? (int)$updatedFolder['parent_id'] : null,
                 'project_id' => (int)$updatedFolder['project_id'],
+                'edited' => (int)$updatedFolder['edited'],
                 'created_at' => $updatedFolder['created_at'],
                 'updated_at' => $updatedFolder['updated_at']
             ]);
