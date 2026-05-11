@@ -183,3 +183,90 @@ Normative literals: **`foreman`** and **`pm`** only (lowercase ASCII). Anything 
 | 400 | Missing/invalid `channel`, empty/overlong body, bad `limit` / `before_id` |
 | 403 | Not allowed to read stream or to post to that channel |
 | 404 | Project or schedule entry not found / wrong `projectId` |
+
+## 7. Schedule entry documents (`setup` / `completed`)
+
+**Base path:** `/api/v1/projects/{projectId}/schedule-entries/{scheduleEntryId}/documents`
+
+Documents are stored per slot (`fw_worker_task_schedules.id`) in two buckets:
+
+- `setup` — PM instructions (photos/files before work)
+- `completed` — worker results (photos/files after work)
+
+Storage path format:
+
+- `/uploads/schedule-slot-documents/p-{projectId}/t-{taskId}/s-{YYYY-MM-DD}/{bucket}/{storedFileName}`
+
+Note: `am/pm/full` is intentionally not included in the path because day part is already stored in schedule slot metadata.
+
+Database table: `fw_schedule_slot_documents` (create via `scripts/create-schedule-slot-documents-table.sql`).
+
+### GET `/api/v1/projects/{projectId}/schedule-entries/{scheduleEntryId}/documents`
+
+Returns grouped documents:
+
+```json
+{
+  "error_code": 0,
+  "status": "success",
+  "message": "Schedule entry documents retrieved",
+  "data": {
+    "setup": [],
+    "completed": []
+  }
+}
+```
+
+### POST `/api/v1/projects/{projectId}/schedule-entries/{scheduleEntryId}/documents`
+
+`multipart/form-data`:
+
+- `file` (required)
+- `bucket` (required): `setup` | `completed`
+
+Validation:
+
+- `file` required
+- max size: 20MB
+- only `image/*` and `application/pdf` (`.pdf`) accepted
+- `display_name` (optional): trimmed string, max 160 chars, no control characters; empty after trim becomes `null`
+
+### GET `/api/v1/projects/{projectId}/schedule-entries/{scheduleEntryId}/documents/{documentId}/download`
+
+Downloads the file as attachment with original filename.
+
+### DELETE `/api/v1/projects/{projectId}/schedule-entries/{scheduleEntryId}/documents/{documentId}`
+
+Soft-deletes one document row (`deleted_at`) and tries to remove the file from disk.
+
+ACL:
+
+- managers (`admin` / `project_manager` / `prj_manager`) can delete any bucket
+- for `completed`, the assigned worker or uploader may also delete
+
+Error payload format for this documents API:
+
+```json
+{ "message": "..." }
+```
+
+### PATCH `/api/v1/projects/{projectId}/schedule-entries/{scheduleEntryId}/documents/{documentId}`
+### PATCH `/api/v1/projects/{projectId}/schedule-entries/{scheduleEntryId}/documents/{documentId}/rename`
+
+Updates document UI name.
+
+Request body:
+
+```json
+{ "display_name": "Marker on pharma wall" }
+```
+
+`display_name` may be `null` or empty string (stored as `null` after trim).
+
+### Codes
+
+| Code | Meaning |
+|------|---------|
+| 403 | Forbidden by project/schedule ACL |
+| 404 | Project, schedule entry, or document not found |
+| 422 | Validation error, or `scheduleEntryId`/`documentId` does not belong to `projectId` |

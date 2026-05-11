@@ -1898,8 +1898,8 @@ class ProjectController
                 // Вставляем папку с новым project_id
                 try {
                     $connection->executeStatement(
-                        "INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at) 
-                         VALUES (?, ?, ?, ?, ?)",
+                        "INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at, edited) 
+                         VALUES (?, ?, ?, ?, ?, 0)",
                         [
                             $folder['name'],
                             $newParentId,

@@ -13,6 +13,7 @@ use App\Controllers\TaskController;
 use App\Controllers\ProjectTeamController;
 use App\Controllers\ScheduleWeekController;
 use App\Controllers\ScheduleEntryMessageController;
+use App\Controllers\ScheduleEntryDocumentController;
 use App\Controllers\EventLogController;
 use App\Controllers\N8nIntegrationController;
 use App\Controllers\LanguageController;
@@ -1142,6 +1143,7 @@ class ApiRoutes
         });
 
         $scheduleEntryMessageController = new ScheduleEntryMessageController($this->logger);
+        $scheduleEntryDocumentController = new ScheduleEntryDocumentController($this->logger);
         Flight::route('GET /api/v1/projects/@project_id/schedule-entries/@schedule_entry_id/messages', function($project_id, $schedule_entry_id) use ($authMiddleware, $scheduleEntryMessageController) {
             if ($authMiddleware->handle()) {
                 $scheduleEntryMessageController->index((int) $project_id, (int) $schedule_entry_id);
@@ -1161,6 +1163,67 @@ class ApiRoutes
         Flight::route('POST /api/v1/projects/@project_id/worker-task-schedules/@schedule_entry_id/messages', function($project_id, $schedule_entry_id) use ($authMiddleware, $scheduleEntryMessageController) {
             if ($authMiddleware->handle()) {
                 $scheduleEntryMessageController->create((int) $project_id, (int) $schedule_entry_id);
+            }
+        });
+        Flight::route('GET /api/v1/projects/@project_id/schedule-entries/@schedule_entry_id/documents', function($project_id, $schedule_entry_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->index((int) $project_id, (int) $schedule_entry_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/schedule-entries/@schedule_entry_id/documents', function($project_id, $schedule_entry_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->upload((int) $project_id, (int) $schedule_entry_id);
+            }
+        });
+        Flight::route('GET /api/v1/projects/@project_id/schedule-entries/@schedule_entry_id/documents/@document_id/download', function($project_id, $schedule_entry_id, $document_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->download((int) $project_id, (int) $schedule_entry_id, (int) $document_id);
+            }
+        });
+        Flight::route('DELETE /api/v1/projects/@project_id/schedule-entries/@schedule_entry_id/documents/@document_id', function($project_id, $schedule_entry_id, $document_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->delete((int) $project_id, (int) $schedule_entry_id, (int) $document_id);
+            }
+        });
+        Flight::route('PATCH /api/v1/projects/@project_id/schedule-entries/@schedule_entry_id/documents/@document_id', function($project_id, $schedule_entry_id, $document_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->updateDisplayName((int) $project_id, (int) $schedule_entry_id, (int) $document_id);
+            }
+        });
+        Flight::route('PATCH /api/v1/projects/@project_id/schedule-entries/@schedule_entry_id/documents/@document_id/rename', function($project_id, $schedule_entry_id, $document_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->updateDisplayName((int) $project_id, (int) $schedule_entry_id, (int) $document_id);
+            }
+        });
+        // Alias routes for worker contour (same handlers)
+        Flight::route('GET /api/v1/projects/@project_id/worker-task-schedules/@schedule_entry_id/documents', function($project_id, $schedule_entry_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->index((int) $project_id, (int) $schedule_entry_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/worker-task-schedules/@schedule_entry_id/documents', function($project_id, $schedule_entry_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->upload((int) $project_id, (int) $schedule_entry_id);
+            }
+        });
+        Flight::route('GET /api/v1/projects/@project_id/worker-task-schedules/@schedule_entry_id/documents/@document_id/download', function($project_id, $schedule_entry_id, $document_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->download((int) $project_id, (int) $schedule_entry_id, (int) $document_id);
+            }
+        });
+        Flight::route('DELETE /api/v1/projects/@project_id/worker-task-schedules/@schedule_entry_id/documents/@document_id', function($project_id, $schedule_entry_id, $document_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->delete((int) $project_id, (int) $schedule_entry_id, (int) $document_id);
+            }
+        });
+        Flight::route('PATCH /api/v1/projects/@project_id/worker-task-schedules/@schedule_entry_id/documents/@document_id', function($project_id, $schedule_entry_id, $document_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->updateDisplayName((int) $project_id, (int) $schedule_entry_id, (int) $document_id);
+            }
+        });
+        Flight::route('PATCH /api/v1/projects/@project_id/worker-task-schedules/@schedule_entry_id/documents/@document_id/rename', function($project_id, $schedule_entry_id, $document_id) use ($authMiddleware, $scheduleEntryDocumentController) {
+            if ($authMiddleware->handle()) {
+                $scheduleEntryDocumentController->updateDisplayName((int) $project_id, (int) $schedule_entry_id, (int) $document_id);
             }
         });
 

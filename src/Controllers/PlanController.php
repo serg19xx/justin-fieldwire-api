@@ -158,6 +158,11 @@ class PlanController
             }
             unset($node);
 
+            $scheduleBranch = $this->buildScheduleSlotDocumentsTreeRoot((int) $projectId, $connection);
+            if ($scheduleBranch !== null) {
+                $roots[] = $scheduleBranch;
+            }
+
             Flight::json($roots);
         } catch (Exception $e) {
             $this->logger->error('Failed to get folder tree', [
@@ -182,6 +187,7 @@ class PlanController
      *     tags={"Plans"},
      *     security={{"bearerAuth": {}}},
      *     @OA\Parameter(name="folderId", in="path", required=true, @OA\Schema(type="integer")),
+     *     @OA\Parameter(name="project_id", in="query", required=false, @OA\Schema(type="integer"), description="Required when folderId is a virtual schedule-slot-documents folder (negative id)"),
      *     @OA\Response(
      *         response=200,
      *         description="Content returned",
@@ -193,6 +199,33 @@ class PlanController
     {
         try {
             $connection = $this->database->getConnection();
+
+            if ($folderId < 0) {
+                $projectId = isset($_GET['project_id']) ? (int) $_GET['project_id'] : 0;
+                if ($projectId <= 0) {
+                    Flight::json([
+                        'error_code' => 400,
+                        'status' => 'error',
+                        'message' => 'project_id query parameter is required for schedule slot document folders',
+                        'data' => null,
+                    ], 400);
+                    return;
+                }
+
+                $payload = $this->getScheduleSlotDocumentsFolderPayload($projectId, $folderId, $connection);
+                if ($payload === null) {
+                    Flight::json([
+                        'error_code' => 404,
+                        'status' => 'error',
+                        'message' => 'Folder not found',
+                        'data' => null,
+                    ], 404);
+                    return;
+                }
+
+                Flight::json($payload);
+                return;
+            }
 
             // Папка
             $folder = $connection->executeQuery(
@@ -2078,6 +2111,274 @@ class PlanController
                 'code' => 'UPDATE_FAILED'
             ], 500);
         }
+    }
+
+    private function scheduleSlotDocumentsTableExists($connection): bool
+    {
+        try {
+            $n = $connection->executeQuery(
+                'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
+                ['fw_schedule_slot_documents']
+            )->fetchOne();
+
+            return (int) $n > 0;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Stable synthetic folder id (negative) for virtual schedule-slot-document paths.
+     */
+    private function scheduleVirtualFolderId(string $pathKey): int
+    {
+        $crc = crc32($pathKey);
+        if ($crc < 0) {
+            $crc += 4294967296;
+        }
+        $masked = ($crc & 0x7FFFFFFF) | 0x80000000;
+
+        return -(int) $masked;
+    }
+
+    /**
+     * @return array{flat: array<int, array<string, mixed>>, root_id: int}|null
+     */
+    private function buildScheduleSlotDocumentsFlat(int $projectId, $connection): ?array
+    {
+        if (!$this->scheduleSlotDocumentsTableExists($connection)) {
+            return null;
+        }
+
+        $projectId = (int) $projectId;
+        $rootKey = 'ssd:root:' . $projectId;
+        $rootId = $this->scheduleVirtualFolderId($rootKey);
+
+        $flat = [];
+        $flat[$rootId] = [
+            'id' => $rootId,
+            'name' => 'Schedule slot documents',
+            'parent_id' => null,
+            'edited' => 0,
+            'created_at' => null,
+            'updated_at' => null,
+            'child_folder_ids' => [],
+            'files' => [],
+        ];
+
+        $ensureLink = static function (array &$flat, int $parentId, int $childId): void {
+            if (!isset($flat[$parentId]['child_folder_ids'])) {
+                $flat[$parentId]['child_folder_ids'] = [];
+            }
+            if (!in_array($childId, $flat[$parentId]['child_folder_ids'], true)) {
+                $flat[$parentId]['child_folder_ids'][] = $childId;
+            }
+        };
+
+        $rows = $connection->executeQuery(
+            'SELECT d.id, d.file_name, d.original_name, d.display_name, d.mime_type, d.file_size, d.uploaded_by, d.uploaded_at,
+                    d.bucket, d.schedule_entry_id, d.project_id,
+                    e.work_date, e.day_part, e.task_id,
+                    t.name AS task_name
+             FROM fw_schedule_slot_documents d
+             INNER JOIN fw_worker_task_schedules e ON e.id = d.schedule_entry_id AND e.project_id = d.project_id
+             LEFT JOIN fw_prj_tasks t ON t.id = e.task_id AND t.project_id = d.project_id
+             WHERE d.project_id = ? AND d.deleted_at IS NULL
+             ORDER BY t.name, e.work_date, e.day_part, d.bucket, d.uploaded_at, d.id',
+            [$projectId]
+        )->fetchAllAssociative();
+
+        foreach ($rows as $doc) {
+            $taskId = (int) $doc['task_id'];
+            $taskName = isset($doc['task_name']) && is_string($doc['task_name']) ? trim($doc['task_name']) : '';
+            $taskLabel = $taskName !== '' ? $taskName : ('Task #' . $taskId);
+
+            $wd = $doc['work_date'];
+            if ($wd instanceof \DateTimeInterface) {
+                $wd = $wd->format('Y-m-d');
+            } else {
+                $wd = (string) $wd;
+            }
+            $dayPart = (string) $doc['day_part'];
+            $bucket = (string) $doc['bucket'];
+
+            $taskKey = 'ssd:task:' . $projectId . ':' . $taskId;
+            $taskFolderId = $this->scheduleVirtualFolderId($taskKey);
+
+            $slotKey = 'ssd:slot:' . $projectId . ':' . $taskId . ':' . $wd . ':' . $dayPart;
+            $slotFolderId = $this->scheduleVirtualFolderId($slotKey);
+
+            $bucketKey = 'ssd:bucket:' . $projectId . ':' . $taskId . ':' . $wd . ':' . $dayPart . ':' . $bucket;
+            $bucketFolderId = $this->scheduleVirtualFolderId($bucketKey);
+
+            if (!isset($flat[$taskFolderId])) {
+                $flat[$taskFolderId] = [
+                    'id' => $taskFolderId,
+                    'name' => $taskLabel,
+                    'parent_id' => $rootId,
+                    'edited' => 0,
+                    'created_at' => null,
+                    'updated_at' => null,
+                    'child_folder_ids' => [],
+                    'files' => [],
+                ];
+                $ensureLink($flat, $rootId, $taskFolderId);
+            }
+
+            $slotLabel = $wd . ' (' . $dayPart . ')';
+            if (!isset($flat[$slotFolderId])) {
+                $flat[$slotFolderId] = [
+                    'id' => $slotFolderId,
+                    'name' => $slotLabel,
+                    'parent_id' => $taskFolderId,
+                    'edited' => 0,
+                    'created_at' => null,
+                    'updated_at' => null,
+                    'child_folder_ids' => [],
+                    'files' => [],
+                ];
+                $ensureLink($flat, $taskFolderId, $slotFolderId);
+            }
+
+            $bucketLabel = $bucket === 'setup' ? 'setup' : 'completed';
+            if (!isset($flat[$bucketFolderId])) {
+                $flat[$bucketFolderId] = [
+                    'id' => $bucketFolderId,
+                    'name' => $bucketLabel,
+                    'parent_id' => $slotFolderId,
+                    'edited' => 0,
+                    'created_at' => null,
+                    'updated_at' => null,
+                    'child_folder_ids' => [],
+                    'files' => [],
+                ];
+                $ensureLink($flat, $slotFolderId, $bucketFolderId);
+            }
+
+            $flat[$bucketFolderId]['files'][] = $this->formatScheduleSlotDocumentAsPlanFile($doc, $bucketFolderId, $projectId);
+        }
+
+        return ['flat' => $flat, 'root_id' => $rootId];
+    }
+
+    /** @param array<string, mixed> $doc */
+    private function formatScheduleSlotDocumentAsPlanFile(array $doc, int $virtualFolderId, int $projectId): array
+    {
+        $docId = (int) $doc['id'];
+        $display = isset($doc['display_name']) && $doc['display_name'] !== null && $doc['display_name'] !== ''
+            ? (string) $doc['display_name']
+            : (string) $doc['original_name'];
+
+        return [
+            'id' => -$docId,
+            'file_name' => basename((string) $doc['file_name']),
+            'original_name' => $display,
+            'file_path' => '/' . ltrim((string) $doc['file_name'], '/'),
+            'folder_id' => $virtualFolderId,
+            'file_size' => (int) $doc['file_size'],
+            'mime_type' => (string) $doc['mime_type'],
+            'category' => 'schedule_slot_document',
+            'description' => '',
+            'version' => '1.0',
+            'uploaded_by' => (int) $doc['uploaded_by'],
+            'uploaded_at' => $doc['uploaded_at'],
+            'updated_at' => $doc['uploaded_at'],
+            'schedule_document_id' => $docId,
+            'schedule_entry_id' => (int) $doc['schedule_entry_id'],
+            'project_id' => $projectId,
+            'bucket' => (string) $doc['bucket'],
+        ];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $flat
+     */
+    private function materializeScheduleSlotDocumentsTree(array $flat, int $id): array
+    {
+        $n = $flat[$id];
+        $children = [];
+        foreach ($n['child_folder_ids'] as $cid) {
+            $children[] = $this->materializeScheduleSlotDocumentsTree($flat, $cid);
+        }
+
+        return [
+            'id' => $n['id'],
+            'name' => $n['name'],
+            'parent_id' => $n['parent_id'],
+            'edited' => $n['edited'],
+            'created_at' => $n['created_at'],
+            'updated_at' => $n['updated_at'],
+            'children' => $children,
+            'files' => $n['files'],
+        ];
+    }
+
+    /** @param array<string, mixed> $node */
+    private function sortScheduleVirtualTree(array &$node): void
+    {
+        usort(
+            $node['children'],
+            static fn ($a, $b) => strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''))
+        );
+        foreach ($node['children'] as &$child) {
+            $this->sortScheduleVirtualTree($child);
+        }
+        unset($child);
+    }
+
+    private function buildScheduleSlotDocumentsTreeRoot(int $projectId, $connection): ?array
+    {
+        $built = $this->buildScheduleSlotDocumentsFlat($projectId, $connection);
+        if ($built === null) {
+            return null;
+        }
+
+        $tree = $this->materializeScheduleSlotDocumentsTree($built['flat'], $built['root_id']);
+        $this->sortScheduleVirtualTree($tree);
+
+        return $tree;
+    }
+
+    /**
+     * @return array{folder: array<string, mixed>, subfolders: list<array<string, mixed>>, files: list<array<string, mixed>>}|null
+     */
+    private function getScheduleSlotDocumentsFolderPayload(int $projectId, int $folderId, $connection): ?array
+    {
+        $built = $this->buildScheduleSlotDocumentsFlat($projectId, $connection);
+        if ($built === null || !isset($built['flat'][$folderId])) {
+            return null;
+        }
+
+        $n = $built['flat'][$folderId];
+        $subfolders = [];
+        foreach ($n['child_folder_ids'] as $cid) {
+            $c = $built['flat'][$cid];
+            $subfolders[] = [
+                'id' => $c['id'],
+                'name' => $c['name'],
+                'parent_id' => $c['parent_id'],
+                'edited' => $c['edited'],
+                'created_at' => $c['created_at'],
+                'updated_at' => $c['updated_at'],
+            ];
+        }
+        usort(
+            $subfolders,
+            static fn ($a, $b) => strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''))
+        );
+
+        return [
+            'folder' => [
+                'id' => $n['id'],
+                'name' => $n['name'],
+                'parent_id' => $n['parent_id'],
+                'edited' => $n['edited'],
+                'created_at' => $n['created_at'],
+                'updated_at' => $n['updated_at'],
+            ],
+            'subfolders' => $subfolders,
+            'files' => $n['files'],
+        ];
     }
 
     /**

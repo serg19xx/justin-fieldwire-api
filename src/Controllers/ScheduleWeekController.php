@@ -371,21 +371,68 @@ class ScheduleWeekController
                     return;
                 }
             }
-            $conn->executeStatement(
-                'DELETE FROM fw_worker_task_schedules WHERE schedule_week_id = ?',
+
+            // Merge by slot key (user_id + work_date + day_part) so primary keys stay stable across saves.
+            // A full DELETE + re-INSERT would CASCADE-remove documents/messages attached to those slots.
+            $existingRows = $conn->executeQuery(
+                'SELECT id, user_id, task_id, work_date, day_part, assignment_note
+                 FROM fw_worker_task_schedules
+                 WHERE schedule_week_id = ?',
                 [$weekId]
-            );
-            foreach ($normalized as $e) {
-                $conn->insert('fw_worker_task_schedules', [
-                    'schedule_week_id' => $weekId,
-                    'project_id' => $projectId,
-                    'user_id' => $e['user_id'],
-                    'task_id' => $e['task_id'],
-                    'work_date' => $e['work_date'],
-                    'day_part' => $e['day_part'],
-                    'assignment_note' => $e['assignment_note'],
-                ]);
+            )->fetchAllAssociative();
+
+            $bySlotKey = [];
+            foreach ($existingRows as $row) {
+                $wd = $row['work_date'];
+                if ($wd instanceof \DateTimeInterface) {
+                    $wd = $wd->format('Y-m-d');
+                } else {
+                    $wd = (string) $wd;
+                }
+                $slotKey = (int) $row['user_id'] . '|' . $wd . '|' . (string) $row['day_part'];
+                $bySlotKey[$slotKey] = $row;
             }
+
+            $idsStillPresent = [];
+            foreach ($normalized as $e) {
+                $slotKey = $e['user_id'] . '|' . $e['work_date'] . '|' . $e['day_part'];
+                if (isset($bySlotKey[$slotKey])) {
+                    $existingId = (int) $bySlotKey[$slotKey]['id'];
+                    $idsStillPresent[$existingId] = true;
+                    $conn->executeStatement(
+                        'UPDATE fw_worker_task_schedules
+                         SET task_id = ?, assignment_note = ?, updated_at = NOW(3)
+                         WHERE id = ? AND schedule_week_id = ? AND project_id = ?',
+                        [$e['task_id'], $e['assignment_note'], $existingId, $weekId, $projectId]
+                    );
+                } else {
+                    $conn->insert('fw_worker_task_schedules', [
+                        'schedule_week_id' => $weekId,
+                        'project_id' => $projectId,
+                        'user_id' => $e['user_id'],
+                        'task_id' => $e['task_id'],
+                        'work_date' => $e['work_date'],
+                        'day_part' => $e['day_part'],
+                        'assignment_note' => $e['assignment_note'],
+                    ]);
+                }
+            }
+
+            $idsToRemove = [];
+            foreach ($existingRows as $row) {
+                $rowId = (int) $row['id'];
+                if (!isset($idsStillPresent[$rowId])) {
+                    $idsToRemove[] = $rowId;
+                }
+            }
+            if ($idsToRemove !== []) {
+                $placeholders = implode(',', array_fill(0, count($idsToRemove), '?'));
+                $conn->executeStatement(
+                    "DELETE FROM fw_worker_task_schedules WHERE schedule_week_id = ? AND id IN ($placeholders)",
+                    array_merge([$weekId], $idsToRemove)
+                );
+            }
+
             $conn->commit();
         } catch (UniqueConstraintViolationException $e) {
             $conn->rollBack();

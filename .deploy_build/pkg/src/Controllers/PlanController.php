@@ -52,6 +52,7 @@ class PlanController
      *                 @OA\Property(property="id", type="integer"),
      *                 @OA\Property(property="name", type="string"),
      *                 @OA\Property(property="parent_id", type="integer", nullable=true),
+     *                 @OA\Property(property="edited", type="integer", description="1=user may rename/move/delete; 0=system folder, locked"),
      *                 @OA\Property(property="created_at", type="string"),
      *                 @OA\Property(property="updated_at", type="string"),
      *                 @OA\Property(property="children", type="array", @OA\Items(type="object")),
@@ -96,7 +97,7 @@ class PlanController
             
             // Получаем все папки
             $rows = $connection->executeQuery(
-                'SELECT id, name, parent_id, created_at, updated_at FROM fw_plan_folders WHERE project_id = ? ORDER BY id ASC',
+                'SELECT id, name, parent_id, edited, created_at, updated_at FROM fw_plan_folders WHERE project_id = ? ORDER BY id ASC',
                 [$projectId]
             )->fetchAllAssociative();
 
@@ -138,6 +139,7 @@ class PlanController
                     'id' => $folderId,
                     'name' => $row['name'],
                     'parent_id' => $row['parent_id'] !== null ? (int)$row['parent_id'] : null,
+                    'edited' => (int)$row['edited'],
                     'created_at' => $row['created_at'],
                     'updated_at' => $row['updated_at'],
                     'children' => [],
@@ -155,6 +157,11 @@ class PlanController
                 }
             }
             unset($node);
+
+            $scheduleBranch = $this->buildScheduleSlotDocumentsTreeRoot((int) $projectId, $connection);
+            if ($scheduleBranch !== null) {
+                $roots[] = $scheduleBranch;
+            }
 
             Flight::json($roots);
         } catch (Exception $e) {
@@ -192,9 +199,36 @@ class PlanController
         try {
             $connection = $this->database->getConnection();
 
+            if ($folderId < 0) {
+                $projectId = isset($_GET['project_id']) ? (int) $_GET['project_id'] : 0;
+                if ($projectId <= 0) {
+                    Flight::json([
+                        'error_code' => 400,
+                        'status' => 'error',
+                        'message' => 'project_id query parameter is required for schedule slot document folders',
+                        'data' => null,
+                    ], 400);
+                    return;
+                }
+
+                $payload = $this->getScheduleSlotDocumentsFolderPayload($projectId, $folderId, $connection);
+                if ($payload === null) {
+                    Flight::json([
+                        'error_code' => 404,
+                        'status' => 'error',
+                        'message' => 'Folder not found',
+                        'data' => null,
+                    ], 404);
+                    return;
+                }
+
+                Flight::json($payload);
+                return;
+            }
+
             // Папка
             $folder = $connection->executeQuery(
-                'SELECT id, name, parent_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$folderId]
             )->fetchAssociative();
 
@@ -210,7 +244,7 @@ class PlanController
 
             // Подпапки
             $subfolders = $connection->executeQuery(
-                'SELECT id, name, parent_id, created_at, updated_at FROM fw_plan_folders WHERE parent_id = ? ORDER BY id ASC',
+                'SELECT id, name, parent_id, edited, created_at, updated_at FROM fw_plan_folders WHERE parent_id = ? ORDER BY id ASC',
                 [$folderId]
             )->fetchAllAssociative();
 
@@ -225,6 +259,7 @@ class PlanController
                 'id' => (int)$folder['id'],
                 'name' => $folder['name'],
                 'parent_id' => $folder['parent_id'] !== null ? (int)$folder['parent_id'] : null,
+                'edited' => (int)$folder['edited'],
                 'created_at' => $folder['created_at'],
                 'updated_at' => $folder['updated_at']
             ];
@@ -234,6 +269,7 @@ class PlanController
                     'id' => (int)$f['id'],
                     'name' => $f['name'],
                     'parent_id' => $f['parent_id'] !== null ? (int)$f['parent_id'] : null,
+                    'edited' => (int)$f['edited'],
                     'created_at' => $f['created_at'],
                     'updated_at' => $f['updated_at']
                 ];
@@ -377,9 +413,9 @@ class PlanController
                 return;
             }
 
-            // Создаем папку
+            // Создаем папку (edited=1: пользователь может переименовывать/перемещать/удалять)
             $connection->executeStatement(
-                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())',
+                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at, edited) VALUES (?, ?, ?, NOW(), NOW(), 1)',
                 [$name, $parentId, $projectId]
             );
 
@@ -387,7 +423,7 @@ class PlanController
 
             // Получаем созданную папку
             $newFolder = $connection->executeQuery(
-                'SELECT id, name, parent_id, project_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, project_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$folderId]
             )->fetchAssociative();
 
@@ -396,6 +432,7 @@ class PlanController
                 'name' => $newFolder['name'],
                 'parent_id' => $newFolder['parent_id'] !== null ? (int)$newFolder['parent_id'] : null,
                 'project_id' => (int)$newFolder['project_id'],
+                'edited' => (int)$newFolder['edited'],
                 'created_at' => $newFolder['created_at'],
                 'updated_at' => $newFolder['updated_at']
             ], 201);
@@ -445,7 +482,7 @@ class PlanController
 
             // Проверяем существование папки
             $folder = $connection->executeQuery(
-                'SELECT id, name, parent_id, project_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, project_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$folderId]
             )->fetchAssociative();
 
@@ -453,6 +490,15 @@ class PlanController
                 Flight::json([
                     'error' => 'Folder not found'
                 ], 404);
+                return;
+            }
+
+            if ((int)$folder['edited'] === 0) {
+                Flight::json([
+                    'error' => 'Forbidden',
+                    'message' => 'This folder cannot be deleted',
+                    'code' => 'FOLDER_NOT_EDITABLE'
+                ], 403);
                 return;
             }
 
@@ -473,6 +519,7 @@ class PlanController
                         'name' => $folder['name'],
                         'parent_id' => $folder['parent_id'] !== null ? (int)$folder['parent_id'] : null,
                         'project_id' => (int)$folder['project_id'],
+                        'edited' => (int)$folder['edited'],
                         'created_at' => $folder['created_at'],
                         'updated_at' => $folder['updated_at']
                     ]
@@ -1302,6 +1349,15 @@ class PlanController
                 return;
             }
 
+            if ((int)$folder['edited'] === 0) {
+                Flight::json([
+                    'error' => 'Forbidden',
+                    'message' => 'This folder cannot be moved',
+                    'code' => 'FOLDER_NOT_EDITABLE'
+                ], 403);
+                return;
+            }
+
             // If parent_id is provided, check if it exists
             if ($parentId !== null) {
                 // Check if trying to move folder to itself
@@ -1364,7 +1420,7 @@ class PlanController
 
             // Get updated folder data
             $updatedFolder = $connection->executeQuery(
-                'SELECT id, name, parent_id, project_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, project_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$folderId]
             )->fetchAssociative();
 
@@ -1373,6 +1429,7 @@ class PlanController
                 'name' => $updatedFolder['name'],
                 'parent_id' => $updatedFolder['parent_id'] !== null ? (int)$updatedFolder['parent_id'] : null,
                 'project_id' => (int)$updatedFolder['project_id'],
+                'edited' => (int)$updatedFolder['edited'],
                 'created_at' => $updatedFolder['created_at'],
                 'updated_at' => $updatedFolder['updated_at'],
                 'children' => []
@@ -1487,9 +1544,9 @@ class PlanController
             // Check for name conflict and resolve it (always check for copy operation)
             $finalName = $this->resolveFolderNameConflict($connection, $parentId, $finalName);
 
-            // Create new folder
+            // Create new folder (копия создаётся как пользовательская, edited=1)
             $connection->executeStatement(
-                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())',
+                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at, edited) VALUES (?, ?, ?, NOW(), NOW(), 1)',
                 [$finalName, $parentId, $sourceFolder['project_id']]
             );
 
@@ -1500,7 +1557,7 @@ class PlanController
 
             // Get created folder data
             $newFolder = $connection->executeQuery(
-                'SELECT id, name, parent_id, project_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, project_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$newFolderId]
             )->fetchAssociative();
 
@@ -1509,6 +1566,7 @@ class PlanController
                 'name' => $newFolder['name'],
                 'parent_id' => $newFolder['parent_id'] !== null ? (int)$newFolder['parent_id'] : null,
                 'project_id' => (int)$newFolder['project_id'],
+                'edited' => (int)$newFolder['edited'],
                 'created_at' => $newFolder['created_at'],
                 'updated_at' => $newFolder['updated_at'],
                 'children' => []
@@ -1614,9 +1672,9 @@ class PlanController
         )->fetchAllAssociative();
 
         foreach ($subfolders as $subfolder) {
-            // Create new subfolder
+            // Create new subfolder (копии подпапок — редактируемые)
             $connection->executeStatement(
-                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())',
+                'INSERT INTO fw_plan_folders (name, parent_id, project_id, created_at, updated_at, edited) VALUES (?, ?, ?, NOW(), NOW(), 1)',
                 [$subfolder['name'], $destinationFolderId, $subfolder['project_id']]
             );
 
@@ -1893,6 +1951,15 @@ class PlanController
                 return;
             }
 
+            if ((int)$folder['edited'] === 0) {
+                Flight::json([
+                    'error' => 'Forbidden',
+                    'message' => 'This folder cannot be renamed',
+                    'code' => 'FOLDER_NOT_EDITABLE'
+                ], 403);
+                return;
+            }
+
             // Check for name conflict in same parent
             $existingFolder = $connection->executeQuery(
                 'SELECT id FROM fw_plan_folders WHERE parent_id ' . ($folder['parent_id'] === null ? 'IS NULL' : '= ?') . ' AND name = ? AND id != ?',
@@ -1916,7 +1983,7 @@ class PlanController
 
             // Get updated folder data
             $updatedFolder = $connection->executeQuery(
-                'SELECT id, name, parent_id, project_id, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
+                'SELECT id, name, parent_id, project_id, edited, created_at, updated_at FROM fw_plan_folders WHERE id = ?',
                 [$folderId]
             )->fetchAssociative();
 
@@ -1925,6 +1992,7 @@ class PlanController
                 'name' => $updatedFolder['name'],
                 'parent_id' => $updatedFolder['parent_id'] !== null ? (int)$updatedFolder['parent_id'] : null,
                 'project_id' => (int)$updatedFolder['project_id'],
+                'edited' => (int)$updatedFolder['edited'],
                 'created_at' => $updatedFolder['created_at'],
                 'updated_at' => $updatedFolder['updated_at']
             ]);
@@ -2042,6 +2110,274 @@ class PlanController
                 'code' => 'UPDATE_FAILED'
             ], 500);
         }
+    }
+
+    private function scheduleSlotDocumentsTableExists($connection): bool
+    {
+        try {
+            $n = $connection->executeQuery(
+                'SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ?',
+                ['fw_schedule_slot_documents']
+            )->fetchOne();
+
+            return (int) $n > 0;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * Stable synthetic folder id (negative) for virtual schedule-slot-document paths.
+     */
+    private function scheduleVirtualFolderId(string $pathKey): int
+    {
+        $crc = crc32($pathKey);
+        if ($crc < 0) {
+            $crc += 4294967296;
+        }
+        $masked = ($crc & 0x7FFFFFFF) | 0x80000000;
+
+        return -(int) $masked;
+    }
+
+    /**
+     * @return array{flat: array<int, array<string, mixed>>, root_id: int}|null
+     */
+    private function buildScheduleSlotDocumentsFlat(int $projectId, $connection): ?array
+    {
+        if (!$this->scheduleSlotDocumentsTableExists($connection)) {
+            return null;
+        }
+
+        $projectId = (int) $projectId;
+        $rootKey = 'ssd:root:' . $projectId;
+        $rootId = $this->scheduleVirtualFolderId($rootKey);
+
+        $flat = [];
+        $flat[$rootId] = [
+            'id' => $rootId,
+            'name' => 'Schedule slot documents',
+            'parent_id' => null,
+            'edited' => 0,
+            'created_at' => null,
+            'updated_at' => null,
+            'child_folder_ids' => [],
+            'files' => [],
+        ];
+
+        $ensureLink = static function (array &$flat, int $parentId, int $childId): void {
+            if (!isset($flat[$parentId]['child_folder_ids'])) {
+                $flat[$parentId]['child_folder_ids'] = [];
+            }
+            if (!in_array($childId, $flat[$parentId]['child_folder_ids'], true)) {
+                $flat[$parentId]['child_folder_ids'][] = $childId;
+            }
+        };
+
+        $rows = $connection->executeQuery(
+            'SELECT d.id, d.file_name, d.original_name, d.display_name, d.mime_type, d.file_size, d.uploaded_by, d.uploaded_at,
+                    d.bucket, d.schedule_entry_id, d.project_id,
+                    e.work_date, e.day_part, e.task_id,
+                    t.name AS task_name
+             FROM fw_schedule_slot_documents d
+             INNER JOIN fw_worker_task_schedules e ON e.id = d.schedule_entry_id AND e.project_id = d.project_id
+             LEFT JOIN fw_prj_tasks t ON t.id = e.task_id AND t.project_id = d.project_id
+             WHERE d.project_id = ? AND d.deleted_at IS NULL
+             ORDER BY t.name, e.work_date, e.day_part, d.bucket, d.uploaded_at, d.id',
+            [$projectId]
+        )->fetchAllAssociative();
+
+        foreach ($rows as $doc) {
+            $taskId = (int) $doc['task_id'];
+            $taskName = isset($doc['task_name']) && is_string($doc['task_name']) ? trim($doc['task_name']) : '';
+            $taskLabel = $taskName !== '' ? $taskName : ('Task #' . $taskId);
+
+            $wd = $doc['work_date'];
+            if ($wd instanceof \DateTimeInterface) {
+                $wd = $wd->format('Y-m-d');
+            } else {
+                $wd = (string) $wd;
+            }
+            $dayPart = (string) $doc['day_part'];
+            $bucket = (string) $doc['bucket'];
+
+            $taskKey = 'ssd:task:' . $projectId . ':' . $taskId;
+            $taskFolderId = $this->scheduleVirtualFolderId($taskKey);
+
+            $slotKey = 'ssd:slot:' . $projectId . ':' . $taskId . ':' . $wd . ':' . $dayPart;
+            $slotFolderId = $this->scheduleVirtualFolderId($slotKey);
+
+            $bucketKey = 'ssd:bucket:' . $projectId . ':' . $taskId . ':' . $wd . ':' . $dayPart . ':' . $bucket;
+            $bucketFolderId = $this->scheduleVirtualFolderId($bucketKey);
+
+            if (!isset($flat[$taskFolderId])) {
+                $flat[$taskFolderId] = [
+                    'id' => $taskFolderId,
+                    'name' => $taskLabel,
+                    'parent_id' => $rootId,
+                    'edited' => 0,
+                    'created_at' => null,
+                    'updated_at' => null,
+                    'child_folder_ids' => [],
+                    'files' => [],
+                ];
+                $ensureLink($flat, $rootId, $taskFolderId);
+            }
+
+            $slotLabel = $wd . ' (' . $dayPart . ')';
+            if (!isset($flat[$slotFolderId])) {
+                $flat[$slotFolderId] = [
+                    'id' => $slotFolderId,
+                    'name' => $slotLabel,
+                    'parent_id' => $taskFolderId,
+                    'edited' => 0,
+                    'created_at' => null,
+                    'updated_at' => null,
+                    'child_folder_ids' => [],
+                    'files' => [],
+                ];
+                $ensureLink($flat, $taskFolderId, $slotFolderId);
+            }
+
+            $bucketLabel = $bucket === 'setup' ? 'setup' : 'completed';
+            if (!isset($flat[$bucketFolderId])) {
+                $flat[$bucketFolderId] = [
+                    'id' => $bucketFolderId,
+                    'name' => $bucketLabel,
+                    'parent_id' => $slotFolderId,
+                    'edited' => 0,
+                    'created_at' => null,
+                    'updated_at' => null,
+                    'child_folder_ids' => [],
+                    'files' => [],
+                ];
+                $ensureLink($flat, $slotFolderId, $bucketFolderId);
+            }
+
+            $flat[$bucketFolderId]['files'][] = $this->formatScheduleSlotDocumentAsPlanFile($doc, $bucketFolderId, $projectId);
+        }
+
+        return ['flat' => $flat, 'root_id' => $rootId];
+    }
+
+    /** @param array<string, mixed> $doc */
+    private function formatScheduleSlotDocumentAsPlanFile(array $doc, int $virtualFolderId, int $projectId): array
+    {
+        $docId = (int) $doc['id'];
+        $display = isset($doc['display_name']) && $doc['display_name'] !== null && $doc['display_name'] !== ''
+            ? (string) $doc['display_name']
+            : (string) $doc['original_name'];
+
+        return [
+            'id' => -$docId,
+            'file_name' => basename((string) $doc['file_name']),
+            'original_name' => $display,
+            'file_path' => '/' . ltrim((string) $doc['file_name'], '/'),
+            'folder_id' => $virtualFolderId,
+            'file_size' => (int) $doc['file_size'],
+            'mime_type' => (string) $doc['mime_type'],
+            'category' => 'schedule_slot_document',
+            'description' => '',
+            'version' => '1.0',
+            'uploaded_by' => (int) $doc['uploaded_by'],
+            'uploaded_at' => $doc['uploaded_at'],
+            'updated_at' => $doc['uploaded_at'],
+            'schedule_document_id' => $docId,
+            'schedule_entry_id' => (int) $doc['schedule_entry_id'],
+            'project_id' => $projectId,
+            'bucket' => (string) $doc['bucket'],
+        ];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $flat
+     */
+    private function materializeScheduleSlotDocumentsTree(array $flat, int $id): array
+    {
+        $n = $flat[$id];
+        $children = [];
+        foreach ($n['child_folder_ids'] as $cid) {
+            $children[] = $this->materializeScheduleSlotDocumentsTree($flat, $cid);
+        }
+
+        return [
+            'id' => $n['id'],
+            'name' => $n['name'],
+            'parent_id' => $n['parent_id'],
+            'edited' => $n['edited'],
+            'created_at' => $n['created_at'],
+            'updated_at' => $n['updated_at'],
+            'children' => $children,
+            'files' => $n['files'],
+        ];
+    }
+
+    /** @param array<string, mixed> $node */
+    private function sortScheduleVirtualTree(array &$node): void
+    {
+        usort(
+            $node['children'],
+            static fn ($a, $b) => strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''))
+        );
+        foreach ($node['children'] as &$child) {
+            $this->sortScheduleVirtualTree($child);
+        }
+        unset($child);
+    }
+
+    private function buildScheduleSlotDocumentsTreeRoot(int $projectId, $connection): ?array
+    {
+        $built = $this->buildScheduleSlotDocumentsFlat($projectId, $connection);
+        if ($built === null) {
+            return null;
+        }
+
+        $tree = $this->materializeScheduleSlotDocumentsTree($built['flat'], $built['root_id']);
+        $this->sortScheduleVirtualTree($tree);
+
+        return $tree;
+    }
+
+    /**
+     * @return array{folder: array<string, mixed>, subfolders: list<array<string, mixed>>, files: list<array<string, mixed>>}|null
+     */
+    private function getScheduleSlotDocumentsFolderPayload(int $projectId, int $folderId, $connection): ?array
+    {
+        $built = $this->buildScheduleSlotDocumentsFlat($projectId, $connection);
+        if ($built === null || !isset($built['flat'][$folderId])) {
+            return null;
+        }
+
+        $n = $built['flat'][$folderId];
+        $subfolders = [];
+        foreach ($n['child_folder_ids'] as $cid) {
+            $c = $built['flat'][$cid];
+            $subfolders[] = [
+                'id' => $c['id'],
+                'name' => $c['name'],
+                'parent_id' => $c['parent_id'],
+                'edited' => $c['edited'],
+                'created_at' => $c['created_at'],
+                'updated_at' => $c['updated_at'],
+            ];
+        }
+        usort(
+            $subfolders,
+            static fn ($a, $b) => strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''))
+        );
+
+        return [
+            'folder' => [
+                'id' => $n['id'],
+                'name' => $n['name'],
+                'parent_id' => $n['parent_id'],
+                'edited' => $n['edited'],
+                'created_at' => $n['created_at'],
+                'updated_at' => $n['updated_at'],
+            ],
+            'subfolders' => $subfolders,
+            'files' => $n['files'],
+        ];
     }
 
     /**
