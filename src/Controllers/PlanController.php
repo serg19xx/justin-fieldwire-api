@@ -850,7 +850,31 @@ class PlanController
     {
         try {
             $connection = $this->database->getConnection();
-    
+
+            // Virtual plan tree files for schedule slots use negative ids (-schedule_document_id).
+            if ($fileId < 0) {
+                $documentId = abs($fileId);
+                if ($documentId <= 0 || !$this->scheduleSlotDocumentsTableExists($connection)) {
+                    Flight::json([
+                        'error' => 'File not found',
+                    ], 404);
+                    return;
+                }
+                $loc = $connection->executeQuery(
+                    'SELECT project_id, schedule_entry_id FROM fw_schedule_slot_documents WHERE id = ? AND deleted_at IS NULL',
+                    [$documentId]
+                )->fetchAssociative();
+                if (!$loc) {
+                    Flight::json([
+                        'error' => 'File not found',
+                    ], 404);
+                    return;
+                }
+                $scheduleDocs = new ScheduleEntryDocumentController($this->logger);
+                $scheduleDocs->download((int) $loc['project_id'], (int) $loc['schedule_entry_id'], $documentId);
+                return;
+            }
+
             // Получаем информацию о файле
             $file = $connection->executeQuery(
                 'SELECT id, file_name, original_name, file_path, file_size, mime_type FROM fw_plan_files WHERE id = ?',

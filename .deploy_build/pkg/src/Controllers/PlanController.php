@@ -187,6 +187,7 @@ class PlanController
      *     tags={"Plans"},
      *     security={{"bearerAuth": {}}},
      *     @OA\Parameter(name="folderId", in="path", required=true, @OA\Schema(type="integer")),
+     *     @OA\Parameter(name="project_id", in="query", required=false, @OA\Schema(type="integer"), description="Required when folderId is a virtual schedule-slot-documents folder (negative id)"),
      *     @OA\Response(
      *         response=200,
      *         description="Content returned",
@@ -849,7 +850,31 @@ class PlanController
     {
         try {
             $connection = $this->database->getConnection();
-    
+
+            // Virtual plan tree files for schedule slots use negative ids (-schedule_document_id).
+            if ($fileId < 0) {
+                $documentId = abs($fileId);
+                if ($documentId <= 0 || !$this->scheduleSlotDocumentsTableExists($connection)) {
+                    Flight::json([
+                        'error' => 'File not found',
+                    ], 404);
+                    return;
+                }
+                $loc = $connection->executeQuery(
+                    'SELECT project_id, schedule_entry_id FROM fw_schedule_slot_documents WHERE id = ? AND deleted_at IS NULL',
+                    [$documentId]
+                )->fetchAssociative();
+                if (!$loc) {
+                    Flight::json([
+                        'error' => 'File not found',
+                    ], 404);
+                    return;
+                }
+                $scheduleDocs = new ScheduleEntryDocumentController($this->logger);
+                $scheduleDocs->download((int) $loc['project_id'], (int) $loc['schedule_entry_id'], $documentId);
+                return;
+            }
+
             // Получаем информацию о файле
             $file = $connection->executeQuery(
                 'SELECT id, file_name, original_name, file_path, file_size, mime_type FROM fw_plan_files WHERE id = ?',
