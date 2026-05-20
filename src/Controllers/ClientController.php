@@ -159,16 +159,19 @@ class ClientController
 
             $connection = $this->database->getConnection();
 
-            // Строим WHERE условие для поиска
-            $whereConditions = [];
+            // Exclude rows with empty display name (NULL, blank, whitespace-only).
+            $whereConditions = [
+                "{$nameField} IS NOT NULL",
+                "TRIM({$nameField}) <> ''",
+            ];
             $params = [];
 
-            if ($search) {
+            if (is_string($search) && trim($search) !== '') {
                 $whereConditions[] = "{$nameField} LIKE ?";
-                $params[] = "%{$search}%";
+                $params[] = '%' . trim($search) . '%';
             }
 
-            $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
+            $whereClause = 'WHERE ' . implode(' AND ', $whereConditions);
 
             // Получаем общее количество
             $countSql = "SELECT COUNT(*) as total FROM {$tableName} {$whereClause}";
