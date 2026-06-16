@@ -20,6 +20,7 @@ use App\Controllers\LanguageController;
 use App\Controllers\EventRulesController;
 use App\Controllers\MessageTemplatesController;
 use App\Controllers\ClientController;
+use App\Controllers\CalendarController;
 use App\Database\Database;
 use Flight;
 use Monolog\Logger;
@@ -1139,6 +1140,53 @@ class ApiRoutes
         Flight::route('POST /api/v1/projects/@project_id/schedule-weeks/@week_id/reopen-as-draft', function($project_id, $week_id) use ($authMiddleware, $scheduleWeekController) {
             if ($authMiddleware->handle()) {
                 $scheduleWeekController->reopenAsDraft((int) $project_id, (int) $week_id);
+            }
+        });
+
+        $calendarController = new CalendarController($this->logger);
+        Flight::route('GET /api/v1/calendar/events', function() use ($authMiddleware, $calendarController) {
+            if ($authMiddleware->handle()) {
+                $calendarController->listGlobal();
+            }
+        });
+        Flight::route('GET /api/v1/calendar/availability', function() use ($authMiddleware, $calendarController) {
+            if ($authMiddleware->handle()) {
+                $calendarController->checkAvailability();
+            }
+        });
+        Flight::route('POST /api/v1/calendar/events', function() use ($authMiddleware, $calendarController) {
+            if ($authMiddleware->handle()) {
+                $calendarController->createGlobal();
+            }
+        });
+        Flight::route('PUT /api/v1/calendar/events/@event_id', function($event_id) use ($authMiddleware, $calendarController) {
+            if ($authMiddleware->handle()) {
+                $calendarController->updateGlobal((int) $event_id);
+            }
+        });
+        Flight::route('DELETE /api/v1/calendar/events/@event_id', function($event_id) use ($authMiddleware, $calendarController) {
+            if ($authMiddleware->handle()) {
+                $calendarController->deleteGlobal((int) $event_id);
+            }
+        });
+        Flight::route('GET /api/v1/projects/@project_id/calendar/events', function($project_id) use ($authMiddleware, $calendarController) {
+            if ($authMiddleware->handle()) {
+                $calendarController->listForProject((int) $project_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/calendar/events', function($project_id) use ($authMiddleware, $calendarController) {
+            if ($authMiddleware->handle()) {
+                $calendarController->createForProject((int) $project_id);
+            }
+        });
+        Flight::route('PUT /api/v1/projects/@project_id/calendar/events/@event_id', function($project_id, $event_id) use ($authMiddleware, $calendarController) {
+            if ($authMiddleware->handle()) {
+                $calendarController->updateForProject((int) $project_id, (int) $event_id);
+            }
+        });
+        Flight::route('DELETE /api/v1/projects/@project_id/calendar/events/@event_id', function($project_id, $event_id) use ($authMiddleware, $calendarController) {
+            if ($authMiddleware->handle()) {
+                $calendarController->deleteForProject((int) $project_id, (int) $event_id);
             }
         });
 

@@ -63,7 +63,8 @@ rm -rf "${BUILD_DIR}"; mkdir -p "${PKG_DIR}"
 rsync -a \
   --exclude ".git" --exclude ".github" --exclude "node_modules" \
   --exclude "tests" --exclude "docs" --exclude "*.md" --exclude "logs" \
-  --exclude ".deploy_build" \
+  --exclude ".deploy_build" --exclude ".env" \
+  --exclude "env.development" --exclude "env.production" --exclude "env.local" --exclude "env.staging" \
   ./ "${PKG_DIR}/"
 
 # 2) Корневой .htaccess (если есть public/index.php — ведём в public/, иначе на корневой index.php)
@@ -99,10 +100,15 @@ RewriteRule ^ index.php [QSA,L]
 HTPUB
 fi
 
-# 4) .env (всегда создаём из env.production)
-[[ -f "${LOCAL_ENV_FILE}" ]] || { echo "No ${LOCAL_ENV_FILE}"; exit 2; }
-cp "${LOCAL_ENV_FILE}" "${PKG_DIR}/.env"
-echo "==> Created .env from ${LOCAL_ENV_FILE}"
+# 4) .env — только с флагом --update-env
+if [[ "${UPLOAD_ENV}" == "yes" ]]; then
+  [[ -f "${LOCAL_ENV_FILE}" ]] || { echo "No ${LOCAL_ENV_FILE} (required for --update-env)"; exit 2; }
+  cp "${LOCAL_ENV_FILE}" "${PKG_DIR}/.env"
+  echo "==> Created .env from ${LOCAL_ENV_FILE}"
+else
+  rm -f "${PKG_DIR}/.env"
+  echo "==> Keeping server .env (use --update-env to upload ${LOCAL_ENV_FILE})"
+fi
 
 # 5) Не шлём vendor в основном rsync
 rm -rf "${PKG_DIR}/vendor"
@@ -111,8 +117,12 @@ rm -rf "${PKG_DIR}/vendor"
 RUN_REMOTE "mkdir -p '${REMOTE_BASE}'"
 
 # 7) Заливка кода (быстро)
+RSYNC_EXCLUDES=(--exclude "vendor")
+if [[ "${UPLOAD_ENV}" != "yes" ]]; then
+  RSYNC_EXCLUDES+=(--exclude ".env")
+fi
 rsync -az --delete -e "ssh -p ${SSH_PORT} -o StrictHostKeyChecking=accept-new" \
-  --exclude "vendor" \
+  "${RSYNC_EXCLUDES[@]}" \
   "${PKG_DIR}/" "${SSH_USER}@${SSH_HOST}:${REMOTE_BASE}/"
 
 # 8) Composer на сервере или заливка vendor с локали

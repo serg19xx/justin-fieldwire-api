@@ -687,24 +687,6 @@ class ProfileController
             $status_details = !empty($input['inactive_reason_details']) ? $input['inactive_reason_details'] : null;
             $status_end_at = !empty($input['inactive_until']) ? $input['inactive_until'] : null;
 
-            // If trying to activate, check profile completeness first
-            if ($status) {
-                $completenessCheck = $this->checkProfileCompleteness($user['id']);
-                if (!$completenessCheck['is_complete']) {
-                    Flight::json([
-                        'error_code' => 400,
-                        'status' => 'error',
-                        'message' => 'Cannot activate user: profile is incomplete',
-                        'data' => [
-                            'is_complete' => false,
-                            'missing_fields' => $completenessCheck['missing_fields'],
-                            'message' => $completenessCheck['message']
-                        ]
-                    ], 400);
-                    return;
-                }
-            }
-
             // Update work status in database
             try {
                 $result = $this->updateUserWorkStatus($user['id'], $status, $status_reason, $status_details, $status_end_at);
@@ -737,28 +719,13 @@ class ProfileController
                     'user_id' => $user['id'],
                     'error' => $e->getMessage()
                 ]);
-                
-                // Check if it's a profile completeness error
-                if (strpos($e->getMessage(), 'profile is incomplete') !== false) {
-                    $completenessCheck = $this->checkProfileCompleteness($user['id']);
-                    Flight::json([
-                        'error_code' => 400,
-                        'status' => 'error',
-                        'message' => $e->getMessage(),
-                        'data' => [
-                            'is_complete' => false,
-                            'missing_fields' => $completenessCheck['missing_fields'] ?? [],
-                            'message' => $completenessCheck['message'] ?? 'Profile is incomplete'
-                        ]
-                    ], 400);
-                } else {
-                    Flight::json([
-                        'error_code' => 500,
-                        'status' => 'error',
-                        'message' => 'Failed to update work status: ' . $e->getMessage(),
-                        'data' => null
-                    ], 500);
-                }
+
+                Flight::json([
+                    'error_code' => 500,
+                    'status' => 'error',
+                    'message' => 'Failed to update work status: ' . $e->getMessage(),
+                    'data' => null
+                ], 500);
             }
         } catch (\Exception $e) {
             $this->logger->error('Error updating work status: ' . $e->getMessage());
@@ -2472,12 +2439,6 @@ class ProfileController
             $oldStatus = (bool)($currentUser['status'] ?? false);
             
             if ($isActive) {
-                // Check if profile is complete before activation
-                $completenessCheck = $this->checkProfileCompleteness($userId);
-                if (!$completenessCheck['is_complete']) {
-                    throw new \Exception('Cannot activate user: profile is incomplete. Missing fields: ' . json_encode($completenessCheck['missing_fields']));
-                }
-                
                 // If user is active, clear inactive reasons
                 $sql = "UPDATE fw_users SET 
                         status = TRUE,
@@ -2499,7 +2460,6 @@ class ProfileController
                         eventType: 'USER_ACTIVATED',
                         afterData: [
                             'status' => true,
-                            'profile_complete' => true,
                             'activated_at' => date('c'),
                             'previous_status' => $oldStatus,
                             'previous_status_reason' => $currentUser['status_reason'] ?? null
@@ -2514,7 +2474,7 @@ class ProfileController
                                 'status_end_at' => $currentUser['status_end_at'] ?? null
                             ],
                             'changed_fields' => ['status', 'status_reason', 'status_details', 'status_end_at', 'status_changed_at'],
-                            'comment' => 'User activated - all required profile data completed',
+                            'comment' => 'User activated',
                             'ip' => Flight::request()->ip ?? null,
                             'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
                             'severity' => 'important'
