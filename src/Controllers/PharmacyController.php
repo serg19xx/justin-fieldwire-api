@@ -53,6 +53,8 @@ class PharmacyController
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
+            $subType = Flight::request()->query->sub_type ?? null;
+            $salesCycle = Flight::request()->query->sales_cycle ?? null;
             $page = (int)(Flight::request()->query->page ?? 1);
             $limit = (int)(Flight::request()->query->limit ?? 50);
             $offset = ($page - 1) * $limit;
@@ -68,6 +70,16 @@ class PharmacyController
             if ($region) {
                 $whereConditions[] = "region = ?";
                 $params[] = $region;
+            }
+
+            if ($subType) {
+                $whereConditions[] = "sub_type = ?";
+                $params[] = $subType;
+            }
+
+            if ($salesCycle) {
+                $whereConditions[] = "sales_cycle = ?";
+                $params[] = $salesCycle;
             }
 
             $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
