@@ -3,6 +3,8 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Support\ClientListContactFilter;
+use App\Support\ClientListSort;
 use Flight;
 use Exception;
 use Monolog\Logger;
@@ -53,6 +55,7 @@ class PharmacistController
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
+            $search = trim((string)(Flight::request()->query->search ?? ''));
             $page = (int)(Flight::request()->query->page ?? 1);
             $limit = (int)(Flight::request()->query->limit ?? 50);
             $offset = ($page - 1) * $limit;
@@ -70,6 +73,26 @@ class PharmacistController
                 $params[] = $region;
             }
 
+            if ($search !== '') {
+                if (ctype_digit($search)) {
+                    $whereConditions[] = "(pp.id = ? OR pp.pharmId = ? OR pp.fullName LIKE ? OR pp.reg_number LIKE ? OR pp.email LIKE ? OR pp.workplace LIKE ? OR pa.operName LIKE ?)";
+                    $searchTerm = '%' . $search . '%';
+                    array_push($params, (int)$search, (int)$search, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm);
+                } else {
+                    $whereConditions[] = "(pp.fullName LIKE ? OR pp.reg_number LIKE ? OR pp.email LIKE ? OR pp.workplace LIKE ? OR pa.operName LIKE ?)";
+                    $searchTerm = '%' . $search . '%';
+                    array_push($params, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm);
+                }
+            }
+
+            ClientListContactFilter::apply(
+                'pharmacist',
+                $whereConditions,
+                Flight::request()->query->nonEmpty ?? null,
+                Flight::request()->query->empty ?? null,
+                Flight::request()->query->missingContacts ?? null,
+            );
+
             $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
 
             // Получить общее количество
@@ -77,8 +100,22 @@ class PharmacistController
             $countResult = $this->database->getConnection()->executeQuery($countSql, $params);
             $total = $countResult->fetchAssociative()['total'];
 
+            $orderBy = ClientListSort::resolveOrderBy(
+                Flight::request()->query->sortBy ?? null,
+                Flight::request()->query->sortDir ?? null,
+                [
+                    'id' => 'pp.id',
+                    'fullName' => 'pp.fullName',
+                    'reg_number' => 'pp.reg_number',
+                    'operName' => 'pa.operName',
+                    'workplace' => 'pp.workplace',
+                    'email' => 'pp.email',
+                ],
+                'fullName',
+            );
+
             // Получить фармацевтов с JOIN
-            $sql = "SELECT pp.*, pa.operName FROM pharmacist pp LEFT JOIN pharma pa ON pp.pharmId = pa.id $whereClause ORDER BY pp.fullName LIMIT $limit OFFSET $offset";
+            $sql = "SELECT pp.*, pa.operName FROM pharmacist pp LEFT JOIN pharma pa ON pp.pharmId = pa.id $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
             $pharmacists = $result->fetchAllAssociative();
@@ -191,7 +228,7 @@ class PharmacistController
             $values = [];
 
             foreach ($data as $key => $value) {
-                if (in_array($key, ['id'])) continue; // Пропускаем ID
+                if (in_array($key, ['id', 'operName'], true)) continue;
                 $fields[] = $key;
                 $placeholders[] = '?';
                 $values[] = $value;
@@ -243,6 +280,11 @@ class PharmacistController
 
             $data = Flight::request()->data;
 
+            $allowedFields = [
+                'pharmId', 'fullName', 'reg_number', 'pharm_owned',
+                'workplace', 'cell_phone', 'email', 'notes',
+            ];
+
             // Проверить существование фармацевта
             $checkSql = "SELECT id FROM pharmacist WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
@@ -262,28 +304,27 @@ class PharmacistController
             $values = [];
 
             foreach ($data as $key => $value) {
-                if (in_array($key, ['id'])) continue; // Пропускаем ID
+                if (in_array($key, ['id', 'operName'], true)) continue;
+                if (!in_array($key, $allowedFields, true)) continue;
                 $fields[] = "$key = ?";
                 $values[] = $value;
+            }
+
+            if (empty($fields)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'No valid fields to update',
+                    'data' => null
+                ], 400);
+                return;
             }
 
             $values[] = $id; // Для WHERE условия
 
             $sql = "UPDATE pharmacist SET " . implode(', ', $fields) . " WHERE id = ?";
             
-            $stmt = $this->database->getConnection()->executeStatement($sql, $values);
-            
-            $affectedRows = $stmt->rowCount();
-
-            if ($affectedRows === 0) {
-                Flight::json([
-                    'error_code' => 400,
-                    'status' => 'error',
-                    'message' => 'No changes made to pharmacist',
-                    'data' => null
-                ], 400);
-                return;
-            }
+            $affectedRows = $this->database->getConnection()->executeStatement($sql, $values);
 
             Flight::json([
                 'error_code' => 0,
@@ -340,9 +381,7 @@ class PharmacistController
 
             // Удалить фармацевта
             $sql = "DELETE FROM pharmacist WHERE id = ?";
-            $stmt = $this->database->getConnection()->executeStatement($sql, [$id]);
-            
-            $affectedRows = $stmt->rowCount();
+            $affectedRows = $this->database->getConnection()->executeStatement($sql, [$id]);
 
             if ($affectedRows === 0) {
                 Flight::json([

@@ -3,6 +3,8 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Support\ClientListContactFilter;
+use App\Support\ClientListSort;
 use Flight;
 use Exception;
 use Monolog\Logger;
@@ -54,6 +56,7 @@ class PhysicianController
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
             $specialty = Flight::request()->query->specialty ?? null;
+            $search = trim((string)(Flight::request()->query->search ?? ''));
             $page = (int)(Flight::request()->query->page ?? 1);
             $limit = (int)(Flight::request()->query->limit ?? 50);
             $offset = ($page - 1) * $limit;
@@ -76,6 +79,26 @@ class PhysicianController
                 $params[] = $specialty;
             }
 
+            if ($search !== '') {
+                if (ctype_digit($search)) {
+                    $whereConditions[] = "(id = ? OR fullName LIKE ? OR company LIKE ? OR specialty LIKE ? OR email LIKE ? OR city LIKE ? OR fullAddress LIKE ?)";
+                    $searchTerm = '%' . $search . '%';
+                    array_push($params, (int)$search, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm);
+                } else {
+                    $whereConditions[] = "(fullName LIKE ? OR company LIKE ? OR specialty LIKE ? OR email LIKE ? OR city LIKE ? OR fullAddress LIKE ?)";
+                    $searchTerm = '%' . $search . '%';
+                    array_push($params, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm);
+                }
+            }
+
+            ClientListContactFilter::apply(
+                'physician',
+                $whereConditions,
+                Flight::request()->query->nonEmpty ?? null,
+                Flight::request()->query->empty ?? null,
+                Flight::request()->query->missingContacts ?? null,
+            );
+
             $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
 
             // Получить общее количество
@@ -83,8 +106,21 @@ class PhysicianController
             $countResult = $this->database->getConnection()->executeQuery($countSql, $params);
             $total = $countResult->fetchAssociative()['total'];
 
+            $orderBy = ClientListSort::resolveOrderBy(
+                Flight::request()->query->sortBy ?? null,
+                Flight::request()->query->sortDir ?? null,
+                [
+                    'id' => 'id',
+                    'fullName' => 'fullName',
+                    'specialty' => 'specialty',
+                    'company' => 'company',
+                    'email' => 'email',
+                ],
+                'fullName',
+            );
+
             // Получить врачей
-            $sql = "SELECT id, prefTitle, fullName, company, specialty, cellPhone, email, faxNumber, officePhone, fullAddress, unitNumb, streetNumber, country, region, city, postal, notes, lat, lng FROM physician $whereClause ORDER BY fullName LIMIT $limit OFFSET $offset";
+            $sql = "SELECT id, prefTitle, fullName, company, specialty, cellPhone, email, faxNumber, officePhone, fullAddress, unitNumb, streetNumber, country, region, city, postal, notes, lat, lng FROM physician $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
             $physicians = $result->fetchAllAssociative();
@@ -249,6 +285,13 @@ class PhysicianController
 
             $data = Flight::request()->data;
 
+            $allowedFields = [
+                'prefTitle', 'fullName', 'company', 'specialty',
+                'cellPhone', 'email', 'faxNumber', 'officePhone',
+                'fullAddress', 'unitNumb', 'streetNumber', 'country', 'region',
+                'city', 'postal', 'notes', 'lat', 'lng',
+            ];
+
             // Проверить существование врача
             $checkSql = "SELECT id FROM physician WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
@@ -268,28 +311,27 @@ class PhysicianController
             $values = [];
 
             foreach ($data as $key => $value) {
-                if (in_array($key, ['id'])) continue; // Пропускаем ID
+                if (in_array($key, ['id'], true)) continue;
+                if (!in_array($key, $allowedFields, true)) continue;
                 $fields[] = "$key = ?";
                 $values[] = $value;
+            }
+
+            if (empty($fields)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'No valid fields to update',
+                    'data' => null
+                ], 400);
+                return;
             }
 
             $values[] = $id; // Для WHERE условия
 
             $sql = "UPDATE physician SET " . implode(', ', $fields) . " WHERE id = ?";
             
-            $stmt = $this->database->getConnection()->executeStatement($sql, $values);
-            
-            $affectedRows = $stmt->rowCount();
-
-            if ($affectedRows === 0) {
-                Flight::json([
-                    'error_code' => 400,
-                    'status' => 'error',
-                    'message' => 'No changes made to physician',
-                    'data' => null
-                ], 400);
-                return;
-            }
+            $affectedRows = $this->database->getConnection()->executeStatement($sql, $values);
 
             Flight::json([
                 'error_code' => 0,
@@ -346,9 +388,7 @@ class PhysicianController
 
             // Удалить врача
             $sql = "DELETE FROM physician WHERE id = ?";
-            $stmt = $this->database->getConnection()->executeStatement($sql, [$id]);
-            
-            $affectedRows = $stmt->rowCount();
+            $affectedRows = $this->database->getConnection()->executeStatement($sql, [$id]);
 
             if ($affectedRows === 0) {
                 Flight::json([
