@@ -55,6 +55,7 @@ class PharmacyController
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
+            $city = Flight::request()->query->city ?? null;
             $subType = Flight::request()->query->sub_type ?? null;
             $salesCycle = Flight::request()->query->sales_cycle ?? null;
             $search = trim((string)(Flight::request()->query->search ?? ''));
@@ -73,6 +74,11 @@ class PharmacyController
             if ($region) {
                 $whereConditions[] = "region = ?";
                 $params[] = $region;
+            }
+
+            if ($city) {
+                $whereConditions[] = "city = ?";
+                $params[] = $city;
             }
 
             if ($subType) {

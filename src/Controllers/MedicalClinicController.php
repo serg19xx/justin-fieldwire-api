@@ -55,6 +55,7 @@ class MedicalClinicController
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
+            $city = Flight::request()->query->city ?? null;
             $clinicType = Flight::request()->query->clinicType ?? null;
             $search = trim((string)(Flight::request()->query->search ?? ''));
             $page = (int)(Flight::request()->query->page ?? 1);
@@ -72,6 +73,11 @@ class MedicalClinicController
             if ($region) {
                 $whereConditions[] = "region = ?";
                 $params[] = $region;
+            }
+
+            if ($city) {
+                $whereConditions[] = "city = ?";
+                $params[] = $city;
             }
 
             if ($clinicType) {

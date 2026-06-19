@@ -88,48 +88,267 @@ class EmailService
     }
 
     /**
+     * List active SendGrid dynamic templates (templates with at least one active version).
+     *
+     * @return array<int, array{id: string, name: string, version_name: string}>
+     */
+    public function listActiveDynamicTemplates(): array
+    {
+        if (!$this->sendGridAvailable) {
+            $this->logger->warning('SendGrid not available — cannot list dynamic templates');
+            return [];
+        }
+
+        $response = $this->sendGridGet('/templates?generations=dynamic&page_size=200');
+        if ($response === null) {
+            $this->logger->warning('SendGrid templates request failed — returning empty list');
+            return [];
+        }
+
+        $rawTemplates = $response['result'] ?? $response['templates'] ?? [];
+        $rawCount = count($rawTemplates);
+        $this->logger->info('SendGrid dynamic templates fetched', ['raw_count' => $rawCount]);
+
+        $templates = [];
+        foreach ($rawTemplates as $tpl) {
+            if (!is_array($tpl)) {
+                continue;
+            }
+
+            $id = trim((string) ($tpl['id'] ?? ''));
+            $name = trim((string) ($tpl['name'] ?? ''));
+            if ($id === '' || $name === '') {
+                continue;
+            }
+
+            $versionName = null;
+            foreach ($tpl['versions'] ?? [] as $version) {
+                if (!is_array($version)) {
+                    continue;
+                }
+                if (!empty($version['active'])) {
+                    $versionName = trim((string) ($version['name'] ?? 'Active'));
+                    break;
+                }
+            }
+
+            if ($versionName === null || $versionName === '') {
+                continue;
+            }
+
+            $templates[] = [
+                'id' => $id,
+                'name' => $name,
+                'version_name' => $versionName,
+            ];
+        }
+
+        usort(
+            $templates,
+            static fn(array $a, array $b): int => strcasecmp($a['name'], $b['name']),
+        );
+
+        return $templates;
+    }
+
+    /**
+     * Send email using a SendGrid dynamic template.
+     *
+     * @param array<string, mixed> $dynamicData Handlebars variables for the template
+     */
+    public function sendDynamicTemplateEmail(
+        string $to,
+        string $toName,
+        string $templateId,
+        array $dynamicData,
+    ): bool {
+        if (!$this->sendGridAvailable) {
+            $this->logger->error('SendGrid not available — cannot send dynamic template email');
+            return false;
+        }
+
+        if (!preg_match('/^d-[a-f0-9]+$/', $templateId)) {
+            $this->logger->error('Invalid SendGrid template id', ['template_id' => $templateId]);
+            return false;
+        }
+
+        $from = $this->getSendGridFrom();
+        $personalization = [
+            'to' => [[
+                'email' => $to,
+                'name' => $toName !== '' ? $toName : $to,
+            ]],
+        ];
+
+        if ($dynamicData !== []) {
+            $personalization['dynamic_template_data'] = $dynamicData;
+        }
+
+        $payload = [
+            'personalizations' => [$personalization],
+            'from' => [
+                'email' => $from['email'],
+                'name' => $from['name'],
+            ],
+            'template_id' => $templateId,
+            'tracking_settings' => $this->getSendGridTrackingSettings(),
+        ];
+
+        $sent = $this->sendGridMailSend($payload);
+        if ($sent) {
+            $this->logger->info('SendGrid dynamic template email sent', [
+                'to' => $to,
+                'template_id' => $templateId,
+            ]);
+        }
+
+        return $sent;
+    }
+
+    /**
+     * @return array{email: string, name: string}
+     */
+    private function getSendGridFrom(): array
+    {
+        return [
+            'email' => (string) ($_ENV['SENDGRID_FROM_EMAIL'] ?? 'noreply@fieldwire.com'),
+            'name' => (string) ($_ENV['SENDGRID_FROM_NAME'] ?? 'FieldWire'),
+        ];
+    }
+
+    /**
+     * @return array<string, array<string, bool>>
+     */
+    private function getSendGridTrackingSettings(): array
+    {
+        return [
+            'click_tracking' => [
+                'enable' => false,
+                'enable_text' => false,
+            ],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function sendGridMailSend(array $payload): bool
+    {
+        $apiKey = $_ENV['SENDGRID_API_KEY'] ?? '';
+        if ($apiKey === '') {
+            return false;
+        }
+
+        $json = json_encode($payload);
+        if ($json === false) {
+            $this->logger->error('SendGrid mail payload encoding failed');
+            return false;
+        }
+
+        $ch = curl_init('https://api.sendgrid.com/v3/mail/send');
+        if ($ch === false) {
+            return false;
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $json,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $apiKey,
+                'Content-Type: application/json',
+            ],
+        ]);
+
+        $body = curl_exec($ch);
+        $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        if ($statusCode >= 200 && $statusCode < 300) {
+            return true;
+        }
+
+        $this->logger->error('SendGrid mail send failed', [
+            'status_code' => $statusCode,
+            'body' => is_string($body) ? $body : '',
+        ]);
+        return false;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function sendGridGet(string $path): ?array
+    {
+        $apiKey = $_ENV['SENDGRID_API_KEY'] ?? '';
+        if ($apiKey === '') {
+            return null;
+        }
+
+        $url = 'https://api.sendgrid.com/v3' . $path;
+        $ch = curl_init($url);
+        if ($ch === false) {
+            return null;
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HTTPHEADER => [
+                'Authorization: Bearer ' . $apiKey,
+                'Content-Type: application/json',
+            ],
+        ]);
+
+        $body = curl_exec($ch);
+        $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        if (!is_string($body) || $statusCode < 200 || $statusCode >= 300) {
+            $this->logger->error('SendGrid GET request failed', [
+                'path' => $path,
+                'status_code' => $statusCode,
+                'body' => is_string($body) ? $body : '',
+            ]);
+            return null;
+        }
+
+        $decoded = json_decode($body, true);
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
      * Send email via SendGrid
      */
     private function sendViaSendGrid(string $to, string $subject, string $message, string $toName = ''): bool
     {
-        try {
-            $email = new Mail();
-            $email->setFrom(
-                $_ENV['SENDGRID_FROM_EMAIL'] ?? 'noreply@fieldwire.com',
-                $_ENV['SENDGRID_FROM_NAME'] ?? 'FieldWire'
-            );
-            $email->setSubject($subject);
-            $email->addTo($to, $toName ?: $to);
-            $email->addContent("text/plain", $message);
-            
-            // Disable click tracking to preserve original URLs
-            $email->setClickTracking(false, false);
+        $from = $this->getSendGridFrom();
+        $payload = [
+            'personalizations' => [[
+                'to' => [[
+                    'email' => $to,
+                    'name' => $toName !== '' ? $toName : $to,
+                ]],
+                'subject' => $subject,
+            ]],
+            'from' => [
+                'email' => $from['email'],
+                'name' => $from['name'],
+            ],
+            'subject' => $subject,
+            'content' => [[
+                'type' => 'text/plain',
+                'value' => $message,
+            ]],
+            'tracking_settings' => $this->getSendGridTrackingSettings(),
+        ];
 
-            $response = $this->sendGrid->send($email);
-
-            if ($response->statusCode() === 202) {
-                $this->logger->info('Email sent successfully via SendGrid', [
-                    'to' => $to,
-                    'subject' => $subject,
-                    'status_code' => $response->statusCode()
-                ]);
-                return true;
-            } else {
-                $this->logger->error('SendGrid email failed', [
-                    'to' => $to,
-                    'status_code' => $response->statusCode(),
-                    'body' => $response->body()
-                ]);
-                return false;
-            }
-
-        } catch (\Exception $e) {
-            $this->logger->error('SendGrid error', [
-                'error' => $e->getMessage(),
-                'to' => $to
+        $sent = $this->sendGridMailSend($payload);
+        if ($sent) {
+            $this->logger->info('Email sent successfully via SendGrid', [
+                'to' => $to,
+                'subject' => $subject,
             ]);
-            return false;
         }
+
+        return $sent;
     }
 
     /**
@@ -299,6 +518,11 @@ class EmailService
 
             return $this->sendEmail($email, $subject, $message, $fullName, $provider);
         }
+    }
+
+    public function isSendGridAvailable(): bool
+    {
+        return $this->sendGridAvailable;
     }
 
     /**

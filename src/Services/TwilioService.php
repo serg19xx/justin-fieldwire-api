@@ -80,69 +80,117 @@ class TwilioService
      */
     public function sendVerificationCode(string $phoneNumber, string $code): bool
     {
+        $body = "Your FieldWire verification code is: {$code}. Valid for 10 minutes.";
+        return $this->sendSms($phoneNumber, $body);
+    }
+
+    /**
+     * Send a plain SMS message.
+     */
+    public function sendSms(string $phoneNumber, string $body): bool
+    {
         try {
-            // Format phone number (ensure it starts with +)
             $formattedPhone = $this->formatPhoneNumber($phoneNumber);
-            
-            $this->logger->info('Attempting to send SMS verification code', [
+            $body = trim($body);
+            if ($body === '') {
+                $this->logger->warning('Refusing to send empty SMS body', ['to' => $phoneNumber]);
+                return false;
+            }
+
+            $this->logger->info('Attempting to send SMS', [
                 'original_phone' => $phoneNumber,
                 'formatted_phone' => $formattedPhone,
-                'code' => $code,
                 'from_number' => $this->fromNumber,
-                'client_available' => $this->client !== null
+                'client_available' => $this->client !== null,
             ]);
-            
-            // If Twilio client is not available (development mode), just log the SMS
+
             if ($this->client === null) {
-                $this->logger->info('MOCK SMS: Verification code would be sent', [
+                $this->logger->info('MOCK SMS: Message would be sent', [
                     'to' => $formattedPhone,
-                    'code' => $code,
-                    'message' => "Your FieldWire verification code is: {$code}. Valid for 10 minutes."
+                    'body' => $body,
                 ]);
-                $this->safeLog('MOCK SMS: Verification code would be sent to ' . $formattedPhone . ' with code ' . $code);
+                $this->safeLog('MOCK SMS: Message would be sent to ' . $formattedPhone);
                 return true;
             }
-            
-            $this->logger->info('Creating Twilio message', [
-                'to' => $formattedPhone,
-                'from' => $this->fromNumber,
-                'body' => "Your FieldWire verification code is: {$code}. Valid for 10 minutes."
-            ]);
-            
-            $message = $this->client->messages->create(
-                $formattedPhone,
-                [
-                    'from' => $this->fromNumber,
-                    'body' => "Your FieldWire verification code is: {$code}. Valid for 10 minutes."
-                ]
-            );
 
-            $this->logger->info('SMS verification code sent successfully', [
-                'to' => $formattedPhone,
-                'message_sid' => $message->sid,
-                'status' => $message->status,
-                'error_code' => $message->errorCode ?? null,
-                'error_message' => $message->errorMessage ?? null
-            ]);
+            $accountSid = $_ENV['TWILIO_ACCOUNT_SID'] ?? '';
+            $authToken = $_ENV['TWILIO_AUTH_TOKEN'] ?? '';
+            if ($accountSid === '' || $authToken === '' || $this->fromNumber === '') {
+                $this->logger->error('Twilio credentials missing for SMS send');
+                return false;
+            }
 
-            return true;
-
+            return $this->sendSmsViaRestApi($accountSid, $authToken, $formattedPhone, $this->fromNumber, $body);
         } catch (TwilioException $e) {
-            $this->logger->error('Failed to send SMS verification code', [
+            $this->logger->error('Failed to send SMS', [
                 'to' => $phoneNumber,
                 'error' => $e->getMessage(),
-                'code' => $e->getCode()
+                'code' => $e->getCode(),
             ]);
-
             return false;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->logger->error('Unexpected error sending SMS', [
                 'to' => $phoneNumber,
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ]);
-
             return false;
         }
+    }
+
+    private function sendSmsViaRestApi(
+        string $accountSid,
+        string $authToken,
+        string $to,
+        string $from,
+        string $body,
+    ): bool {
+        $url = 'https://api.twilio.com/2010-04-01/Accounts/' . rawurlencode($accountSid) . '/Messages.json';
+        $postFields = http_build_query([
+            'To' => $to,
+            'From' => $from,
+            'Body' => $body,
+        ]);
+
+        $ch = curl_init($url);
+        if ($ch === false) {
+            return false;
+        }
+
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_POST => true,
+            CURLOPT_POSTFIELDS => $postFields,
+            CURLOPT_USERPWD => $accountSid . ':' . $authToken,
+            CURLOPT_HTTPHEADER => ['Content-Type: application/x-www-form-urlencoded'],
+        ]);
+
+        $response = curl_exec($ch);
+        $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+
+        if ($statusCode >= 200 && $statusCode < 300 && is_string($response)) {
+            $data = json_decode($response, true);
+            $this->logger->info('SMS sent successfully', [
+                'to' => $to,
+                'message_sid' => is_array($data) ? ($data['sid'] ?? null) : null,
+                'status' => is_array($data) ? ($data['status'] ?? null) : null,
+            ]);
+            return true;
+        }
+
+        $errorMessage = is_string($response) ? $response : '';
+        if (is_string($response)) {
+            $data = json_decode($response, true);
+            if (is_array($data) && isset($data['message'])) {
+                $errorMessage = (string) $data['message'];
+            }
+        }
+
+        $this->logger->error('Failed to send SMS via Twilio REST', [
+            'to' => $to,
+            'status_code' => $statusCode,
+            'error' => $errorMessage,
+        ]);
+        return false;
     }
 
     /**

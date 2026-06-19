@@ -760,6 +760,79 @@ class ApiRoutes
             }
         });
 
+        Flight::route('GET /api/v1/sendgrid/dynamic-templates', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->listDynamicTemplates();
+            }
+        });
+
+        // Client outbound communications (SMS / email / fax)
+        Flight::route('POST /api/v1/clients/@type/@id/send-sms', function($type, $id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->sendSms((string) $type, (int) $id);
+            }
+        });
+
+        Flight::route('POST /api/v1/clients/@type/@id/send-email', function($type, $id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->sendEmail((string) $type, (int) $id);
+            }
+        });
+
+        Flight::route('POST /api/v1/clients/@type/@id/send-fax', function($type, $id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->sendFax((string) $type, (int) $id);
+            }
+        });
+
+        Flight::route('POST /api/v1/clients/@type/send-sms/bulk', function($type) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->sendBulkSms((string) $type);
+            }
+        });
+
+        Flight::route('POST /api/v1/clients/@type/send-email/bulk', function($type) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->sendBulkEmail((string) $type);
+            }
+        });
+
         // Role routes v1 (protected)
         Flight::route('GET /api/v1/roles', function() use ($authMiddleware) {
             if ($authMiddleware->handle()) {

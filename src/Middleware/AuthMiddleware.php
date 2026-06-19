@@ -186,9 +186,10 @@ class AuthMiddleware
         try {
             $connection = Database::getConnection();
             
-            $sql = 'SELECT id, email, first_name, last_name, phone, job_title, status, 
-                           additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at 
-                    FROM fw_v_users 
+            $sql = 'SELECT id, email, first_name, last_name, phone, job_title, status,
+                           role_code, role_name,
+                           additional_info, avatar_url, two_factor_enabled, last_login, created_at, updated_at
+                    FROM fw_v_users
                     WHERE id = ? AND archived_at IS NULL';
             
             $result = $connection->executeQuery($sql, [$userId]);

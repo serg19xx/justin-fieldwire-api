@@ -55,6 +55,7 @@ class PhysicianController
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
+            $city = Flight::request()->query->city ?? null;
             $specialty = Flight::request()->query->specialty ?? null;
             $search = trim((string)(Flight::request()->query->search ?? ''));
             $page = (int)(Flight::request()->query->page ?? 1);
@@ -72,6 +73,11 @@ class PhysicianController
             if ($region) {
                 $whereConditions[] = "region = ?";
                 $params[] = $region;
+            }
+
+            if ($city) {
+                $whereConditions[] = "city = ?";
+                $params[] = $city;
             }
 
             if ($specialty) {

@@ -55,6 +55,7 @@ class PharmacistController
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
+            $city = Flight::request()->query->city ?? null;
             $search = trim((string)(Flight::request()->query->search ?? ''));
             $page = (int)(Flight::request()->query->page ?? 1);
             $limit = (int)(Flight::request()->query->limit ?? 50);
@@ -71,6 +72,11 @@ class PharmacistController
             if ($region) {
                 $whereConditions[] = "pa.region = ?";
                 $params[] = $region;
+            }
+
+            if ($city) {
+                $whereConditions[] = "pa.city = ?";
+                $params[] = $city;
             }
 
             if ($search !== '') {
@@ -115,7 +121,7 @@ class PharmacistController
             );
 
             // Получить фармацевтов с JOIN
-            $sql = "SELECT pp.*, pa.operName FROM pharmacist pp LEFT JOIN pharma pa ON pp.pharmId = pa.id $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
+            $sql = "SELECT pp.*, pa.operName, pa.city, pa.country, pa.region FROM pharmacist pp LEFT JOIN pharma pa ON pp.pharmId = pa.id $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
             $pharmacists = $result->fetchAllAssociative();
