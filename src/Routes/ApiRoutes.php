@@ -833,6 +833,46 @@ class ApiRoutes
             }
         });
 
+        // SMS meeting slot invites (PM schedules call; client replies 1/2/3)
+        Flight::route('POST /api/v1/clients/@type/@id/send-meeting-invite', function($type, $id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\SmsMeetingInviteController(
+                    $this->logger,
+                    new \App\Services\SmsMeetingInviteService(
+                        $this->logger,
+                        new \App\Services\TwilioService($this->logger),
+                    ),
+                );
+                $controller->send((string) $type, (int) $id);
+            }
+        });
+
+        Flight::route('GET /api/v1/clients/@type/@id/meeting-invite/latest', function($type, $id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\SmsMeetingInviteController(
+                    $this->logger,
+                    new \App\Services\SmsMeetingInviteService(
+                        $this->logger,
+                        new \App\Services\TwilioService($this->logger),
+                    ),
+                );
+                $controller->latest((string) $type, (int) $id);
+            }
+        });
+
+        // Twilio inbound SMS webhook (no JWT — Twilio signature validation)
+        Flight::route('POST /api/v1/twilio/sms/inbound', function() {
+            $controller = new \App\Controllers\TwilioSmsWebhookController(
+                $this->logger,
+                new \App\Services\SmsMeetingInviteService(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                ),
+                new \App\Services\TwilioService($this->logger),
+            );
+            $controller->inboundSms();
+        });
+
         // Role routes v1 (protected)
         Flight::route('GET /api/v1/roles', function() use ($authMiddleware) {
             if ($authMiddleware->handle()) {
