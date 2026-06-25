@@ -11,8 +11,8 @@ if ($appEnv === 'production') {
     ini_set('display_errors', 0);
     ini_set('display_startup_errors', 0);
 } else {
-    // В режиме разработки показываем все ошибки
-    error_reporting(E_ALL);
+    // In development mode show errors but ignore vendor deprecations (PHP 8.5+).
+    error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
     ini_set('display_errors', 1);
     ini_set('display_startup_errors', 1);
 }

@@ -99,20 +99,15 @@ class TwilioService
                 'client_available' => $this->client !== null,
             ]);
 
-            if ($this->client === null) {
+            $accountSid = $_ENV['TWILIO_ACCOUNT_SID'] ?? '';
+            $authToken = $_ENV['TWILIO_AUTH_TOKEN'] ?? '';
+            if ($accountSid === '' || $authToken === '' || $this->fromNumber === '') {
                 $this->logger->info('MOCK SMS: Message would be sent', [
                     'to' => $formattedPhone,
                     'body' => $body,
                 ]);
                 $this->safeLog('MOCK SMS: Message would be sent to ' . $formattedPhone);
                 return true;
-            }
-
-            $accountSid = $_ENV['TWILIO_ACCOUNT_SID'] ?? '';
-            $authToken = $_ENV['TWILIO_AUTH_TOKEN'] ?? '';
-            if ($accountSid === '' || $authToken === '' || $this->fromNumber === '') {
-                $this->logger->error('Twilio credentials missing for SMS send');
-                return false;
             }
 
             return $this->sendSmsViaRestApi($accountSid, $authToken, $formattedPhone, $this->fromNumber, $body);

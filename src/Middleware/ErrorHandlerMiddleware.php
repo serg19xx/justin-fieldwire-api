@@ -51,6 +51,17 @@ class ErrorHandlerMiddleware
             return false;
         }
 
+        // PHP 8.5 deprecations from vendor SDKs must not abort API requests in dev.
+        if ($errno === E_DEPRECATED || $errno === E_USER_DEPRECATED) {
+            $this->logger->warning('PHP Deprecation', [
+                'errno' => $errno,
+                'errstr' => $errstr,
+                'errfile' => $errfile,
+                'errline' => $errline,
+            ]);
+            return true;
+        }
+
         $this->logger->error('PHP Error', [
             'errno' => $errno,
             'errstr' => $errstr,

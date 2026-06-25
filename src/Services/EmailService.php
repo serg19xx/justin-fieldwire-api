@@ -5,7 +5,6 @@ namespace App\Services;
 use Monolog\Logger;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception as PHPMailerException;
-use SendGrid\Mail\Mail;
 use SendGrid;
 
 class EmailService
@@ -605,35 +604,35 @@ class EmailService
      */
     private function sendWithSendGridTemplates(string $email, string $subject, string $htmlContent, string $textContent, string $recipientName): bool
     {
-        try {
-            $fromEmail = $_ENV['SENDGRID_FROM_EMAIL'] ?? 'noreply@fieldwire.com';
-            $fromName = $_ENV['SENDGRID_FROM_NAME'] ?? 'FieldWire Team';
+        $from = $this->getSendGridFrom();
+        $payload = [
+            'personalizations' => [[
+                'to' => [[
+                    'email' => $email,
+                    'name' => $recipientName !== '' ? $recipientName : $email,
+                ]],
+                'subject' => $subject,
+            ]],
+            'from' => [
+                'email' => $from['email'],
+                'name' => $from['name'],
+            ],
+            'subject' => $subject,
+            'content' => [
+                ['type' => 'text/plain', 'value' => $textContent],
+                ['type' => 'text/html', 'value' => $htmlContent],
+            ],
+            'tracking_settings' => $this->getSendGridTrackingSettings(),
+        ];
 
-            $mail = new Mail();
-            $mail->setFrom($fromEmail, $fromName);
-            $mail->setSubject($subject);
-            $mail->addTo($email, $recipientName);
-            $mail->addContent("text/plain", $textContent);
-            $mail->addContent("text/html", $htmlContent);
-            
-            // Disable click tracking to preserve original URLs (important for reset password links)
-            $mail->setClickTracking(false, false);
-
-            $response = $this->sendGrid->send($mail);
-            
+        $sent = $this->sendGridMailSend($payload);
+        if ($sent) {
             $this->logger->info('Email sent via SendGrid with templates', [
                 'email' => $email,
-                'status_code' => $response->statusCode()
             ]);
-
-            return $response->statusCode() >= 200 && $response->statusCode() < 300;
-        } catch (\Exception $e) {
-            $this->logger->error('SendGrid template email failed', [
-                'email' => $email,
-                'error' => $e->getMessage()
-            ]);
-            return false;
         }
+
+        return $sent;
     }
 
     /**
