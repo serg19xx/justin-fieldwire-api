@@ -42,15 +42,11 @@ class TwilioService
         // Direct file logging for debugging
         $this->safeLog('TwilioService constructor called');
 
-        // In development, allow mock mode if Twilio credentials are not set
+        // Missing credentials: keep API bootable; SMS methods no-op / mock until configured.
         if (empty($accountSid) || empty($authToken) || empty($this->fromNumber)) {
-            if (($_ENV['APP_ENV'] ?? '') === 'development') {
-                $this->logger->warning('Twilio credentials not set, running in mock mode');
-                $this->safeLog('Twilio credentials not set, running in mock mode');
-                return;
-            } else {
-                throw new \RuntimeException('Twilio configuration is incomplete. Please check TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER environment variables.');
-            }
+            $this->logger->warning('Twilio credentials not set, SMS features run in mock/disabled mode');
+            $this->safeLog('Twilio credentials not set, running in mock mode');
+            return;
         }
 
         try {
