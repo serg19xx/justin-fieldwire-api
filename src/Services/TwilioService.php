@@ -54,12 +54,11 @@ class TwilioService
             $this->logger->info('Twilio client initialized successfully');
             $this->safeLog('Twilio client initialized successfully');
         } catch (\Exception $e) {
-            $this->logger->error('Failed to initialize Twilio client', [
+            $this->client = null;
+            $this->logger->error('Failed to initialize Twilio client, SMS features run in mock/disabled mode', [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
             ]);
-            $this->safeLog('Failed to initialize Twilio client: ' . $e->getMessage());
-            throw $e;
+            $this->safeLog('Failed to initialize Twilio client (mock mode): ' . $e->getMessage());
         }
     }
 
