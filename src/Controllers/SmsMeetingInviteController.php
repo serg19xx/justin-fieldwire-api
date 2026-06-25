@@ -55,6 +55,7 @@ class SmsMeetingInviteController
                 'sent_to' => $result['sent_to'] ?? '',
                 'original_to' => $result['original_to'] ?? '',
                 'test_mode' => $result['test_mode'] ?? false,
+                'slots' => $result['slots'] ?? [],
             ],
         ]);
     }
@@ -83,6 +84,45 @@ class SmsMeetingInviteController
             'status' => 'success',
             'data' => [
                 'invite' => $result['invite'] ?? null,
+            ],
+        ]);
+    }
+
+    public function suggestedSlots(): void
+    {
+        if (!$this->authorize()) {
+            return;
+        }
+
+        $query = Flight::request()->query;
+        $date = trim((string) ($query['date'] ?? ''));
+        $duration = (int) ($query['duration_minutes'] ?? 30);
+        $timezone = trim((string) ($query['timezone'] ?? 'America/Toronto'));
+
+        $user = Flight::get('current_user');
+        $userId = (int) ($user['id'] ?? 0);
+
+        $result = $this->inviteService->getDaySchedule($userId, [
+            'date' => $date,
+            'duration_minutes' => $duration,
+            'timezone' => $timezone,
+        ]);
+
+        if (!$result['success']) {
+            $this->respondError($result['error'] ?? 'Failed to load schedule', 400);
+            return;
+        }
+
+        Flight::json([
+            'status' => 'success',
+            'data' => [
+                'date' => $result['date'] ?? $date,
+                'min_date' => $result['min_date'] ?? null,
+                'duration_minutes' => $result['duration_minutes'] ?? $duration,
+                'timezone' => $result['timezone'] ?? $timezone,
+                'hold_days' => $result['hold_days'] ?? 3,
+                'schedule' => $result['schedule'] ?? [],
+                'available_count' => $result['available_count'] ?? 0,
             ],
         ]);
     }

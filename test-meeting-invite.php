@@ -75,11 +75,7 @@ try {
     exit(1);
 }
 
-$tomorrow = (new DateTimeImmutable('tomorrow'))->format('Y-m-d');
-
 $result = $service->sendInvite(92, $clientType, $clientId, [
-    'meeting_date' => $tomorrow,
-    'slots' => ['10:00', '14:00', '15:30'],
     'duration_minutes' => 30,
     'title' => 'FieldWire test call',
     'timezone' => 'America/Toronto',

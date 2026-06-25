@@ -834,6 +834,19 @@ class ApiRoutes
         });
 
         // SMS meeting slot invites (PM schedules call; client replies 1/2/3)
+        Flight::route('GET /api/v1/meeting-invite/day-schedule', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\SmsMeetingInviteController(
+                    $this->logger,
+                    new \App\Services\SmsMeetingInviteService(
+                        $this->logger,
+                        new \App\Services\TwilioService($this->logger),
+                    ),
+                );
+                $controller->suggestedSlots();
+            }
+        });
+
         Flight::route('POST /api/v1/clients/@type/@id/send-meeting-invite', function($type, $id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
                 $controller = new \App\Controllers\SmsMeetingInviteController(

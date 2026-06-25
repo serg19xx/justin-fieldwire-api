@@ -236,63 +236,79 @@ class TaskController
                 return;
             }
 
-            // Базовый SQL запрос - task_lead_id и team_members теперь в fw_prj_team_members
-            $sql = "SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE project_id = ?";
+            // Base WHERE clause (shared by COUNT and SELECT)
+            $whereSql = ' WHERE project_id = ?';
             $params = [$projectId];
 
-            // Фильтр по статусу
             if ($status) {
-                $sql .= " AND status = ?";
+                $whereSql .= ' AND status = ?';
                 $params[] = $status;
             }
 
-            // Фильтр по milestone (ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL)
             if ($milestone !== null && $milestone !== '') {
-                // Если milestone = 'true' или true, фильтруем задачи где milestone IS NOT NULL
-                // Если milestone = 'false' или false, фильтруем задачи где milestone IS NULL
-                // Иначе фильтруем по конкретному значению enum
                 $milestoneValue = filter_var($milestone, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
                 if ($milestoneValue === true || $milestone === 'true' || $milestone === true) {
-                    $sql .= " AND milestone IS NOT NULL";
+                    $whereSql .= ' AND milestone IS NOT NULL';
                 } elseif ($milestoneValue === false || $milestone === 'false' || $milestone === false) {
-                    $sql .= " AND milestone IS NULL";
+                    $whereSql .= ' AND milestone IS NULL';
                 } else {
-                    // Фильтруем по конкретному значению enum
                     $validMilestones = ['inspection', 'visit', 'meeting', 'review', 'delivery', 'approval', 'other'];
                     if (in_array($milestone, $validMilestones, true)) {
-                        $sql .= " AND milestone = ?";
+                        $whereSql .= ' AND milestone = ?';
                         $params[] = $milestone;
                     }
                 }
             }
 
-            // Поиск по названию, заметкам и адресу
             if ($search) {
                 $term = '%' . $search . '%';
-                $sql .= " AND (name LIKE ? OR notes LIKE ? OR address LIKE ?)";
+                $whereSql .= ' AND (name LIKE ? OR notes LIKE ? OR address LIKE ?)';
                 $params[] = $term;
                 $params[] = $term;
                 $params[] = $term;
             }
 
-            // Фильтр задач по назначению пользователя
             if ($userId !== null && $userId !== '' && is_numeric($userId)) {
-                $sql .= " AND EXISTS (
+                $whereSql .= ' AND EXISTS (
                     SELECT 1
                     FROM fw_prj_team_members tm
                     WHERE tm.project_id = ?
                       AND tm.task_id = fw_prj_tasks.id
                       AND tm.user_id = ?
-                )";
+                )';
                 $params[] = $projectId;
                 $params[] = (int)$userId;
             }
 
-            // Добавляем сортировку
-            $sql .= " ORDER BY task_order ASC, start_planned ASC";
+            $countResult = $connection->executeQuery(
+                'SELECT COUNT(*) FROM fw_prj_tasks' . $whereSql,
+                $params
+            );
+            $totalTasks = (int)$countResult->fetchOne();
+
+            $page = max(1, (int)($request->query['page'] ?? 1));
+            $limitParam = $request->query['limit'] ?? null;
+            $limit = null;
+            if ($limitParam !== null && $limitParam !== '') {
+                $limit = min(max((int)$limitParam, 1), 2000);
+            }
+
+            $sql = 'SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks'
+                . $whereSql
+                . ' ORDER BY task_order ASC, start_planned ASC';
+
+            if ($limit !== null) {
+                $offset = ($page - 1) * $limit;
+                $sql .= ' LIMIT ' . $limit . ' OFFSET ' . $offset;
+            } else {
+                $page = 1;
+            }
 
             $result = $connection->executeQuery($sql, $params);
             $tasks = $result->fetchAllAssociative();
+
+            $effectivePerPage = $limit ?? $totalTasks;
+            $lastPage = $limit !== null ? max(1, (int)ceil($totalTasks / $limit)) : 1;
 
             // Получаем зависимости из отдельной таблицы
             $dependenciesResult = $connection->executeQuery(
@@ -324,58 +340,52 @@ class TaskController
             $taskInvitedPeople = []; // Инициализируем всегда
             
             if (!empty($taskIds)) {
-                $placeholders = str_repeat('?,', count($taskIds) - 1) . '?';
-                
-                // Сначала получаем информацию о milestone для каждой задачи
-                $milestoneSql = "SELECT id, milestone FROM fw_prj_tasks WHERE id IN ($placeholders)";
-                $milestoneResult = $connection->executeQuery($milestoneSql, $taskIds);
-                $milestoneData = $milestoneResult->fetchAllAssociative();
-                $taskMilestones = []; // Для определения, какие задачи являются milestone
-                foreach ($milestoneData as $milestoneRow) {
-                    $taskMilestones[(int)$milestoneRow['id']] = $milestoneRow['milestone'] !== null && $milestoneRow['milestone'] !== '';
-                }
-                
-                // Получаем всех назначенных на задачи (исполнители, бригадиры и приглашенные)
-                $assigneesSql = "SELECT task_id, user_id, role_in_project, invited_people FROM fw_prj_team_members WHERE task_id IN ($placeholders)";
-                $assigneesResult = $connection->executeQuery($assigneesSql, $taskIds);
-                $assigneesData = $assigneesResult->fetchAllAssociative();
-                
-                // Группируем по task_id и определяем бригадира, исполнителей и приглашенных
-                foreach ($assigneesData as $assignee) {
-                    $taskId = (int)$assignee['task_id'];
-                    $role = $assignee['role_in_project'] ?? null;
-                    $isMilestone = isset($taskMilestones[$taskId]) && $taskMilestones[$taskId];
-                    
-                    if ($isMilestone && $role === 'task_lead') {
-                        // Для milestone: ОДНА запись с role_in_project = 'task_lead' и invited_people (JSON массив)
-                        $invitedPeopleRaw = $assignee['invited_people'] ?? null;
-                        if ($invitedPeopleRaw !== null && $invitedPeopleRaw !== '') {
-                            $invitedPeopleArray = json_decode($invitedPeopleRaw, true);
-                            if (is_array($invitedPeopleArray)) {
-                                $taskInvitedPeople[$taskId] = $invitedPeopleArray;
+                $taskMilestones = [];
+
+                foreach (array_chunk($taskIds, 200) as $taskIdChunk) {
+                    $placeholders = str_repeat('?,', count($taskIdChunk) - 1) . '?';
+
+                    $milestoneSql = "SELECT id, milestone FROM fw_prj_tasks WHERE id IN ($placeholders)";
+                    $milestoneResult = $connection->executeQuery($milestoneSql, $taskIdChunk);
+                    $milestoneData = $milestoneResult->fetchAllAssociative();
+                    foreach ($milestoneData as $milestoneRow) {
+                        $taskMilestones[(int)$milestoneRow['id']] = $milestoneRow['milestone'] !== null && $milestoneRow['milestone'] !== '';
+                    }
+
+                    $assigneesSql = "SELECT task_id, user_id, role_in_project, invited_people FROM fw_prj_team_members WHERE task_id IN ($placeholders)";
+                    $assigneesResult = $connection->executeQuery($assigneesSql, $taskIdChunk);
+                    $assigneesData = $assigneesResult->fetchAllAssociative();
+
+                    foreach ($assigneesData as $assignee) {
+                        $taskId = (int)$assignee['task_id'];
+                        $role = $assignee['role_in_project'] ?? null;
+                        $isMilestone = isset($taskMilestones[$taskId]) && $taskMilestones[$taskId];
+
+                        if ($isMilestone && $role === 'task_lead') {
+                            $invitedPeopleRaw = $assignee['invited_people'] ?? null;
+                            if ($invitedPeopleRaw !== null && $invitedPeopleRaw !== '') {
+                                $invitedPeopleArray = json_decode($invitedPeopleRaw, true);
+                                if (is_array($invitedPeopleArray)) {
+                                    $taskInvitedPeople[$taskId] = $invitedPeopleArray;
+                                } else {
+                                    $taskInvitedPeople[$taskId] = [];
+                                }
                             } else {
                                 $taskInvitedPeople[$taskId] = [];
                             }
-                        } else {
-                            $taskInvitedPeople[$taskId] = [];
-                        }
-                        // task_lead для milestone
-                        if ($assignee['user_id']) {
-                            $taskLeads[$taskId] = (int)$assignee['user_id'];
-                        }
-                    } elseif (!$isMilestone && $assignee['user_id']) {
-                        // Для обычной задачи: отдельные записи для каждого члена бригады
-                        $userId = (int)$assignee['user_id'];
-                        // Бригадир определяется по role_in_project (например, 'task_lead' или 'supervisor')
-                        // Если role указывает на бригадира, сохраняем как task_lead_id
-                        if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
-                            $taskLeads[$taskId] = $userId;
-                        } else {
-                            // Иначе это исполнитель
-                            if (!isset($taskAssignees[$taskId])) {
-                                $taskAssignees[$taskId] = [];
+                            if ($assignee['user_id']) {
+                                $taskLeads[$taskId] = (int)$assignee['user_id'];
                             }
-                            $taskAssignees[$taskId][] = $userId;
+                        } elseif (!$isMilestone && $assignee['user_id']) {
+                            $assigneeUserId = (int)$assignee['user_id'];
+                            if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
+                                $taskLeads[$taskId] = $assigneeUserId;
+                            } else {
+                                if (!isset($taskAssignees[$taskId])) {
+                                    $taskAssignees[$taskId] = [];
+                                }
+                                $taskAssignees[$taskId][] = $assigneeUserId;
+                            }
                         }
                     }
                 }
@@ -426,7 +436,13 @@ class TaskController
                 'message' => 'Tasks retrieved successfully',
                 'data' => [
                     'tasks' => $formattedTasks,
-                    'dependencies' => $formattedDependencies
+                    'dependencies' => $formattedDependencies,
+                    'pagination' => [
+                        'current_page' => $page,
+                        'per_page' => $effectivePerPage,
+                        'total' => $totalTasks,
+                        'last_page' => $lastPage,
+                    ],
                 ]
             ]);
 
