@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\FrontendUrl;
 use Monolog\Logger;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception as PHPMailerException;
@@ -464,8 +465,8 @@ class EmailService
         $fullName = trim($firstName . ' ' . $lastName);
         $subject = 'Invitation to join FieldWire';
         
-        // Create login URL with invitation code - use frontend URL, not API URL
-        $frontendUrl = $_ENV['FRONTEND_URL'] ?? $_ENV['APP_URL'] ?? 'http://localhost:3000';
+        // Login links must target the SPA, not the API (APP_URL).
+        $frontendUrl = FrontendUrl::resolve();
         $loginUrl = $frontendUrl . '/login?token=' . urlencode($invitationToken);
         
         // Prepare template data

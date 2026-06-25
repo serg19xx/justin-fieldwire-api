@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Support\FrontendUrl;
 use App\Support\UserRoleFields;
 use App\Services\UserAuditService;
 use App\Services\EventLoggingService;
@@ -750,13 +751,7 @@ class AuthController
             
             $resetToken = $base64Header . "." . $base64Payload . "." . $base64Signature;
             
-            // Determine frontend URL based on environment
-            $appEnv = $_ENV['APP_ENV'] ?? 'development';
-            $frontendUrl = $appEnv === 'production' 
-                ? 'https://fieldwire.medicalcontractor.ca' 
-                : 'http://localhost:3000';
-            
-            $resetLink = $frontendUrl . '/reset-password?token=' . $resetToken;
+            $resetLink = FrontendUrl::resolve() . '/reset-password?token=' . $resetToken;
             
             // Send email with code using Twig template
             $userName = $user['first_name'] . ' ' . $user['last_name'];
