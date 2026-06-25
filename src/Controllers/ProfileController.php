@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Support\ApiUrl;
 use App\Support\UserRoleFields;
 use App\Services\TwilioService;
 use App\Services\EmailService;
@@ -156,8 +157,8 @@ class ProfileController
                         'status_reason' => $user['status_reason'] ?? null,
                         'status_details' => $user['status_details'] ?? null,
                         'additional_info' => $user['additional_info'] ?? null,
-                        'avatar_url' => $user['avatar_url'] ?: null,
-                        'full_img_url' => isset($user['full_img_url']) ? $user['full_img_url'] : null,
+                        'avatar_url' => ApiUrl::avatar($user['avatar_url'] ?? null),
+                        'full_img_url' => ApiUrl::fullImage($user['full_img_url'] ?? null),
                         'two_factor_enabled' => (bool)($user['two_factor_enabled'] ?? false),
                         'last_login' => $user['last_login'] ?? null,
                         'dob' => $user['dob'] ?? null,
@@ -405,7 +406,7 @@ class ProfileController
                         'city' => $updatedUser['city'] ?? null,
                         'emergency' => $this->getEmergencyData($updatedUser['id']),
                         'languages' => $this->getUserLanguages($updatedUser['id']),
-                        'avatar_url' => $updatedUser['avatar_url'] ? 'http://localhost:8000/api/v1/avatar?file=' . basename($updatedUser['avatar_url']) : null,
+                        'avatar_url' => ApiUrl::avatar($updatedUser['avatar_url'] ?? null),
                         'two_factor_enabled' => (bool)($updatedUser['two_factor_enabled'] ?? false),
                         'updated_at' => $updatedUser['updated_at'] ?? null
                     ]
@@ -552,16 +553,16 @@ class ProfileController
             $fullImageFullUrl = null;
             
             if ($avatarUrl) {
-                $avatarFullUrl = 'http://localhost:8000/api/v1/avatar?file=' . basename($avatarUrl);
+                $avatarFullUrl = ApiUrl::avatar($avatarUrl);
             }
-            
+
             if ($fullImageUrl) {
-                $fullImageFullUrl = 'http://localhost:8000/api/v1/full-image?file=' . basename($fullImageUrl);
+                $fullImageFullUrl = ApiUrl::fullImage($fullImageUrl);
             }
-            
-            // Use new URLs if provided, otherwise keep existing ones
-            $finalAvatarUrl = $avatarFullUrl ?: $currentUser['avatar_url'];
-            $finalFullImageUrl = $fullImageFullUrl ?: $currentUser['full_img_url'];
+
+            // Use new URLs if provided, otherwise keep existing ones (normalized for current host)
+            $finalAvatarUrl = $avatarFullUrl ?: ApiUrl::avatar($currentUser['avatar_url'] ?? null);
+            $finalFullImageUrl = $fullImageFullUrl ?: ApiUrl::fullImage($currentUser['full_img_url'] ?? null);
             
             $this->updateUserImages($user['id'], $finalAvatarUrl, $finalFullImageUrl);
 
@@ -984,8 +985,8 @@ class ProfileController
                 'status' => 'success',
                 'message' => 'Full image retrieved successfully',
                 'data' => [
-                    'full_image_url' => $user['full_img_url'],
-                    'full_url' => 'http://localhost:8000/api/v1/full-image?file=' . basename($user['full_img_url'])
+                    'full_image_url' => ApiUrl::fullImage($user['full_img_url'] ?? null),
+                    'full_url' => ApiUrl::fullImage($user['full_img_url'] ?? null),
                 ]
             ]);
 
@@ -1048,8 +1049,8 @@ class ProfileController
                 'status' => 'success',
                 'message' => 'Avatar retrieved successfully',
                 'data' => [
-                    'avatar_url' => $user['avatar_url'],
-                    'full_url' => 'http://localhost:8000/api/v1/avatar?file=' . basename($user['avatar_url'])
+                    'avatar_url' => ApiUrl::avatar($user['avatar_url'] ?? null),
+                    'full_url' => ApiUrl::avatar($user['avatar_url'] ?? null),
                 ]
             ]);
 
