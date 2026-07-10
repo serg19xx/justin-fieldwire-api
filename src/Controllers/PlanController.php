@@ -2540,9 +2540,6 @@ class PlanController
             $dateKey = 'tfp:date:' . $projectId . ':' . $taskId . ':' . $wd;
             $dateFolderId = $this->taskFieldPhotoVirtualFolderId($dateKey);
 
-            $slotKey = 'tfp:slot:' . $projectId . ':' . $taskId . ':' . $wd . ':' . $slot;
-            $slotFolderId = $this->taskFieldPhotoVirtualFolderId($slotKey);
-
             if (!isset($flat[$taskFolderId])) {
                 $flat[$taskFolderId] = [
                     'id' => $taskFolderId,
@@ -2573,22 +2570,44 @@ class PlanController
                 $ensureLink($flat, $taskFolderId, $dateFolderId);
             }
 
-            if (!isset($flat[$slotFolderId])) {
-                $flat[$slotFolderId] = [
-                    'id' => $slotFolderId,
-                    'name' => $slot,
-                    'parent_id' => $dateFolderId,
-                    'edited' => 0,
-                    'created_at' => null,
-                    'updated_at' => null,
-                    'child_folder_ids' => [],
-                    'files' => [],
-                ];
-                $ensureLink($flat, $dateFolderId, $slotFolderId);
-            }
-
-            $flat[$slotFolderId]['files'][] = $this->formatTaskFieldPhotoAsPlanFile($doc, $slotFolderId, $projectId);
+            $flat[$dateFolderId]['files'][] = $this->formatTaskFieldPhotoAsPlanFile($doc, $dateFolderId, $projectId);
         }
+
+        foreach ($flat as &$node) {
+            if (($node['files'] ?? []) === []) {
+                continue;
+            }
+            usort(
+                $node['files'],
+                static function (array $a, array $b): int {
+                    $slotOrder = static function (array $file): int {
+                        $slot = strtolower((string) ($file['slot'] ?? ''));
+                        if ($slot === 'before') {
+                            return 0;
+                        }
+                        if ($slot === 'after') {
+                            return 1;
+                        }
+
+                        return 2;
+                    };
+                    $sa = $slotOrder($a);
+                    $sb = $slotOrder($b);
+                    if ($sa !== $sb) {
+                        return $sa <=> $sb;
+                    }
+                    $ta = (string) ($a['uploaded_at'] ?? '');
+                    $tb = (string) ($b['uploaded_at'] ?? '');
+                    $cmp = strcmp($ta, $tb);
+                    if ($cmp !== 0) {
+                        return $cmp;
+                    }
+
+                    return ((int) ($a['field_work_photo_id'] ?? 0)) <=> ((int) ($b['field_work_photo_id'] ?? 0));
+                }
+            );
+        }
+        unset($node);
 
         return [
             'flat' => $flat,
