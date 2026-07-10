@@ -63,7 +63,9 @@ class EmailService
      */
     public function sendEmail(string $to, string $subject, string $message, string $toName = '', string $provider = 'auto'): bool
     {
-        switch (strtolower($provider)) {
+        $provider = $this->resolveEmailProvider($provider);
+
+        switch ($provider) {
             case 'sendgrid':
                 if ($this->sendGridAvailable) {
                     return $this->sendViaSendGrid($to, $subject, $message, $toName);
@@ -77,14 +79,34 @@ class EmailService
                 
             case 'auto':
             default:
-                // Use SendGrid API by default, fallback to PHPMailer if not available
-                if ($this->sendGridAvailable) {
-                    return $this->sendViaSendGrid($to, $subject, $message, $toName);
-                } else {
-                    $this->logger->info('SendGrid not available, using PHPMailer fallback');
+                if ($this->sendGridAvailable && $this->sendViaSendGrid($to, $subject, $message, $toName)) {
+                    return true;
+                }
+
+                if ($this->isPHPMailerConfigured()) {
                     return $this->sendViaPHPMailer($to, $subject, $message, $toName);
                 }
+
+                $this->logger->info('No email provider configured');
+                return false;
         }
+    }
+
+    private function resolveEmailProvider(string $provider): string
+    {
+        if ($provider !== 'auto') {
+            return strtolower($provider);
+        }
+
+        $configured = strtolower(trim((string) ($_ENV['EMAIL_PROVIDER'] ?? 'auto')));
+        if (in_array($configured, ['phpmailer', 'smtp', 'hosting'], true)) {
+            return 'phpmailer';
+        }
+        if ($configured === 'sendgrid') {
+            return 'sendgrid';
+        }
+
+        return 'auto';
     }
 
     /**
@@ -191,10 +213,9 @@ class EmailService
                 'name' => $from['name'],
             ],
             'template_id' => $templateId,
-            'tracking_settings' => $this->getSendGridTrackingSettings(),
         ];
 
-        $sent = $this->sendGridMailSend($payload);
+        $sent = $this->sendGridMailSend($this->applySendGridDeliverabilitySettings($payload));
         if ($sent) {
             $this->logger->info('SendGrid dynamic template email sent', [
                 'to' => $to,
@@ -226,7 +247,50 @@ class EmailService
                 'enable' => false,
                 'enable_text' => false,
             ],
+            'open_tracking' => [
+                'enable' => false,
+            ],
+            'subscription_tracking' => [
+                'enable' => false,
+            ],
         ];
+    }
+
+    /**
+     * @return array{email: string, name: string}|null
+     */
+    private function getSendGridReplyTo(): ?array
+    {
+        $email = trim((string) ($_ENV['SENDGRID_REPLY_TO'] ?? ''));
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return null;
+        }
+
+        return [
+            'email' => $email,
+            'name' => (string) ($_ENV['SENDGRID_REPLY_TO_NAME'] ?? $_ENV['SENDGRID_FROM_NAME'] ?? 'FieldWire Support'),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function applySendGridDeliverabilitySettings(array $payload): array
+    {
+        $replyTo = $this->getSendGridReplyTo();
+        if ($replyTo !== null) {
+            $payload['reply_to'] = $replyTo;
+        }
+
+        $payload['tracking_settings'] = $this->getSendGridTrackingSettings();
+        $payload['mail_settings'] = [
+            'footer' => ['enable' => false],
+            'bypass_list_management' => ['enable' => true],
+        ];
+        $payload['categories'] = ['transactional'];
+
+        return $payload;
     }
 
     /**
@@ -252,6 +316,7 @@ class EmailService
 
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_HEADER => true,
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $json,
             CURLOPT_HTTPHEADER => [
@@ -260,16 +325,25 @@ class EmailService
             ],
         ]);
 
-        $body = curl_exec($ch);
+        $response = curl_exec($ch);
         $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $headerSize = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
 
         if ($statusCode >= 200 && $statusCode < 300) {
+            $responseHeaders = is_string($response) ? substr($response, 0, $headerSize) : '';
+            if (preg_match('/^X-Message-Id:\s*(.+)$/mi', $responseHeaders, $matches)) {
+                $this->logger->info('SendGrid message accepted', [
+                    'message_id' => trim($matches[1]),
+                    'status_code' => $statusCode,
+                ]);
+            }
             return true;
         }
 
+        $responseBody = is_string($response) ? substr($response, $headerSize) : '';
         $this->logger->error('SendGrid mail send failed', [
             'status_code' => $statusCode,
-            'body' => is_string($body) ? $body : '',
+            'body' => $responseBody,
         ]);
         return false;
     }
@@ -277,7 +351,7 @@ class EmailService
     /**
      * @return array<string, mixed>|null
      */
-    private function sendGridGet(string $path): ?array
+    private function sendGridGet(string $path, bool $allowNotFound = false): ?array
     {
         $apiKey = $_ENV['SENDGRID_API_KEY'] ?? '';
         if ($apiKey === '') {
@@ -301,6 +375,10 @@ class EmailService
         $body = curl_exec($ch);
         $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
 
+        if ($statusCode === 404 && $allowNotFound) {
+            return null;
+        }
+
         if (!is_string($body) || $statusCode < 200 || $statusCode >= 300) {
             $this->logger->error('SendGrid GET request failed', [
                 'path' => $path,
@@ -312,6 +390,19 @@ class EmailService
 
         $decoded = json_decode($body, true);
         return is_array($decoded) ? $decoded : null;
+    }
+
+    private function getSendGridSuppressionReason(string $email): ?string
+    {
+        $encodedEmail = rawurlencode($email);
+        foreach (['bounces', 'blocks', 'invalid_emails', 'spam_reports'] as $type) {
+            $result = $this->sendGridGet('/suppression/' . $type . '/' . $encodedEmail, true);
+            if (is_array($result) && $result !== []) {
+                return $type;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -337,10 +428,9 @@ class EmailService
                 'type' => 'text/plain',
                 'value' => $message,
             ]],
-            'tracking_settings' => $this->getSendGridTrackingSettings(),
         ];
 
-        $sent = $this->sendGridMailSend($payload);
+        $sent = $this->sendGridMailSend($this->applySendGridDeliverabilitySettings($payload));
         if ($sent) {
             $this->logger->info('Email sent successfully via SendGrid', [
                 'to' => $to,
@@ -351,6 +441,32 @@ class EmailService
         return $sent;
     }
 
+    private function configurePhpMailerSmtp(PHPMailer $mail): void
+    {
+        $mail->isSMTP();
+        $mail->Host = $_ENV['SMTP_HOST'] ?? 'smtp.gmail.com';
+        $mail->SMTPAuth = filter_var($_ENV['SMTP_AUTH'] ?? 'true', FILTER_VALIDATE_BOOLEAN);
+        $mail->Username = $_ENV['SMTP_USERNAME'] ?? '';
+        $mail->Password = $_ENV['SMTP_PASSWORD'] ?? '';
+        $encryption = strtolower(trim((string) ($_ENV['SMTP_ENCRYPTION'] ?? 'tls')));
+        if ($encryption === 'none' || $encryption === 'false') {
+            $mail->SMTPSecure = false;
+            $mail->SMTPAutoTLS = false;
+        } else {
+            $mail->SMTPSecure = $encryption === 'ssl' ? PHPMailer::ENCRYPTION_SMTPS : PHPMailer::ENCRYPTION_STARTTLS;
+        }
+        $mail->Port = (int) ($_ENV['SMTP_PORT'] ?? 587);
+        $mail->Timeout = 20;
+
+        $mail->SMTPOptions = [
+            'ssl' => [
+                'verify_peer' => true,
+                'verify_peer_name' => true,
+                'allow_self_signed' => false,
+            ],
+        ];
+    }
+
     /**
      * Send email via PHPMailer
      */
@@ -359,15 +475,7 @@ class EmailService
         try {
             $mail = new PHPMailer(true);
 
-            // Server settings
-            $mail->isSMTP();
-            $mail->Host = $_ENV['SMTP_HOST'] ?? 'smtp.gmail.com';
-            $mail->SMTPAuth = true;
-            $mail->Username = $_ENV['SMTP_USERNAME'] ?? '';
-            $mail->Password = $_ENV['SMTP_PASSWORD'] ?? '';
-            $encryption = $_ENV['SMTP_ENCRYPTION'] ?? 'tls';
-            $mail->SMTPSecure = $encryption === 'ssl' ? PHPMailer::ENCRYPTION_SMTPS : PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port = (int)($_ENV['SMTP_PORT'] ?? 587);
+            $this->configurePhpMailerSmtp($mail);
 
             // Recipients
             $mail->setFrom(
@@ -584,13 +692,49 @@ class EmailService
     public function sendEmailWithTemplates(string $email, string $subject, string $htmlContent, string $textContent, string $recipientName, string $provider = 'auto'): bool
     {
         try {
-            // Use SendGrid by default for templates, fallback to PHPMailer if not available
-            if ($provider === 'phpmailer' || ($provider === 'auto' && !$this->sendGridAvailable)) {
-                return $this->sendWithPHPMailerTemplates($email, $subject, $htmlContent, $textContent, $recipientName);
-            } else {
-                // Default to SendGrid for better deliverability
-                return $this->sendWithSendGridTemplates($email, $subject, $htmlContent, $textContent, $recipientName);
+            $provider = $this->resolveEmailProvider($provider);
+
+            if ($provider === 'phpmailer') {
+                if ($this->isPHPMailerConfigured() && $this->sendWithPHPMailerTemplates($email, $subject, $htmlContent, $textContent, $recipientName)) {
+                    return true;
+                }
+
+                $this->logger->warning('PHPMailer failed, trying SendGrid fallback', ['email' => $email]);
+                if ($this->sendGridAvailable && $this->sendWithSendGridTemplates($email, $subject, $htmlContent, $textContent, $recipientName)) {
+                    return true;
+                }
+
+                return false;
             }
+
+            if ($provider === 'sendgrid') {
+                if ($this->sendGridAvailable && $this->sendWithSendGridTemplates($email, $subject, $htmlContent, $textContent, $recipientName)) {
+                    return true;
+                }
+
+                if ($this->isPHPMailerConfigured()) {
+                    return $this->sendWithPHPMailerTemplates($email, $subject, $htmlContent, $textContent, $recipientName);
+                }
+
+                return false;
+            }
+
+            // auto: SendGrid first (reliable delivery), then hosting SMTP
+            if ($this->sendGridAvailable && $this->sendWithSendGridTemplates($email, $subject, $htmlContent, $textContent, $recipientName)) {
+                return true;
+            }
+
+            if ($this->isPHPMailerConfigured()) {
+                if ($this->sendWithPHPMailerTemplates($email, $subject, $htmlContent, $textContent, $recipientName)) {
+                    return true;
+                }
+
+                $this->logger->warning('PHPMailer template email failed after SendGrid fallback attempt', [
+                    'email' => $email,
+                ]);
+            }
+
+            return false;
         } catch (\Exception $e) {
             $this->logger->error('Failed to send email with templates', [
                 'email' => $email,
@@ -605,6 +749,14 @@ class EmailService
      */
     private function sendWithSendGridTemplates(string $email, string $subject, string $htmlContent, string $textContent, string $recipientName): bool
     {
+        $suppression = $this->getSendGridSuppressionReason($email);
+        if ($suppression !== null) {
+            $this->logger->warning('Recipient is on SendGrid suppression list', [
+                'email' => $email,
+                'suppression_type' => $suppression,
+            ]);
+        }
+
         $from = $this->getSendGridFrom();
         $payload = [
             'personalizations' => [[
@@ -623,10 +775,9 @@ class EmailService
                 ['type' => 'text/plain', 'value' => $textContent],
                 ['type' => 'text/html', 'value' => $htmlContent],
             ],
-            'tracking_settings' => $this->getSendGridTrackingSettings(),
         ];
 
-        $sent = $this->sendGridMailSend($payload);
+        $sent = $this->sendGridMailSend($this->applySendGridDeliverabilitySettings($payload));
         if ($sent) {
             $this->logger->info('Email sent via SendGrid with templates', [
                 'email' => $email,
@@ -644,14 +795,7 @@ class EmailService
         try {
             $mail = new PHPMailer(true);
 
-            // Server settings
-            $mail->isSMTP();
-            $mail->Host = $_ENV['SMTP_HOST'] ?? 'smtp.gmail.com';
-            $mail->SMTPAuth = true;
-            $mail->Username = $_ENV['SMTP_USERNAME'] ?? '';
-            $mail->Password = $_ENV['SMTP_PASSWORD'] ?? '';
-            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
-            $mail->Port = $_ENV['SMTP_PORT'] ?? 587;
+            $this->configurePhpMailerSmtp($mail);
 
             // Recipients
             $mail->setFrom($_ENV['SMTP_FROM_EMAIL'] ?? 'noreply@fieldwire.com', $_ENV['SMTP_FROM_NAME'] ?? 'FieldWire Team');

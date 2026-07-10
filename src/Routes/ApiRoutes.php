@@ -14,6 +14,7 @@ use App\Controllers\ProjectTeamController;
 use App\Controllers\ScheduleWeekController;
 use App\Controllers\ScheduleEntryMessageController;
 use App\Controllers\ScheduleEntryDocumentController;
+use App\Controllers\TaskFieldPhotoController;
 use App\Controllers\EventLogController;
 use App\Controllers\N8nIntegrationController;
 use App\Controllers\LanguageController;
@@ -1016,6 +1017,13 @@ class ApiRoutes
             }
         });
 
+        Flight::route('GET /api/v1/projects/@project_id/tasks/stats', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getTaskStats((int)$project_id);
+            }
+        });
+
         Flight::route('PUT /api/v1/projects/@project_id/tasks/reorder', function($project_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
                 $taskController = new \App\Controllers\TaskController($this->logger);
@@ -1085,6 +1093,35 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $taskController = new \App\Controllers\TaskController($this->logger);
                 $taskController->updateTask((int)$project_id, (int)$task_id);
+            }
+        });
+
+        Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/submit', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->submitTask((int)$project_id, (int)$task_id);
+            }
+        });
+
+        $taskFieldPhotoController = new TaskFieldPhotoController($this->logger);
+        Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/field-photos', function($project_id, $task_id) use ($authMiddleware, $taskFieldPhotoController) {
+            if ($authMiddleware->handle()) {
+                $taskFieldPhotoController->index((int) $project_id, (int) $task_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/field-photos', function($project_id, $task_id) use ($authMiddleware, $taskFieldPhotoController) {
+            if ($authMiddleware->handle()) {
+                $taskFieldPhotoController->upload((int) $project_id, (int) $task_id);
+            }
+        });
+        Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/field-photos/@photo_id/download', function($project_id, $task_id, $photo_id) use ($authMiddleware, $taskFieldPhotoController) {
+            if ($authMiddleware->handle()) {
+                $taskFieldPhotoController->download((int) $project_id, (int) $task_id, (int) $photo_id);
+            }
+        });
+        Flight::route('DELETE /api/v1/projects/@project_id/tasks/@task_id/field-photos/@photo_id', function($project_id, $task_id, $photo_id) use ($authMiddleware, $taskFieldPhotoController) {
+            if ($authMiddleware->handle()) {
+                $taskFieldPhotoController->delete((int) $project_id, (int) $task_id, (int) $photo_id);
             }
         });
 

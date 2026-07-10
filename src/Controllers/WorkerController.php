@@ -243,6 +243,15 @@ class WorkerController
             $search = $request->query['search'] ?? null;
             $sortBy = $request->query['sort_by'] ?? 'created_at';
             $sortOrder = $request->query['sort_order'] ?? 'DESC';
+            $viewMode = $request->query['view_mode'] ?? null;
+            $fields = strtolower(trim((string)($request->query['fields'] ?? 'full')));
+            $isListFields = ($fields === 'list');
+
+            if (!$invitationStatus && $viewMode === 'registered') {
+                $invitationStatus = 'registered';
+            } elseif (!$invitationStatus && ($viewMode === 'pending' || $viewMode === 'invited')) {
+                $invitationStatus = 'invited';
+            }
 
             $offset = ($page - 1) * $limit;
 
@@ -250,7 +259,7 @@ class WorkerController
             $params = [];
             
             if ($projectId && is_numeric($projectId)) {
-                // Если указан project_id, делаем JOIN с таблицей участников проекта (только участники)
+                // One row per user: team table may have multiple rows per user/project (per task).
                 $sql = "SELECT 
                             u.id, u.email, u.first_name, u.last_name, u.dob, u.gender, u.nationality, u.country_of_origin, 
                             u.workforce_group, u.phone, u.role_id, u.job_title, u.city, u.status, u.emergency, 
@@ -263,8 +272,14 @@ class WorkerController
                             true as is_project_member
                         FROM fw_users u
                         LEFT JOIN fw_glob_roles r ON u.role_id = r.id
-                        INNER JOIN fw_prj_team_members tm ON u.id = tm.user_id
-                        WHERE tm.project_id = ?";
+                        INNER JOIN (
+                            SELECT user_id,
+                                   SUBSTRING_INDEX(GROUP_CONCAT(role_in_project ORDER BY assigned_at DESC), ',', 1) AS role_in_project,
+                                   MAX(assigned_at) AS assigned_at
+                            FROM fw_prj_team_members
+                            WHERE project_id = ? AND user_id IS NOT NULL
+                            GROUP BY user_id
+                        ) tm ON u.id = tm.user_id";
                 $params[] = (int)$projectId;
             } else {
                 // Обычный запрос для всех пользователей (параметр prj_mngr_id игнорируется)
@@ -283,14 +298,14 @@ class WorkerController
 
             // Фильтр по ID (точное совпадение)
             if ($id && is_numeric($id)) {
-                $sql .= " AND id = ?";
+                $sql .= " AND u.id = ?";
                 $params[] = (int)$id;
             }
 
             // Фильтр по статусу приглашения
             if ($invitationStatus) {
                 if (in_array($invitationStatus, ['invited', 'registered', 'expired'])) {
-                    $sql .= " AND invitation_status = ?";
+                    $sql .= " AND u.invitation_status = ?";
                     $params[] = $invitationStatus;
                 } else {
                     // Для невалидных статусов возвращаем пустой результат
@@ -300,34 +315,34 @@ class WorkerController
 
             // Фильтр по статусу пользователя (1=активный, 0=неактивный)
             if ($status !== null && in_array($status, [0, 1, '0', '1'])) {
-                $sql .= " AND status = ?";
+                $sql .= " AND u.status = ?";
                 $params[] = (int)$status;
             }
 
             // Фильтр по роли (ID)
             if ($roleId && is_numeric($roleId)) {
-                $sql .= " AND role_id = ?";
+                $sql .= " AND u.role_id = ?";
                 $params[] = (int)$roleId;
             }
 
             // Фильтр по коду роли
             if ($roleCode) {
-                $sql .= " AND role_code = ?";
+                $sql .= " AND r.code = ?";
                 $params[] = $roleCode;
             }
 
             // Фильтр по должности
             if ($jobTitle) {
-                $sql .= " AND job_title LIKE ?";
+                $sql .= " AND u.job_title LIKE ?";
                 $params[] = "%{$jobTitle}%";
             }
 
             // Фильтр по архивированным пользователям
             if ($archived !== null) {
                 if ($archived === 'true' || $archived === true) {
-                    $sql .= " AND archived_at IS NOT NULL";
+                    $sql .= " AND u.archived_at IS NOT NULL";
                 } else {
-                    $sql .= " AND archived_at IS NULL";
+                    $sql .= " AND u.archived_at IS NULL";
                 }
             }
 
@@ -337,38 +352,35 @@ class WorkerController
             // Фильтр по 2FA
             if ($twoFactor !== null) {
                 if ($twoFactor === 'true' || $twoFactor === true) {
-                    $sql .= " AND two_factor_enabled = 1";
+                    $sql .= " AND u.two_factor_enabled = 1";
                 } else {
-                    $sql .= " AND two_factor_enabled = 0";
+                    $sql .= " AND u.two_factor_enabled = 0";
                 }
             }
 
             // Поиск по имени, email, телефону или должности
             if ($search) {
-                $sql .= " AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ? OR phone LIKE ? OR job_title LIKE ?)";
-                $searchTerm = "%{$search}%";
-                $params[] = $searchTerm;
-                $params[] = $searchTerm;
-                $params[] = $searchTerm;
-                $params[] = $searchTerm;
-                $params[] = $searchTerm;
+                $this->appendWorkerSearchSql($sql, $params, (string)$search);
             }
 
             // Подсчет общего количества с теми же фильтрами
             if ($projectId && is_numeric($projectId)) {
-                $countSql = "SELECT COUNT(*) as total 
+                $countSql = "SELECT COUNT(DISTINCT u.id) as total 
                             FROM fw_users u
                             LEFT JOIN fw_glob_roles r ON u.role_id = r.id
-                            INNER JOIN fw_prj_team_members tm ON u.id = tm.user_id
-                            WHERE tm.project_id = ?";
+                            WHERE u.id IN (
+                                SELECT DISTINCT tm.user_id
+                                FROM fw_prj_team_members tm
+                                WHERE tm.project_id = ? AND tm.user_id IS NOT NULL
+                            )";
                 $countParams = [(int)$projectId];
             } elseif ($prjMngrId && is_numeric($prjMngrId)) {
+                // Same scope as main query: all workers (prj_mngr_id filter not applied to listing yet)
                 $countSql = "SELECT COUNT(*) as total 
                             FROM fw_users u
                             LEFT JOIN fw_glob_roles r ON u.role_id = r.id
-                            INNER JOIN fw_projects p ON u.id = p.prj_manager
-                            WHERE p.prj_manager = ?";
-                $countParams = [(int)$prjMngrId];
+                            WHERE 1=1";
+                $countParams = [];
             } else {
                 $countSql = "SELECT COUNT(*) as total 
                             FROM fw_users u
@@ -379,13 +391,13 @@ class WorkerController
             
             // Применяем те же фильтры для подсчета
             if ($id && is_numeric($id)) {
-                $countSql .= " AND id = ?";
+                $countSql .= " AND u.id = ?";
                 $countParams[] = (int)$id;
             }
             
             if ($invitationStatus) {
                 if (in_array($invitationStatus, ['invited', 'registered', 'expired'])) {
-                    $countSql .= " AND invitation_status = ?";
+                    $countSql .= " AND u.invitation_status = ?";
                     $countParams[] = $invitationStatus;
                 } else {
                     // Для невалидных статусов возвращаем пустой результат
@@ -394,30 +406,30 @@ class WorkerController
             }
             
             if ($status !== null && in_array($status, [0, 1, '0', '1'])) {
-                $countSql .= " AND status = ?";
+                $countSql .= " AND u.status = ?";
                 $countParams[] = (int)$status;
             }
             
             if ($roleId && is_numeric($roleId)) {
-                $countSql .= " AND role_id = ?";
+                $countSql .= " AND u.role_id = ?";
                 $countParams[] = (int)$roleId;
             }
             
             if ($roleCode) {
-                $countSql .= " AND role_code = ?";
+                $countSql .= " AND r.code = ?";
                 $countParams[] = $roleCode;
             }
             
             if ($jobTitle) {
-                $countSql .= " AND job_title LIKE ?";
+                $countSql .= " AND u.job_title LIKE ?";
                 $countParams[] = "%{$jobTitle}%";
             }
             
             if ($archived !== null) {
                 if ($archived === 'true' || $archived === true) {
-                    $countSql .= " AND archived_at IS NOT NULL";
+                    $countSql .= " AND u.archived_at IS NOT NULL";
                 } else {
-                    $countSql .= " AND archived_at IS NULL";
+                    $countSql .= " AND u.archived_at IS NULL";
                 }
             }
             
@@ -426,20 +438,14 @@ class WorkerController
             
             if ($twoFactor !== null) {
                 if ($twoFactor === 'true' || $twoFactor === true) {
-                    $countSql .= " AND two_factor_enabled = 1";
+                    $countSql .= " AND u.two_factor_enabled = 1";
                 } else {
-                    $countSql .= " AND two_factor_enabled = 0";
+                    $countSql .= " AND u.two_factor_enabled = 0";
                 }
             }
             
             if ($search) {
-                $countSql .= " AND (first_name LIKE ? OR last_name LIKE ? OR email LIKE ? OR phone LIKE ? OR job_title LIKE ?)";
-                $searchTerm = "%{$search}%";
-                $countParams[] = $searchTerm;
-                $countParams[] = $searchTerm;
-                $countParams[] = $searchTerm;
-                $countParams[] = $searchTerm;
-                $countParams[] = $searchTerm;
+                $this->appendWorkerSearchSql($countSql, $countParams, (string)$search);
             }
 
             $connection = $this->database->getConnection();
@@ -447,76 +453,49 @@ class WorkerController
             $total = $countResult->fetchOne();
 
             // Добавляем сортировку и пагинацию
-            // Сортировка
-            $allowedSortFields = ['id', 'email', 'first_name', 'last_name', 'created_at', 'updated_at', 'last_login', 'role_name', 'job_title'];
-            $sortBy = in_array($sortBy, $allowedSortFields) ? $sortBy : 'created_at';
+            $sortFieldMap = [
+                'id' => 'u.id',
+                'email' => 'u.email',
+                'first_name' => 'u.first_name',
+                'last_name' => 'u.last_name',
+                'created_at' => 'u.created_at',
+                'updated_at' => 'u.updated_at',
+                'last_login' => 'u.last_login',
+                'role_name' => 'r.name',
+                'job_title' => 'u.job_title',
+            ];
+            $sortByKey = in_array($sortBy, array_keys($sortFieldMap), true) ? $sortBy : 'created_at';
+            $sortColumn = $sortFieldMap[$sortByKey];
             $sortOrder = strtoupper($sortOrder) === 'ASC' ? 'ASC' : 'DESC';
             
-            $sql .= " ORDER BY {$sortBy} {$sortOrder} LIMIT {$limit} OFFSET {$offset}";
+            $sql .= " ORDER BY {$sortColumn} {$sortOrder} LIMIT {$limit} OFFSET {$offset}";
 
             $result = $connection->executeQuery($sql, $params);
             $workers = $result->fetchAllAssociative();
 
+            $userIds = array_map(static fn(array $row): int => (int)$row['id'], $workers);
+            $languagesByUser = $isListFields ? $this->getLanguagesForUserIds($userIds) : [];
+
             // Форматируем данные с вложенными объектами
-            $formattedWorkers = array_map(function($worker) {
+            $formattedWorkers = array_map(function($worker) use ($isListFields, $languagesByUser) {
                 $workerId = (int)$worker['id'];
-                
-                // Получаем профессиональные данные
-                $professionalData = $this->getProfessionalData($workerId);
-                
-                // Получаем проекты пользователя
-                $projects = $this->getUserProjects($workerId);
-                
-                // Получаем языки пользователя
-                $languages = $this->getUserLanguages($workerId);
-                
-                return [
-                    'id' => $workerId,
-                    'email' => $worker['email'],
-                    'first_name' => $worker['first_name'],
-                    'last_name' => $worker['last_name'],
-                    'dob' => $worker['dob'],
-                    'gender' => $worker['gender'],
-                    'nationality' => $worker['nationality'],
-                    'country_of_origin' => $worker['country_of_origin'],
-                    'workforce_group' => $worker['workforce_group'],
-                    'phone' => $worker['phone'],
-                    'role_id' => $worker['role_id'] ? (int)$worker['role_id'] : null,
-                    'job_title' => $worker['job_title'],
-                    'city' => $worker['city'],
-                    'status' => (int)$worker['status'],
-                    'emergency' => $this->getEmergencyData($workerId),
-                    'status_changed_at' => $worker['status_changed_at'],
-                    'status_end_at' => $worker['status_end_at'],
-                    'status_reason' => $worker['status_reason'],
-                    'status_details' => $worker['status_details'],
-                    'additional_info' => $worker['additional_info'],
-                    'full_img_url' => $worker['full_img_url'],
-                    'avatar_url' => $worker['avatar_url'],
-                    'created_at' => $worker['created_at'],
-                    'updated_at' => $worker['updated_at'],
-                    'invitation_status' => $worker['invitation_status'],
-                    'invitation_sent_at' => $worker['invitation_sent_at'],
-                    'invitation_expires_at' => $worker['invitation_expires_at'],
-                    'invited_by' => $worker['invited_by'] ? (int)$worker['invited_by'] : null,
-                    'registration_completed_at' => $worker['registration_completed_at'],
-                    'invitation_attempts' => (int)$worker['invitation_attempts'],
-                    'last_reminder_sent_at' => $worker['last_reminder_sent_at'],
-                    'archived_at' => $worker['archived_at'],
-                    'code' => $worker['role_code'],
-                    'name' => $worker['role_name'],
-                    'category' => $worker['role_category'],
-                    'description' => $worker['role_description'],
-                    'role' => [
-                        'id' => $worker['role_id'] ? (int)$worker['role_id'] : null,
-                        'code' => $worker['role_code'],
-                        'name' => $worker['role_name'],
-                        'category' => $worker['role_category']
-                    ],
-                    'professional_data' => $professionalData,
-                    'projects' => $projects,
-                    'languages' => $languages
-                ];
+                $emergency = $this->parseEmergencyField($worker['emergency'] ?? null);
+
+                $base = $this->formatWorkerBaseRow($worker, $emergency);
+
+                if ($isListFields) {
+                    return array_merge($base, [
+                        'professional_data' => [],
+                        'projects' => [],
+                        'languages' => $languagesByUser[$workerId] ?? [],
+                    ]);
+                }
+
+                return array_merge($base, [
+                    'professional_data' => $this->getProfessionalData($workerId),
+                    'projects' => $this->getUserProjects($workerId),
+                    'languages' => $this->getUserLanguages($workerId),
+                ]);
             }, $workers);
 
             $lastPage = ceil($total / $limit);
@@ -1050,6 +1029,195 @@ class WorkerController
     }
 
     /**
+     * Escape user input for SQL LIKE patterns.
+     */
+    private function likePattern(string $raw): string
+    {
+        $trimmed = trim($raw);
+        return '%' . addcslashes($trimmed, '%_\\') . '%';
+    }
+
+    /**
+     * Worker list search: full name, compact name (no spaces), multi-word tokens.
+     */
+    private function appendWorkerSearchSql(string &$sql, array &$params, string $search): void
+    {
+        $search = trim($search);
+        if ($search === '') {
+            return;
+        }
+
+        $fullPattern = $this->likePattern($search);
+        $compact = preg_replace('/\s+/u', '', $search) ?? '';
+        $compactPattern = $compact !== '' && mb_strlen($compact) >= 2
+            ? $this->likePattern($compact)
+            : null;
+
+        $tokens = preg_split('/\s+/u', $search, -1, PREG_SPLIT_NO_EMPTY);
+        if (!is_array($tokens) || $tokens === []) {
+            $tokens = [$search];
+        }
+
+        $fullNameExpr = "CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, ''))";
+        $compactNameExpr = "REPLACE(CONCAT(COALESCE(u.first_name, ''), COALESCE(u.last_name, '')), ' ', '')";
+
+        $parts = [
+            'u.first_name LIKE ?',
+            'u.last_name LIKE ?',
+            "{$fullNameExpr} LIKE ?",
+            'u.email LIKE ?',
+            'u.phone LIKE ?',
+            'u.job_title LIKE ?',
+        ];
+        $bindings = [$fullPattern, $fullPattern, $fullPattern, $fullPattern, $fullPattern, $fullPattern];
+
+        if ($compactPattern !== null) {
+            $parts[] = "{$compactNameExpr} LIKE ?";
+            $bindings[] = $compactPattern;
+        }
+
+        if (count($tokens) > 1) {
+            $tokenGroups = [];
+            $tokenBindings = [];
+            foreach ($tokens as $token) {
+                $tokenPattern = $this->likePattern($token);
+                $tokenGroups[] = '(u.first_name LIKE ? OR u.last_name LIKE ? OR u.email LIKE ? OR u.job_title LIKE ? OR '
+                    . "{$fullNameExpr} LIKE ? OR {$compactNameExpr} LIKE ?)";
+                array_push($tokenBindings, $tokenPattern, $tokenPattern, $tokenPattern, $tokenPattern, $tokenPattern, $tokenPattern);
+            }
+            $sql .= ' AND ((' . implode(' OR ', $parts) . ') OR (' . implode(' AND ', $tokenGroups) . '))';
+            foreach ($bindings as $binding) {
+                $params[] = $binding;
+            }
+            foreach ($tokenBindings as $binding) {
+                $params[] = $binding;
+            }
+            return;
+        }
+
+        $sql .= ' AND (' . implode(' OR ', $parts) . ')';
+        foreach ($bindings as $binding) {
+            $params[] = $binding;
+        }
+    }
+
+    /**
+     * Parse emergency JSON already selected on the user row.
+     */
+    private function parseEmergencyField(mixed $raw): ?array
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (is_array($raw)) {
+            return $raw;
+        }
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            return is_array($decoded) ? $decoded : null;
+        }
+        return null;
+    }
+
+    /**
+     * Shared worker payload for list and full responses.
+     */
+    private function formatWorkerBaseRow(array $worker, ?array $emergency): array
+    {
+        $workerId = (int)$worker['id'];
+
+        return [
+            'id' => $workerId,
+            'email' => $worker['email'],
+            'first_name' => $worker['first_name'],
+            'last_name' => $worker['last_name'],
+            'dob' => $worker['dob'],
+            'gender' => $worker['gender'],
+            'nationality' => $worker['nationality'],
+            'country_of_origin' => $worker['country_of_origin'],
+            'workforce_group' => $worker['workforce_group'],
+            'phone' => $worker['phone'],
+            'role_id' => $worker['role_id'] ? (int)$worker['role_id'] : null,
+            'job_title' => $worker['job_title'],
+            'city' => $worker['city'],
+            'status' => (int)$worker['status'],
+            'emergency' => $emergency,
+            'status_changed_at' => $worker['status_changed_at'],
+            'status_end_at' => $worker['status_end_at'],
+            'status_reason' => $worker['status_reason'],
+            'status_details' => $worker['status_details'],
+            'additional_info' => $worker['additional_info'],
+            'full_img_url' => $worker['full_img_url'],
+            'avatar_url' => $worker['avatar_url'],
+            'created_at' => $worker['created_at'],
+            'updated_at' => $worker['updated_at'],
+            'invitation_status' => $worker['invitation_status'],
+            'invitation_sent_at' => $worker['invitation_sent_at'],
+            'invitation_expires_at' => $worker['invitation_expires_at'],
+            'invited_by' => $worker['invited_by'] ? (int)$worker['invited_by'] : null,
+            'registration_completed_at' => $worker['registration_completed_at'],
+            'invitation_attempts' => (int)$worker['invitation_attempts'],
+            'last_reminder_sent_at' => $worker['last_reminder_sent_at'],
+            'archived_at' => $worker['archived_at'],
+            'code' => $worker['role_code'],
+            'role_code' => $worker['role_code'],
+            'role_name' => $worker['role_name'],
+            'name' => $worker['role_name'],
+            'category' => $worker['role_category'],
+            'description' => $worker['role_description'],
+            'role' => [
+                'id' => $worker['role_id'] ? (int)$worker['role_id'] : null,
+                'code' => $worker['role_code'],
+                'name' => $worker['role_name'],
+                'category' => $worker['role_category'],
+            ],
+        ];
+    }
+
+    /**
+     * Batch-load languages for a page of workers (list endpoint).
+     *
+     * @param int[] $userIds
+     * @return array<int, list<array{id: int, name: string, prof_level: string}>>
+     */
+    private function getLanguagesForUserIds(array $userIds): array
+    {
+        $userIds = array_values(array_unique(array_filter(array_map('intval', $userIds))));
+        if ($userIds === []) {
+            return [];
+        }
+
+        try {
+            $connection = Database::getConnection();
+            $placeholders = implode(',', array_fill(0, count($userIds), '?'));
+            $sql = "SELECT ul.worker_id, l.id, l.name, ul.prof_level
+                    FROM fw_languages l
+                    INNER JOIN fw_user_languages ul ON l.id = ul.language_id
+                    WHERE ul.worker_id IN ({$placeholders})";
+
+            $result = $connection->executeQuery($sql, $userIds);
+            $rows = $result->fetchAllAssociative();
+
+            $grouped = [];
+            foreach ($rows as $language) {
+                $uid = (int)$language['worker_id'];
+                $grouped[$uid][] = [
+                    'id' => (int)$language['id'],
+                    'name' => $language['name'],
+                    'prof_level' => $language['prof_level'],
+                ];
+            }
+
+            return $grouped;
+        } catch (Exception $e) {
+            $this->logger->error('Error batch-fetching user languages', [
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+    }
+
+    /**
      * Get emergency data for user
      */
     private function getEmergencyData(int $userId): ?array
@@ -1060,8 +1228,8 @@ class WorkerController
             $result = $connection->executeQuery($sql, [$userId]);
             $row = $result->fetchAssociative();
             
-            if ($row['emergency']) {
-                return json_decode($row['emergency'], true) ?: null;
+            if ($row && $row['emergency']) {
+                return $this->parseEmergencyField($row['emergency']);
             }
             
             return null;

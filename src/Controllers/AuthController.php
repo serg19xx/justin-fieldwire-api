@@ -755,7 +755,7 @@ class AuthController
             
             // Send email with code using Twig template
             $userName = $user['first_name'] . ' ' . $user['last_name'];
-            $subject = 'Password Reset Request - FieldWire';
+            $subject = "FieldWire password reset code: {$code}";
             
             try {
                 // Initialize Twig
@@ -772,13 +772,12 @@ class AuthController
                 ]);
                 
                 // Plain text version
-                $textMessage = "Hello {$userName}!\n\n";
-                $textMessage .= "Password Reset Request\n\n";
+                $textMessage = "Hello {$userName},\n\n";
+                $textMessage .= "Your FieldWire password reset code: {$code}\n\n";
                 $textMessage .= "Reset link: {$resetLink}\n\n";
-                $textMessage .= "Or enter this code: {$code}\n\n";
-                $textMessage .= "This link and code expire in 10 minutes.\n\n";
-                $textMessage .= "Security Notice: If you didn't request this, ignore this email.\n\n";
-                $textMessage .= "Best regards,\nFieldWire Team";
+                $textMessage .= "This code and link expire in 10 minutes.\n\n";
+                $textMessage .= "If you did not request this, ignore this email.\n\n";
+                $textMessage .= "FieldWire\nhttps://fieldwire.medicalcontractor.ca\n";
                 
                 // Send email using EmailService
                 $emailService = new \App\Services\EmailService($this->logger);
@@ -797,6 +796,12 @@ class AuthController
             }
             
             if (!$emailSent) {
+                $this->logger->error('Password reset email delivery failed', [
+                    'user_id' => $user['id'],
+                    'email' => $email,
+                    'sendgrid_configured' => !empty($_ENV['SENDGRID_API_KEY']),
+                    'smtp_configured' => !empty($_ENV['SMTP_HOST']) && !empty($_ENV['SMTP_USERNAME']),
+                ]);
                 throw new \Exception('Failed to send email');
             }
             
