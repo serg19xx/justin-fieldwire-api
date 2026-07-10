@@ -380,6 +380,9 @@ class TaskFieldPhotoController
         if ($auth->isAssignedToTask($conn, $taskId, $userId)) {
             return true;
         }
+        if ($auth->canActAsProjectForemanOnTask($conn, $projectId, $userId)) {
+            return true;
+        }
 
         return false;
     }
@@ -391,7 +394,7 @@ class TaskFieldPhotoController
             return true;
         }
 
-        return $auth->canSubmitFieldWork($conn, $taskId, $userId);
+        return $auth->canSubmitFieldWork($conn, $projectId, $taskId, $userId);
     }
 
     private function canDeletePhoto(Connection $conn, int $userId, int $taskId, int $projectId, int $uploadedBy): bool
@@ -400,7 +403,7 @@ class TaskFieldPhotoController
         if ($auth->isProjectTaskManager($conn, $userId, $projectId)) {
             return true;
         }
-        if ($auth->canSubmitFieldWork($conn, $taskId, $userId)) {
+        if ($auth->canSubmitFieldWork($conn, $projectId, $taskId, $userId)) {
             return true;
         }
 

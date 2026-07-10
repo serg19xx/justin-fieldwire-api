@@ -34,7 +34,9 @@ class TaskController
         'field_submitted_at',
         'field_submitted_by',
         'field_work_started_at',
+        'field_work_started_by',
         'field_work_ended_at',
+        'field_work_ended_by',
         'field_notes',
         'field_work_start_reason',
         'field_work_end_reason',
@@ -120,7 +122,13 @@ class TaskController
                 ? (int) $task['field_submitted_by']
                 : null,
             'field_work_started_at' => $task['field_work_started_at'] ?? null,
+            'field_work_started_by' => isset($task['field_work_started_by']) && $task['field_work_started_by'] !== null
+                ? (int) $task['field_work_started_by']
+                : null,
             'field_work_ended_at' => $task['field_work_ended_at'] ?? null,
+            'field_work_ended_by' => isset($task['field_work_ended_by']) && $task['field_work_ended_by'] !== null
+                ? (int) $task['field_work_ended_by']
+                : null,
             'field_work_start_reason' => $task['field_work_start_reason'] ?? null,
             'field_work_end_reason' => $task['field_work_end_reason'] ?? null,
             'field_notes' => $task['field_notes'] ?? null,
@@ -151,6 +159,58 @@ class TaskController
         self::$taskOptionalColumnExists = $map;
 
         return $map;
+    }
+
+    /**
+     * @param array<string, mixed> $task
+     * @param array<string, mixed> $beforeData
+     */
+    private function logFieldWorkInitiatorEvent(
+        Connection $connection,
+        int $projectId,
+        int $taskId,
+        array $task,
+        array $beforeData,
+        int $actorId,
+        string $eventType,
+        string $phase,
+    ): void {
+        $accountableForemanId = $this->taskAuth->resolveAccountableForemanUserId($connection, $projectId, $taskId);
+        $onBehalfOfForeman = $accountableForemanId !== null && $actorId !== $accountableForemanId;
+        $timeKey = $phase === 'ended' ? 'field_work_ended_at' : 'field_work_started_at';
+        $byKey = $phase === 'ended' ? 'field_work_ended_by' : 'field_work_started_by';
+
+        $this->eventLoggingService->logEvent(
+            'task',
+            $taskId,
+            $eventType,
+            $this->fieldSubmissionPayloadFromRow($beforeData),
+            array_merge(
+                $this->fieldSubmissionPayloadFromRow($task),
+                [
+                    'task_id' => $taskId,
+                    'project_id' => $projectId,
+                    'task_name' => $task['name'] ?? null,
+                    'project_foreman_id' => $this->taskAuth->resolveProjectForemanUserId($connection, $projectId),
+                    'task_lead_id' => $this->taskAuth->resolveTaskLeadUserId($connection, $taskId),
+                    'accountable_foreman_id' => $accountableForemanId,
+                    'initiated_by_user_id' => $actorId,
+                    $timeKey => $task[$timeKey] ?? null,
+                    $byKey => isset($task[$byKey]) ? (int) $task[$byKey] : $actorId,
+                    'on_behalf_of_foreman' => $onBehalfOfForeman,
+                ]
+            ),
+            [$timeKey, $byKey],
+            [
+                'actor_type' => 'user',
+                'actor_id' => $actorId,
+                'comment' => $onBehalfOfForeman
+                    ? "Field work {$phase} recorded on behalf of accountable foreman"
+                    : "Field work {$phase} recorded by accountable foreman",
+                'ip' => Flight::request()->ip ?? null,
+                'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+            ]
+        );
     }
 
     private function resolveTaskDetailSelect(Connection $connection): string
@@ -950,6 +1010,9 @@ class TaskController
             // Обработка task_lead_id - все пользователи должны быть прикреплены к задачам
             // Не проверяем наличие в команде проекта, так как все должны быть назначены на задачи
             $taskLeadId = isset($data['task_lead_id']) && $data['task_lead_id'] ? (int)$data['task_lead_id'] : null;
+            if ($taskLeadId === null) {
+                $taskLeadId = $this->taskAuth->resolveProjectForemanUserId($connection, $projectId);
+            }
 
             $params = [
                 $nextOrder,
@@ -1419,8 +1482,7 @@ class TaskController
 
             // Получаем текущие данные задачи перед обновлением для логирования
             $beforeResult = $connection->executeQuery(
-                "SELECT id, project_id, name, status, start_planned, end_planned, start_time, end_time, milestone, progress_pct, actual_start, actual_end
-                 FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
+                'SELECT ' . $this->resolveTaskDetailSelect($connection) . ' FROM fw_prj_tasks WHERE id = ? AND project_id = ?',
                 [$taskId, $projectId]
             );
             $beforeData = $beforeResult->fetchAssociative();
@@ -1548,12 +1610,26 @@ class TaskController
                 if ($this->taskOptionalColumnPresent($connection, 'field_work_started_at')) {
                     $updateFields[] = 'field_work_started_at = ?';
                     $params[] = $this->normalizeNullableDateTime($data['field_work_started_at']);
+                    if (
+                        $data['field_work_started_at'] !== null
+                        && $this->taskOptionalColumnPresent($connection, 'field_work_started_by')
+                    ) {
+                        $updateFields[] = 'field_work_started_by = ?';
+                        $params[] = $actorId;
+                    }
                 }
             }
             if (array_key_exists('field_work_ended_at', $data)) {
                 if ($this->taskOptionalColumnPresent($connection, 'field_work_ended_at')) {
                     $updateFields[] = 'field_work_ended_at = ?';
                     $params[] = $this->normalizeNullableDateTime($data['field_work_ended_at']);
+                    if (
+                        $data['field_work_ended_at'] !== null
+                        && $this->taskOptionalColumnPresent($connection, 'field_work_ended_by')
+                    ) {
+                        $updateFields[] = 'field_work_ended_by = ?';
+                        $params[] = $actorId;
+                    }
                 }
             }
             if (array_key_exists('field_notes', $data)) {
@@ -1980,6 +2056,38 @@ class TaskController
                             'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
                             'severity' => 'important'
                         ]
+                    );
+                }
+
+                if (
+                    array_key_exists('field_work_started_at', $data)
+                    && ($beforeData['field_work_started_at'] ?? null) !== ($task['field_work_started_at'] ?? null)
+                ) {
+                    $this->logFieldWorkInitiatorEvent(
+                        $connection,
+                        $projectId,
+                        $taskId,
+                        $task,
+                        $beforeData,
+                        $actorId,
+                        'TASK_FIELD_WORK_STARTED',
+                        'started',
+                    );
+                }
+
+                if (
+                    array_key_exists('field_work_ended_at', $data)
+                    && ($beforeData['field_work_ended_at'] ?? null) !== ($task['field_work_ended_at'] ?? null)
+                ) {
+                    $this->logFieldWorkInitiatorEvent(
+                        $connection,
+                        $projectId,
+                        $taskId,
+                        $task,
+                        $beforeData,
+                        $actorId,
+                        'TASK_FIELD_WORK_ENDED',
+                        'ended',
                     );
                 }
 
@@ -4405,7 +4513,7 @@ class TaskController
                 return;
             }
 
-            if (!$this->taskAuth->canSubmitFieldWork($connection, $taskId, $actorId)) {
+            if (!$this->taskAuth->canSubmitFieldWork($connection, $projectId, $taskId, $actorId)) {
                 Flight::json([
                     'error_code' => 403,
                     'status' => 'error',
@@ -4463,9 +4571,8 @@ class TaskController
             $params[] = $projectId;
             $connection->executeStatement($updateSql, $params);
 
-            $taskLeadId = $this->taskAuth->resolveTaskLeadUserId($connection, $taskId);
-            $actorIsTaskLead = $this->taskAuth->isTaskLead($connection, $taskId, $actorId);
-            $submittedOnBehalfOfLead = $taskLeadId !== null && !$actorIsTaskLead;
+            $accountableForemanId = $this->taskAuth->resolveAccountableForemanUserId($connection, $projectId, $taskId);
+            $onBehalfOfForeman = $accountableForemanId !== null && $actorId !== $accountableForemanId;
 
             $afterRow = $connection->executeQuery(
                 'SELECT ' . $this->resolveTaskDetailSelect($connection) . ' FROM fw_prj_tasks WHERE id = ? AND project_id = ?',
@@ -4484,17 +4591,21 @@ class TaskController
                         'project_id' => $projectId,
                         'task_name' => $taskRow['name'] ?? null,
                         'status' => $taskRow['status'] ?? null,
-                        'task_lead_id' => $taskLeadId,
+                        'project_foreman_id' => $this->taskAuth->resolveProjectForemanUserId($connection, $projectId),
+                        'task_lead_id' => $this->taskAuth->resolveTaskLeadUserId($connection, $taskId),
+                        'accountable_foreman_id' => $accountableForemanId,
+                        'initiated_by_user_id' => $actorId,
                         'submitted_by_user_id' => $actorId,
-                        'submitted_on_behalf_of_lead' => $submittedOnBehalfOfLead,
+                        'submitted_on_behalf_of_lead' => $onBehalfOfForeman,
+                        'on_behalf_of_foreman' => $onBehalfOfForeman,
                     ]
                 ),
                 ['field_submitted_at', 'field_submitted_by', 'field_notes'],
                 [
                     'actor_type' => 'user',
                     'actor_id' => $actorId,
-                    'comment' => $submittedOnBehalfOfLead
-                        ? 'Crew member submitted field work for PM review (task lead on record)'
+                    'comment' => $onBehalfOfForeman
+                        ? 'Crew member submitted field work for PM review (accountable foreman on record)'
                         : 'Foreman submitted field work for PM review',
                     'ip' => Flight::request()->ip ?? null,
                     'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,

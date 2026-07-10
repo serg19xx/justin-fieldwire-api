@@ -12,6 +12,8 @@ use Doctrine\DBAL\Connection;
  */
 class TaskAuthorizationService
 {
+    private static ?bool $projectForemanColumnExists = null;
+
     private const PM_GLOBAL_ROLES = ['admin', 'project_manager'];
 
     private const FIELD_FOREMAN_GLOBAL_ROLES = ['foreman'];
@@ -169,10 +171,88 @@ class TaskAuthorizationService
         return $this->isAssignedToTask($conn, $taskId, $userId);
     }
 
-    public function canSubmitFieldWork(Connection $conn, int $taskId, int $userId): bool
+    public function canSubmitFieldWork(Connection $conn, int $projectId, int $taskId, int $userId): bool
     {
         return $this->isTaskLead($conn, $taskId, $userId)
-            || $this->canActAsFieldCrew($conn, $taskId, $userId);
+            || $this->canActAsFieldCrew($conn, $taskId, $userId)
+            || $this->canActAsProjectForemanOnTask($conn, $projectId, $userId);
+    }
+
+    public function projectForemanColumnPresent(Connection $conn): bool
+    {
+        if (self::$projectForemanColumnExists !== null) {
+            return self::$projectForemanColumnExists;
+        }
+
+        $row = $conn->executeQuery(
+            'SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+            ['fw_projects', 'project_foreman_id']
+        )->fetchAssociative();
+
+        self::$projectForemanColumnExists = (int) ($row['c'] ?? 0) > 0;
+
+        return self::$projectForemanColumnExists;
+    }
+
+    public function resolveProjectForemanUserId(Connection $conn, int $projectId): ?int
+    {
+        if (!$this->projectForemanColumnPresent($conn)) {
+            return null;
+        }
+
+        $row = $conn->executeQuery(
+            'SELECT project_foreman_id FROM fw_projects WHERE id = ? LIMIT 1',
+            [$projectId]
+        )->fetchAssociative();
+
+        if (!$row || $row['project_foreman_id'] === null) {
+            return null;
+        }
+
+        $id = (int) $row['project_foreman_id'];
+
+        return $id > 0 ? $id : null;
+    }
+
+    public function isProjectForeman(Connection $conn, int $projectId, int $userId): bool
+    {
+        $foremanId = $this->resolveProjectForemanUserId($conn, $projectId);
+
+        return $foremanId !== null && $foremanId === $userId;
+    }
+
+    /**
+     * Project foreman may record field work on any task in the project (coordinates crews by phone).
+     */
+    public function canActAsProjectForemanOnTask(Connection $conn, int $projectId, int $userId): bool
+    {
+        if (!$this->isProjectForeman($conn, $projectId, $userId)) {
+            return false;
+        }
+
+        $role = $this->getGlobalRoleCode($conn, $userId);
+
+        return $role !== null && in_array($role, self::FIELD_FOREMAN_GLOBAL_ROLES, true);
+    }
+
+    /**
+     * Accountable foreman for field-work events: task override when different from project foreman.
+     */
+    public function resolveAccountableForemanUserId(Connection $conn, int $projectId, int $taskId): ?int
+    {
+        $projectForemanId = $this->resolveProjectForemanUserId($conn, $projectId);
+        $taskLeadId = $this->resolveTaskLeadUserId($conn, $taskId);
+
+        if ($taskLeadId !== null && $projectForemanId !== null && $taskLeadId !== $projectForemanId) {
+            return $taskLeadId;
+        }
+
+        if ($taskLeadId !== null) {
+            return $taskLeadId;
+        }
+
+        return $projectForemanId;
     }
 
     public function resolveTaskLeadUserId(Connection $conn, int $taskId): ?int
@@ -212,7 +292,9 @@ class TaskAuthorizationService
         }
 
         $assignment = $this->getTaskAssignmentRole($conn, $taskId, $userId);
-        if ($assignment === null) {
+        $isProjectForemanActor = $this->canActAsProjectForemanOnTask($conn, $projectId, $userId);
+
+        if ($assignment === null && !$isProjectForemanActor) {
             return ['allowed' => false, 'message' => 'You are not assigned to this task'];
         }
 

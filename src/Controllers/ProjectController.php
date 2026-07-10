@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Database\Database;
 use App\Services\EventLoggingService;
+use App\Services\TaskAuthorizationService;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
@@ -50,6 +51,8 @@ class ProjectController
     private Logger $logger;
     private Database $database;
     private EventLoggingService $eventLoggingService;
+    private TaskAuthorizationService $taskAuth;
+    private static ?bool $projectForemanColumnExists = null;
 
     public function __construct(Logger $logger)
     {
@@ -58,6 +61,7 @@ class ProjectController
         try {
             $this->database = new Database();
             $this->eventLoggingService = new EventLoggingService($this->logger);
+            $this->taskAuth = new TaskAuthorizationService();
         } catch (\Exception $e) {
             $this->logger->error('Failed to initialize ProjectController', [
                 'error' => $e->getMessage()
@@ -197,6 +201,10 @@ class ProjectController
 
             $offset = ($page - 1) * $limit;
 
+            $connection = $this->database->getConnection();
+            $foremanSelect = $this->projectForemanSelectSql($connection);
+            $foremanJoin = $this->projectForemanJoinSql($connection);
+
             // Базовый SQL запрос
             $sql = "SELECT
                         p.id, p.prj_name, p.address, p.date_start, p.date_end,
@@ -205,9 +213,11 @@ class ProjectController
                         p.description, p.area, p.level, p.prj_manager, p.created_by, p.created_at, p.updated_at,
                         u.first_name, u.last_name,
                         creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
+                        {$foremanSelect}
                     FROM fw_projects p
                     LEFT JOIN fw_v_users u ON p.prj_manager = u.id
                     LEFT JOIN fw_v_users creator ON p.created_by = creator.id
+                    {$foremanJoin}
                     WHERE 1=1";
 
             $params = [];
@@ -307,7 +317,7 @@ class ProjectController
             $formattedProjects = array_map(function($project) {
                 $clientData = $this->parseClientData($project['client_data'] ?? null);
                 $client2Data = $this->parseClientData($project['client2_data'] ?? null);
-                return [
+                return $this->appendProjectForemanFields($project, [
                     'id' => (int)$project['id'],
                     'prj_name' => $project['prj_name'],
                     'address' => $project['address'],
@@ -341,7 +351,7 @@ class ProjectController
                         : null,
                     'created_at' => $project['created_at'],
                     'updated_at' => $project['updated_at']
-                ];
+                ]);
             }, $projects);
 
             $lastPage = ceil($total / $limit);
@@ -465,6 +475,8 @@ class ProjectController
         
         try {
             $connection = $this->database->getConnection();
+            $foremanSelect = $this->projectForemanSelectSql($connection);
+            $foremanJoin = $this->projectForemanJoinSql($connection);
             
             $sql = "SELECT
                         p.id, p.prj_name, p.address, p.date_start, p.date_end,
@@ -473,9 +485,11 @@ class ProjectController
                         p.description, p.area, p.level, p.prj_manager, p.created_by, p.created_at, p.updated_at,
                         u.first_name, u.last_name,
                         creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
+                        {$foremanSelect}
                     FROM fw_projects p
                     LEFT JOIN fw_v_users u ON p.prj_manager = u.id
                     LEFT JOIN fw_v_users creator ON p.created_by = creator.id
+                    {$foremanJoin}
                     WHERE p.id = ?";
             
             $result = $connection->executeQuery($sql, [$id]);
@@ -494,7 +508,7 @@ class ProjectController
             $clientData = $this->parseClientData($project['client_data'] ?? null);
             $client2Data = $this->parseClientData($project['client2_data'] ?? null);
             
-            $formattedProject = [
+            $formattedProject = $this->appendProjectForemanFields($project, [
                 'id' => (int)$project['id'],
                 'prj_name' => $project['prj_name'],
                 'address' => $project['address'],
@@ -528,7 +542,7 @@ class ProjectController
                     : null,
                 'created_at' => $project['created_at'],
                 'updated_at' => $project['updated_at']
-            ];
+            ]);
 
             Flight::json([
                 'error_code' => 0,
@@ -684,10 +698,9 @@ class ProjectController
             }
             
             $sysStatus = array_key_exists('sys_status', $data) ? $data['sys_status'] : 'Draft';
-            
-            $sql = "INSERT INTO fw_projects (prj_name, address, date_start, date_end, priority, status, sys_status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, client2_id, client2_type, client2_table, client2_data, client2_name, area, level, prj_manager, created_by, description)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
 
+            $insertColumns = 'prj_name, address, date_start, date_end, priority, status, sys_status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, client2_id, client2_type, client2_table, client2_data, client2_name, area, level, prj_manager, created_by, description';
+            $insertPlaceholders = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
             $params = [
                 $data['prj_name'],
                 $data['address'],
@@ -712,8 +725,16 @@ class ProjectController
                 $data['level'] ?? null,
                 $data['prj_manager'] ?? null,
                 $data['created_by'] ?? null,
-                $data['description'] ?? null
+                $data['description'] ?? null,
             ];
+
+            if ($this->projectForemanColumnPresent($connection)) {
+                $insertColumns .= ', project_foreman_id';
+                $insertPlaceholders .= ', ?';
+                $params[] = isset($data['project_foreman_id']) ? (int) $data['project_foreman_id'] : null;
+            }
+
+            $sql = "INSERT INTO fw_projects ({$insertColumns}) VALUES ({$insertPlaceholders})";
 
             $connection->executeStatement($sql, $params);
             $projectId = $connection->lastInsertId();
@@ -912,8 +933,8 @@ class ProjectController
 
             // Получаем текущие данные проекта перед обновлением для логирования
             $beforeResult = $connection->executeQuery(
-                "SELECT id, prj_name, address, date_start, date_end, priority, status, sys_status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, client2_id, client2_type, client2_table, client2_data, client2_name, description, area, level, prj_manager, created_by, created_at, updated_at
-                 FROM fw_projects WHERE id = ?",
+                'SELECT id, prj_name, address, date_start, date_end, priority, status, sys_status, purchase_or_lease, notes, client_id, client_type, client_table, client_data, client_name, client2_id, client2_type, client2_table, client2_data, client2_name, description, area, level, prj_manager, created_by, created_at, updated_at
+                 FROM fw_projects WHERE id = ?',
                 [$id]
             );
             $beforeData = $beforeResult->fetchAssociative();
@@ -1040,6 +1061,10 @@ class ProjectController
                 $updateFields[] = "prj_manager = ?";
                 $params[] = $data['prj_manager'];
             }
+            if (array_key_exists('project_foreman_id', $data) && $this->projectForemanColumnPresent($connection)) {
+                $updateFields[] = 'project_foreman_id = ?';
+                $params[] = $data['project_foreman_id'] ? (int) $data['project_foreman_id'] : null;
+            }
             if (isset($data['created_by'])) {
                 $updateFields[] = "created_by = ?";
                 $params[] = $data['created_by'];
@@ -1068,6 +1093,27 @@ class ProjectController
 
             $sql = "UPDATE fw_projects SET " . implode(', ', $updateFields) . " WHERE id = ?";
             $connection->executeStatement($sql, $params);
+
+            $propagateTaskForeman = !empty($data['update_task_foreman_on_all_tasks']);
+            $foremanIdForPropagation = null;
+            if (array_key_exists('project_foreman_id', $data) && $data['project_foreman_id']) {
+                $foremanIdForPropagation = (int) $data['project_foreman_id'];
+            } elseif ($propagateTaskForeman) {
+                $foremanRow = $connection->executeQuery(
+                    'SELECT project_foreman_id FROM fw_projects WHERE id = ?',
+                    [$id]
+                )->fetchAssociative();
+                if ($foremanRow && $foremanRow['project_foreman_id']) {
+                    $foremanIdForPropagation = (int) $foremanRow['project_foreman_id'];
+                }
+            }
+            if (
+                $propagateTaskForeman
+                && $foremanIdForPropagation
+                && $this->projectForemanColumnPresent($connection)
+            ) {
+                $this->propagateProjectForemanToTaskLeads($connection, $id, $foremanIdForPropagation);
+            }
 
             // Получаем обновленный проект с информацией о создателе
             $result = $connection->executeQuery(
@@ -1215,6 +1261,9 @@ class ProjectController
                         'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
                         'level' => $project['level'] ?? null,
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
+                        'project_foreman_id' => isset($project['project_foreman_id']) && $project['project_foreman_id']
+                            ? (int) $project['project_foreman_id']
+                            : null,
                         'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                         'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
                             ? $project['created_by_first_name'] . ' ' . $project['created_by_last_name']
@@ -1393,6 +1442,21 @@ class ProjectController
                     ];
                 }
             }
+        }
+
+        try {
+            $connection = $this->database->getConnection();
+            if ($isCreate && $this->projectForemanColumnPresent($connection)) {
+                $foremanId = $data['project_foreman_id'] ?? null;
+                if ($foremanId === null || !is_numeric($foremanId) || (int) $foremanId <= 0) {
+                    return [
+                        'valid' => false,
+                        'message' => "Field 'project_foreman_id' is required",
+                    ];
+                }
+            }
+        } catch (\Exception $e) {
+            // ignore — validation continues without foreman column check
         }
 
         // Валидация длины полей
@@ -2193,5 +2257,116 @@ class ProjectController
             $clientName = $this->getClientName($project['client2_table'], (int)$project['client2_id']);
         }
         return $clientName;
+    }
+
+    private function projectForemanColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        return $this->taskAuth->projectForemanColumnPresent($connection);
+    }
+
+    private function projectForemanSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        if (!$this->projectForemanColumnPresent($connection)) {
+            return '';
+        }
+
+        return ', p.project_foreman_id, pf.first_name as project_foreman_first_name, pf.last_name as project_foreman_last_name';
+    }
+
+    private function projectForemanJoinSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        if (!$this->projectForemanColumnPresent($connection)) {
+            return '';
+        }
+
+        return ' LEFT JOIN fw_v_users pf ON p.project_foreman_id = pf.id';
+    }
+
+    /**
+     * @param array<string, mixed> $project
+     * @param array<string, mixed> $formatted
+     * @return array<string, mixed>
+     */
+    private function appendProjectForemanFields(array $project, array $formatted): array
+    {
+        if (!array_key_exists('project_foreman_id', $project)) {
+            return $formatted;
+        }
+
+        $formatted['project_foreman_id'] = $project['project_foreman_id']
+            ? (int) $project['project_foreman_id']
+            : null;
+        $formatted['project_foreman_name'] = !empty($project['project_foreman_first_name']) || !empty($project['project_foreman_last_name'])
+            ? trim(($project['project_foreman_first_name'] ?? '') . ' ' . ($project['project_foreman_last_name'] ?? ''))
+            : null;
+
+        return $formatted;
+    }
+
+    private function propagateProjectForemanToTaskLeads(
+        \Doctrine\DBAL\Connection $connection,
+        int $projectId,
+        int $newForemanId,
+    ): int {
+        $tasks = $connection->executeQuery(
+            'SELECT id, milestone FROM fw_prj_tasks WHERE project_id = ?',
+            [$projectId]
+        )->fetchAllAssociative();
+
+        $updated = 0;
+        foreach ($tasks as $task) {
+            $taskId = (int) $task['id'];
+            $milestone = $task['milestone'] ?? null;
+            if ($milestone !== null && $milestone !== '') {
+                // Milestones keep their own lead (often PM); do not overwrite.
+                continue;
+            }
+
+            $assigneeRows = $connection->executeQuery(
+                'SELECT id, role_in_project FROM fw_prj_team_members WHERE task_id = ? AND project_id = ?',
+                [$taskId, $projectId]
+            )->fetchAllAssociative();
+
+            $leadRowId = null;
+            foreach ($assigneeRows as $row) {
+                if ($this->taskAuth->isTaskLeadProjectRole($row['role_in_project'] ?? null)) {
+                    $leadRowId = (int) $row['id'];
+                    break;
+                }
+            }
+
+            if ($leadRowId !== null) {
+                $connection->executeStatement(
+                    'UPDATE fw_prj_team_members SET user_id = ? WHERE id = ?',
+                    [$newForemanId, $leadRowId]
+                );
+                $updated++;
+                continue;
+            }
+
+            // Legacy tasks may have no task_lead row — create one.
+            try {
+                $connection->executeStatement(
+                    "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project) VALUES (?, ?, ?, 'task_lead')",
+                    [$projectId, $taskId, $newForemanId]
+                );
+                $updated++;
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to assign project foreman to task during propagation', [
+                    'project_id' => $projectId,
+                    'task_id' => $taskId,
+                    'foreman_id' => $newForemanId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        $this->logger->info('Propagated project foreman to task leads', [
+            'project_id' => $projectId,
+            'foreman_id' => $newForemanId,
+            'tasks_updated' => $updated,
+        ]);
+
+        return $updated;
     }
 }
