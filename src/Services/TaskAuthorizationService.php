@@ -8,7 +8,7 @@ use Doctrine\DBAL\Connection;
 
 /**
  * Field-level authorization for project task updates.
- * PM / admin: full control. Task lead and assigned foreman/worker: progress + field work. Contractors: read-only.
+ * PM / admin: full control. Task lead and assigned foreman/worker/contractor: progress + field work.
  */
 class TaskAuthorizationService
 {
@@ -19,7 +19,7 @@ class TaskAuthorizationService
     private const FIELD_FOREMAN_GLOBAL_ROLES = ['foreman'];
 
     /** Global roles that may record field work when assigned as task members (not task lead). */
-    private const FIELD_CREW_GLOBAL_ROLES = ['foreman', 'worker'];
+    private const FIELD_CREW_GLOBAL_ROLES = ['foreman', 'worker', 'contractor'];
 
     /** Keys accepted on PUT /tasks/{id} (including assignee aliases). */
     private const ALL_UPDATE_KEYS = [
