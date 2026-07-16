@@ -48,11 +48,61 @@ class ProjectController
         'Extravagant',
     ];
 
+    /** Allowed clinic model type values */
+    private const ALLOWED_CLINIC_MODEL_TYPES = [
+        'FFS Solo',
+        'FHG',
+        'FHO',
+        'FHT',
+        'Urgent Care FFS',
+        'Walk In Clinic FFS',
+        'Mix Family Practise & Walk In FFS',
+        'Mix Family Practise & Walk In FHG',
+        'Other',
+        'Specialty Clinic',
+    ];
+
+    /** Allowed healthcare services values */
+    private const ALLOWED_HEALTHCARE_SERVICES = [
+        'Primary Care',
+        'Pharmacy',
+        'Allied Health',
+        'Private Health Services',
+        'Dental',
+        'Womens Health',
+        'Stem Cell',
+        'Peptides',
+        'PRP',
+    ];
+
+    /** Allowed Long Term Family Medicine team size values */
+    private const ALLOWED_LONG_TERM_FM_TEAM_SIZES = [
+        'Solo',
+        '1-3',
+        '4-6',
+        '7-10',
+        '11-15',
+    ];
+
     private Logger $logger;
     private Database $database;
     private EventLoggingService $eventLoggingService;
     private TaskAuthorizationService $taskAuth;
     private static ?bool $projectForemanColumnExists = null;
+
+    private static ?bool $projectClientsTableExists = null;
+
+    private static ?bool $locationsOfInterestColumnExists = null;
+
+    private static ?bool $clinicModelTypeColumnExists = null;
+
+    private static ?bool $healthcareServicesColumnExists = null;
+
+    private static ?bool $longTermFmTeamSizeColumnExists = null;
+
+    private static ?bool $monthlyBudgetFirstYearColumnExists = null;
+
+    private const ALLOWED_CLIENT_TABLES = ['pharma', 'physician', 'pharmacist', 'medical_clinic'];
 
     public function __construct(Logger $logger)
     {
@@ -146,7 +196,7 @@ class ProjectController
      *                     @OA\Property(property="priority", type="string", example="High"),
      *                     @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
      *                     @OA\Property(property="sys_status", type="string", nullable=true, enum={"Draft","Active","Closing","Suspended","Done"}, example="Active"),
-     *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
+     *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease","Undecided"}, example="Purchase"),
      *                     @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="client_type", type="string", nullable=true, example="pharmacy"),
@@ -204,6 +254,11 @@ class ProjectController
             $connection = $this->database->getConnection();
             $foremanSelect = $this->projectForemanSelectSql($connection);
             $foremanJoin = $this->projectForemanJoinSql($connection);
+            $locationsSelect = $this->locationsOfInterestSelectSql($connection);
+            $clinicModelSelect = $this->clinicModelTypeSelectSql($connection);
+            $healthcareServicesSelect = $this->healthcareServicesSelectSql($connection);
+            $longTermFmTeamSizeSelect = $this->longTermFmTeamSizeSelectSql($connection);
+            $monthlyBudgetFirstYearSelect = $this->monthlyBudgetFirstYearSelectSql($connection);
 
             // Базовый SQL запрос
             $sql = "SELECT
@@ -214,6 +269,11 @@ class ProjectController
                         u.first_name, u.last_name,
                         creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
                         {$foremanSelect}
+                        {$locationsSelect}
+                        {$clinicModelSelect}
+                        {$healthcareServicesSelect}
+                        {$longTermFmTeamSizeSelect}
+                        {$monthlyBudgetFirstYearSelect}
                     FROM fw_projects p
                     LEFT JOIN fw_v_users u ON p.prj_manager = u.id
                     LEFT JOIN fw_v_users creator ON p.created_by = creator.id
@@ -313,12 +373,20 @@ class ProjectController
             $result = $connection->executeQuery($sql, $params);
             $projects = $result->fetchAllAssociative();
 
+            $projectIds = array_map(static fn($p) => (int) $p['id'], $projects);
+            $additionalByProject = $this->loadAdditionalClientsByProjectIds($connection, $projectIds);
+
             // Форматируем данные
-            $formattedProjects = array_map(function($project) {
+            $formattedProjects = array_map(function($project) use ($additionalByProject) {
                 $clientData = $this->parseClientData($project['client_data'] ?? null);
                 $client2Data = $this->parseClientData($project['client2_data'] ?? null);
+                $projectId = (int) $project['id'];
+                $additionalClients = $additionalByProject[$projectId] ?? [];
+                if ($additionalClients === []) {
+                    $additionalClients = $this->additionalClientsFromLegacyClient2($project);
+                }
                 return $this->appendProjectForemanFields($project, [
-                    'id' => (int)$project['id'],
+                    'id' => $projectId,
                     'prj_name' => $project['prj_name'],
                     'address' => $project['address'],
                     'date_start' => $project['date_start'],
@@ -328,6 +396,7 @@ class ProjectController
                     'sys_status' => $project['sys_status'] ?? null,
                     'purchase_or_lease' => $project['purchase_or_lease'],
                     'notes' => $project['notes'] ?? null,
+                    'locations_of_interest' => $this->parseLocationsOfInterest($project['locations_of_interest'] ?? null),
                     'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                     'client_type' => $project['client_type'] ?? null,
                     'client_table' => $project['client_table'] ?? null,
@@ -338,9 +407,14 @@ class ProjectController
                     'client2_table' => $project['client2_table'] ?? null,
                     'client2_name' => $this->getClient2NameWithFallback($project, $client2Data),
                     'client2_data' => $client2Data,
+                    'additional_clients' => $additionalClients,
                     'description' => $project['description'] ?? null,
                     'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
                     'level' => $project['level'] ?? null,
+                    'clinic_model_type' => $project['clinic_model_type'] ?? null,
+                    'healthcare_services' => $project['healthcare_services'] ?? null,
+                    'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
+                    'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                     'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                     'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                     'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -435,7 +509,7 @@ class ProjectController
      *                     @OA\Property(property="priority", type="string", example="High"),
      *                     @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
      *                     @OA\Property(property="sys_status", type="string", nullable=true, enum={"Draft","Active","Closing","Suspended","Done"}, example="Active"),
-     *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
+     *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease","Undecided"}, example="Purchase"),
      *                     @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="client_type", type="string", nullable=true, example="pharmacy"),
@@ -477,6 +551,11 @@ class ProjectController
             $connection = $this->database->getConnection();
             $foremanSelect = $this->projectForemanSelectSql($connection);
             $foremanJoin = $this->projectForemanJoinSql($connection);
+            $locationsSelect = $this->locationsOfInterestSelectSql($connection);
+            $clinicModelSelect = $this->clinicModelTypeSelectSql($connection);
+            $healthcareServicesSelect = $this->healthcareServicesSelectSql($connection);
+            $longTermFmTeamSizeSelect = $this->longTermFmTeamSizeSelectSql($connection);
+            $monthlyBudgetFirstYearSelect = $this->monthlyBudgetFirstYearSelectSql($connection);
             
             $sql = "SELECT
                         p.id, p.prj_name, p.address, p.date_start, p.date_end,
@@ -486,6 +565,11 @@ class ProjectController
                         u.first_name, u.last_name,
                         creator.first_name as created_by_first_name, creator.last_name as created_by_last_name
                         {$foremanSelect}
+                        {$locationsSelect}
+                        {$clinicModelSelect}
+                        {$healthcareServicesSelect}
+                        {$longTermFmTeamSizeSelect}
+                        {$monthlyBudgetFirstYearSelect}
                     FROM fw_projects p
                     LEFT JOIN fw_v_users u ON p.prj_manager = u.id
                     LEFT JOIN fw_v_users creator ON p.created_by = creator.id
@@ -507,9 +591,14 @@ class ProjectController
 
             $clientData = $this->parseClientData($project['client_data'] ?? null);
             $client2Data = $this->parseClientData($project['client2_data'] ?? null);
+            $projectId = (int) $project['id'];
+            $additionalClients = $this->loadAdditionalClientsByProjectIds($connection, [$projectId])[$projectId] ?? [];
+            if ($additionalClients === []) {
+                $additionalClients = $this->additionalClientsFromLegacyClient2($project);
+            }
             
             $formattedProject = $this->appendProjectForemanFields($project, [
-                'id' => (int)$project['id'],
+                'id' => $projectId,
                 'prj_name' => $project['prj_name'],
                 'address' => $project['address'],
                 'date_start' => $project['date_start'],
@@ -519,6 +608,7 @@ class ProjectController
                 'sys_status' => $project['sys_status'] ?? null,
                 'purchase_or_lease' => $project['purchase_or_lease'],
                 'notes' => $project['notes'] ?? null,
+                'locations_of_interest' => $this->parseLocationsOfInterest($project['locations_of_interest'] ?? null),
                 'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                 'client_type' => $project['client_type'] ?? null,
                 'client_table' => $project['client_table'] ?? null,
@@ -529,9 +619,14 @@ class ProjectController
                 'client2_table' => $project['client2_table'] ?? null,
                 'client2_name' => $this->getClient2NameWithFallback($project, $client2Data),
                 'client2_data' => $client2Data,
+                'additional_clients' => $additionalClients,
                 'description' => $project['description'] ?? null,
                 'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
                 'level' => $project['level'] ?? null,
+                'clinic_model_type' => $project['clinic_model_type'] ?? null,
+                'healthcare_services' => $project['healthcare_services'] ?? null,
+                'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
+                'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                 'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                 'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -598,7 +693,7 @@ class ProjectController
      *             @OA\Property(property="priority", type="string", example="High"),
      *             @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
      *             @OA\Property(property="sys_status", type="string", nullable=true, enum={"Draft","Active","Closing","Suspended","Done"}, example="Draft", description="System lifecycle status used by app logic"),
-     *             @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
+     *             @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease","Undecided"}, example="Purchase"),
      *             @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *             @OA\Property(property="client_id", type="integer", nullable=true, example=1),
      *             @OA\Property(property="client_type", type="string", nullable=true, example="pharmacy"),
@@ -631,7 +726,7 @@ class ProjectController
      *                     @OA\Property(property="priority", type="string", example="High"),
      *                     @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
      *                     @OA\Property(property="sys_status", type="string", nullable=true, enum={"Draft","Active","Closing","Suspended","Done"}, example="Draft"),
-     *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
+     *                     @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease","Undecided"}, example="Purchase"),
      *                     @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *                     @OA\Property(property="client_id", type="integer", nullable=true, example=1),
      *                     @OA\Property(property="client_type", type="string", nullable=true, example="pharmacy"),
@@ -692,9 +787,27 @@ class ProjectController
             if (!empty($data['client_id']) && !empty($data['client_table'])) {
                 $clientName = $this->getClientName($data['client_table'], (int)$data['client_id']);
             }
-            $client2Name = null;
-            if (!empty($data['client2_id']) && !empty($data['client2_table'])) {
-                $client2Name = $this->getClientName($data['client2_table'], (int)$data['client2_id']);
+
+            $primaryClientId = !empty($data['client_id']) ? (int) $data['client_id'] : null;
+            $primaryClientTable = !empty($data['client_table']) ? (string) $data['client_table'] : null;
+            $normalizedAdditional = [];
+            if (array_key_exists('additional_clients', $data) && is_array($data['additional_clients'])) {
+                $normalizedAdditional = $this->normalizeAdditionalClientsPayload(
+                    $data['additional_clients'],
+                    $primaryClientId,
+                    $primaryClientTable
+                );
+                $client2Mirror = $this->client2FieldsFromAdditional($normalizedAdditional);
+                $data['client2_id'] = $client2Mirror['client2_id'];
+                $data['client2_type'] = $client2Mirror['client2_type'];
+                $data['client2_table'] = $client2Mirror['client2_table'];
+                $data['client2_data'] = $client2Mirror['client2_data'];
+                $client2Name = $client2Mirror['client2_name'];
+            } else {
+                $client2Name = null;
+                if (!empty($data['client2_id']) && !empty($data['client2_table'])) {
+                    $client2Name = $this->getClientName($data['client2_table'], (int)$data['client2_id']);
+                }
             }
             
             $sysStatus = array_key_exists('sys_status', $data) ? $data['sys_status'] : 'Draft';
@@ -734,10 +847,71 @@ class ProjectController
                 $params[] = isset($data['project_foreman_id']) ? (int) $data['project_foreman_id'] : null;
             }
 
+            if ($this->locationsOfInterestColumnPresent($connection)) {
+                $insertColumns .= ', locations_of_interest';
+                $insertPlaceholders .= ', ?';
+                $params[] = $this->encodeLocationsOfInterest(
+                    array_key_exists('locations_of_interest', $data)
+                        ? $this->normalizeLocationsOfInterestInput($data['locations_of_interest'])
+                        : null
+                );
+            }
+
+            if ($this->clinicModelTypeColumnPresent($connection)) {
+                $insertColumns .= ', clinic_model_type';
+                $insertPlaceholders .= ', ?';
+                $params[] = !empty($data['clinic_model_type']) ? (string) $data['clinic_model_type'] : null;
+            }
+
+            if ($this->healthcareServicesColumnPresent($connection)) {
+                $insertColumns .= ', healthcare_services';
+                $insertPlaceholders .= ', ?';
+                $params[] = !empty($data['healthcare_services']) ? (string) $data['healthcare_services'] : null;
+            }
+
+            if ($this->longTermFmTeamSizeColumnPresent($connection)) {
+                $insertColumns .= ', long_term_fm_team_size';
+                $insertPlaceholders .= ', ?';
+                $params[] = !empty($data['long_term_fm_team_size']) ? (string) $data['long_term_fm_team_size'] : null;
+            }
+
+            if ($this->monthlyBudgetFirstYearColumnPresent($connection)) {
+                $insertColumns .= ', monthly_budget_first_year';
+                $insertPlaceholders .= ', ?';
+                $params[] = isset($data['monthly_budget_first_year']) && trim((string) $data['monthly_budget_first_year']) !== ''
+                    ? trim((string) $data['monthly_budget_first_year'])
+                    : null;
+            }
+
             $sql = "INSERT INTO fw_projects ({$insertColumns}) VALUES ({$insertPlaceholders})";
 
             $connection->executeStatement($sql, $params);
-            $projectId = $connection->lastInsertId();
+            $projectId = (int) $connection->lastInsertId();
+
+            if (!array_key_exists('additional_clients', $data) && !empty($data['client2_id']) && !empty($data['client2_table'])) {
+                $normalizedAdditional = $this->normalizeAdditionalClientsPayload(
+                    [[
+                        'client_id' => (int) $data['client2_id'],
+                        'client_type' => $data['client2_type'] ?? null,
+                        'client_table' => $data['client2_table'],
+                        'client_data' => $data['client2_data'] ?? null,
+                        'client_name' => $client2Name,
+                    ]],
+                    $primaryClientId,
+                    $primaryClientTable
+                );
+            }
+
+            $this->syncProjectClients(
+                $connection,
+                $projectId,
+                $primaryClientId,
+                isset($data['client_type']) ? (string) $data['client_type'] : null,
+                $primaryClientTable,
+                $data['client_data'] ?? null,
+                $clientName,
+                $normalizedAdditional
+            );
 
             // Получаем созданный проект с информацией о создателе
             $result = $connection->executeQuery(
@@ -757,6 +931,11 @@ class ProjectController
             // Логируем событие создания проекта
             $this->logProjectCreationEvent($project, $data);
 
+            $additionalClients = $this->loadAdditionalClientsByProjectIds($connection, [$projectId])[$projectId] ?? [];
+            if ($additionalClients === []) {
+                $additionalClients = $this->additionalClientsFromLegacyClient2($project);
+            }
+
             Flight::json([
                 'error_code' => 0,
                 'status' => 'success',
@@ -773,6 +952,7 @@ class ProjectController
                         'sys_status' => $project['sys_status'] ?? null,
                         'purchase_or_lease' => $project['purchase_or_lease'],
                         'notes' => $project['notes'] ?? null,
+                        'locations_of_interest' => $this->parseLocationsOfInterest($project['locations_of_interest'] ?? null),
                         'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                         'client_type' => $project['client_type'] ?? null,
                         'client_table' => $project['client_table'] ?? null,
@@ -783,9 +963,14 @@ class ProjectController
                         'client2_table' => $project['client2_table'] ?? null,
                         'client2_name' => $this->getClient2NameWithFallback($project, $this->parseClientData($project['client2_data'] ?? null)),
                         'client2_data' => $this->parseClientData($project['client2_data'] ?? null),
+                        'additional_clients' => $additionalClients,
                         'description' => $project['description'] ?? null,
                         'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
                         'level' => $project['level'] ?? null,
+                        'clinic_model_type' => $project['clinic_model_type'] ?? null,
+                        'healthcare_services' => $project['healthcare_services'] ?? null,
+                        'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
+                        'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                         'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -838,7 +1023,7 @@ class ProjectController
      *             @OA\Property(property="priority", type="string", example="High"),
      *             @OA\Property(property="status", type="string", example="Project Secured", description="One of: Initial Contact Lead, Dead Lead, Waiting On Direction, Actively Looking For A Location, Securing Location, Project Secured, Construction, Completed Project"),
      *             @OA\Property(property="sys_status", type="string", nullable=true, enum={"Draft","Active","Closing","Suspended","Done"}, example="Active", description="System lifecycle status used by app logic"),
-     *             @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease"}, example="Purchase"),
+     *             @OA\Property(property="purchase_or_lease", type="string", enum={"Purchase","Lease","Undecided"}, example="Purchase"),
      *             @OA\Property(property="notes", type="string", nullable=true, example="Additional project notes"),
      *             @OA\Property(property="client_id", type="integer", nullable=true, example=1),
      *             @OA\Property(property="client_type", type="string", nullable=true, example="pharmacy"),
@@ -1025,34 +1210,70 @@ class ProjectController
                     $params[] = $clientName;
                 }
             }
-            if (array_key_exists('client2_id', $data)) {
-                $updateFields[] = "client2_id = ?";
-                $params[] = $data['client2_id'];
-            }
-            if (array_key_exists('client2_type', $data)) {
-                $updateFields[] = "client2_type = ?";
-                $params[] = $data['client2_type'];
-            }
-            if (array_key_exists('client2_table', $data)) {
-                $updateFields[] = "client2_table = ?";
-                $params[] = $data['client2_table'];
-            }
-            if (array_key_exists('client2_data', $data)) {
-                $updateFields[] = "client2_data = ?";
-                $params[] = $this->encodeClientData($data['client2_data']);
-            }
-            if (array_key_exists('client2_id', $data) || array_key_exists('client2_table', $data)) {
-                $client2Id = array_key_exists('client2_id', $data) ? $data['client2_id'] : null;
-                $client2Table = array_key_exists('client2_table', $data) ? $data['client2_table'] : null;
-                if (!$client2Id || !$client2Table) {
-                    $updateFields[] = "client2_name = ?";
-                    $params[] = null;
-                } else {
-                    $client2Name = $this->getClientName($client2Table, (int)$client2Id);
-                    $updateFields[] = "client2_name = ?";
-                    $params[] = $client2Name;
+            $hasAdditionalClientsPayload =
+                array_key_exists('additional_clients', $data) && is_array($data['additional_clients']);
+
+            // When additional_clients is provided it is authoritative for client2_* mirror.
+            if (!$hasAdditionalClientsPayload) {
+                if (array_key_exists('client2_id', $data)) {
+                    $updateFields[] = "client2_id = ?";
+                    $params[] = $data['client2_id'];
+                }
+                if (array_key_exists('client2_type', $data)) {
+                    $updateFields[] = "client2_type = ?";
+                    $params[] = $data['client2_type'];
+                }
+                if (array_key_exists('client2_table', $data)) {
+                    $updateFields[] = "client2_table = ?";
+                    $params[] = $data['client2_table'];
+                }
+                if (array_key_exists('client2_data', $data)) {
+                    $updateFields[] = "client2_data = ?";
+                    $params[] = $this->encodeClientData($data['client2_data']);
+                }
+                if (array_key_exists('client2_id', $data) || array_key_exists('client2_table', $data)) {
+                    $client2Id = array_key_exists('client2_id', $data) ? $data['client2_id'] : null;
+                    $client2Table = array_key_exists('client2_table', $data) ? $data['client2_table'] : null;
+                    if (!$client2Id || !$client2Table) {
+                        $updateFields[] = "client2_name = ?";
+                        $params[] = null;
+                    } else {
+                        $client2Name = $this->getClientName($client2Table, (int)$client2Id);
+                        $updateFields[] = "client2_name = ?";
+                        $params[] = $client2Name;
+                    }
                 }
             }
+
+            $normalizedAdditionalForSync = null;
+            if ($hasAdditionalClientsPayload) {
+                $primaryClientIdForSync = array_key_exists('client_id', $data)
+                    ? ($data['client_id'] ? (int) $data['client_id'] : null)
+                    : (!empty($beforeData['client_id']) ? (int) $beforeData['client_id'] : null);
+                $primaryClientTableForSync = array_key_exists('client_table', $data)
+                    ? ($data['client_table'] ? (string) $data['client_table'] : null)
+                    : (!empty($beforeData['client_table']) ? (string) $beforeData['client_table'] : null);
+
+                $normalizedAdditionalForSync = $this->normalizeAdditionalClientsPayload(
+                    $data['additional_clients'],
+                    $primaryClientIdForSync,
+                    $primaryClientTableForSync
+                );
+                $client2Mirror = $this->client2FieldsFromAdditional($normalizedAdditionalForSync);
+
+                // Replace client2_* with first additional (or clear) when additional_clients is authoritative.
+                $updateFields[] = 'client2_id = ?';
+                $params[] = $client2Mirror['client2_id'];
+                $updateFields[] = 'client2_type = ?';
+                $params[] = $client2Mirror['client2_type'];
+                $updateFields[] = 'client2_table = ?';
+                $params[] = $client2Mirror['client2_table'];
+                $updateFields[] = 'client2_data = ?';
+                $params[] = $this->encodeClientData($client2Mirror['client2_data']);
+                $updateFields[] = 'client2_name = ?';
+                $params[] = $client2Mirror['client2_name'];
+            }
+
             if (isset($data['description'])) {
                 $updateFields[] = "description = ?";
                 $params[] = $data['description'];
@@ -1077,6 +1298,45 @@ class ProjectController
                 $updateFields[] = "level = ?";
                 $params[] = $data['level'];
             }
+            if (
+                array_key_exists('clinic_model_type', $data)
+                && $this->clinicModelTypeColumnPresent($connection)
+            ) {
+                $updateFields[] = 'clinic_model_type = ?';
+                $params[] = !empty($data['clinic_model_type']) ? (string) $data['clinic_model_type'] : null;
+            }
+            if (
+                array_key_exists('healthcare_services', $data)
+                && $this->healthcareServicesColumnPresent($connection)
+            ) {
+                $updateFields[] = 'healthcare_services = ?';
+                $params[] = !empty($data['healthcare_services']) ? (string) $data['healthcare_services'] : null;
+            }
+            if (
+                array_key_exists('long_term_fm_team_size', $data)
+                && $this->longTermFmTeamSizeColumnPresent($connection)
+            ) {
+                $updateFields[] = 'long_term_fm_team_size = ?';
+                $params[] = !empty($data['long_term_fm_team_size']) ? (string) $data['long_term_fm_team_size'] : null;
+            }
+            if (
+                array_key_exists('monthly_budget_first_year', $data)
+                && $this->monthlyBudgetFirstYearColumnPresent($connection)
+            ) {
+                $updateFields[] = 'monthly_budget_first_year = ?';
+                $params[] = isset($data['monthly_budget_first_year']) && trim((string) $data['monthly_budget_first_year']) !== ''
+                    ? trim((string) $data['monthly_budget_first_year'])
+                    : null;
+            }
+            if (
+                array_key_exists('locations_of_interest', $data)
+                && $this->locationsOfInterestColumnPresent($connection)
+            ) {
+                $updateFields[] = 'locations_of_interest = ?';
+                $params[] = $this->encodeLocationsOfInterest(
+                    $this->normalizeLocationsOfInterestInput($data['locations_of_interest'])
+                );
+            }
 
             if (empty($updateFields)) {
                 Flight::json([
@@ -1093,6 +1353,50 @@ class ProjectController
 
             $sql = "UPDATE fw_projects SET " . implode(', ', $updateFields) . " WHERE id = ?";
             $connection->executeStatement($sql, $params);
+
+            // Keep fw_project_clients in sync when primary and/or additional clients change.
+            $shouldSyncProjectClients =
+                $normalizedAdditionalForSync !== null
+                || array_key_exists('client_id', $data)
+                || array_key_exists('client_table', $data)
+                || array_key_exists('client_type', $data)
+                || array_key_exists('client_data', $data)
+                || array_key_exists('client2_id', $data)
+                || array_key_exists('client2_table', $data);
+
+            if ($shouldSyncProjectClients && $this->projectClientsTablePresent($connection)) {
+                $updatedRow = $connection->executeQuery(
+                    'SELECT client_id, client_type, client_table, client_data, client_name,
+                            client2_id, client2_type, client2_table, client2_data, client2_name
+                     FROM fw_projects WHERE id = ?',
+                    [$id]
+                )->fetchAssociative() ?: [];
+
+                if ($normalizedAdditionalForSync !== null) {
+                    $additionalToSync = $normalizedAdditionalForSync;
+                } else {
+                    $existingAdditional = $this->loadAdditionalClientsByProjectIds($connection, [$id])[$id] ?? [];
+                    if ($existingAdditional === [] && !empty($updatedRow['client2_id'])) {
+                        $existingAdditional = $this->additionalClientsFromLegacyClient2($updatedRow);
+                    }
+                    $additionalToSync = $this->normalizeAdditionalClientsPayload(
+                        $existingAdditional,
+                        !empty($updatedRow['client_id']) ? (int) $updatedRow['client_id'] : null,
+                        !empty($updatedRow['client_table']) ? (string) $updatedRow['client_table'] : null
+                    );
+                }
+
+                $this->syncProjectClients(
+                    $connection,
+                    $id,
+                    !empty($updatedRow['client_id']) ? (int) $updatedRow['client_id'] : null,
+                    $updatedRow['client_type'] ?? null,
+                    !empty($updatedRow['client_table']) ? (string) $updatedRow['client_table'] : null,
+                    $this->parseClientData($updatedRow['client_data'] ?? null),
+                    $updatedRow['client_name'] ?? null,
+                    $additionalToSync
+                );
+            }
 
             $propagateTaskForeman = !empty($data['update_task_foreman_on_all_tasks']);
             $foremanIdForPropagation = null;
@@ -1141,6 +1445,7 @@ class ProjectController
                     'sys_status' => $project['sys_status'] ?? null,
                     'purchase_or_lease' => $project['purchase_or_lease'],
                     'notes' => $project['notes'] ?? null,
+                    'locations_of_interest' => $this->parseLocationsOfInterest($project['locations_of_interest'] ?? null),
                     'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                     'client_type' => $project['client_type'] ?? null,
                     'client_table' => $project['client_table'] ?? null,
@@ -1189,6 +1494,10 @@ class ProjectController
                             'description' => $beforeData['description'] ?? null,
                             'area' => isset($beforeData['area']) && $beforeData['area'] !== null ? (int)$beforeData['area'] : null,
                             'level' => $beforeData['level'] ?? null,
+                            'clinic_model_type' => $beforeData['clinic_model_type'] ?? null,
+                            'healthcare_services' => $beforeData['healthcare_services'] ?? null,
+                            'long_term_fm_team_size' => $beforeData['long_term_fm_team_size'] ?? null,
+                            'monthly_budget_first_year' => $beforeData['monthly_budget_first_year'] ?? null,
                             'prj_manager' => $beforeData['prj_manager'] ? (int)$beforeData['prj_manager'] : null,
                             'created_by' => $beforeData['created_by'] ? (int)$beforeData['created_by'] : null
                         ],
@@ -1231,6 +1540,11 @@ class ProjectController
                 ]);
             }
 
+            $additionalClients = $this->loadAdditionalClientsByProjectIds($connection, [$id])[$id] ?? [];
+            if ($additionalClients === []) {
+                $additionalClients = $this->additionalClientsFromLegacyClient2($project);
+            }
+
             Flight::json([
                 'error_code' => 0,
                 'status' => 'success',
@@ -1247,6 +1561,7 @@ class ProjectController
                         'sys_status' => $project['sys_status'] ?? null,
                         'purchase_or_lease' => $project['purchase_or_lease'],
                         'notes' => $project['notes'] ?? null,
+                        'locations_of_interest' => $this->parseLocationsOfInterest($project['locations_of_interest'] ?? null),
                         'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                         'client_type' => $project['client_type'] ?? null,
                         'client_table' => $project['client_table'] ?? null,
@@ -1257,9 +1572,14 @@ class ProjectController
                         'client2_table' => $project['client2_table'] ?? null,
                         'client2_name' => $this->getClient2NameWithFallback($project, $this->parseClientData($project['client2_data'] ?? null)),
                         'client2_data' => $this->parseClientData($project['client2_data'] ?? null),
+                        'additional_clients' => $additionalClients,
                         'description' => $project['description'] ?? null,
                         'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
                         'level' => $project['level'] ?? null,
+                        'clinic_model_type' => $project['clinic_model_type'] ?? null,
+                        'healthcare_services' => $project['healthcare_services'] ?? null,
+                        'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
+                        'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'project_foreman_id' => isset($project['project_foreman_id']) && $project['project_foreman_id']
                             ? (int) $project['project_foreman_id']
@@ -1518,11 +1838,28 @@ class ProjectController
             }
         }
 
-        if (isset($data['purchase_or_lease']) && !in_array($data['purchase_or_lease'], ['Purchase', 'Lease'], true)) {
+        if (isset($data['purchase_or_lease']) && !in_array($data['purchase_or_lease'], ['Purchase', 'Lease', 'Undecided'], true)) {
             return [
                 'valid' => false,
-                'message' => 'purchase_or_lease must be either Purchase or Lease'
+                'message' => 'purchase_or_lease must be Purchase, Lease, or Undecided'
             ];
+        }
+
+        if (array_key_exists('locations_of_interest', $data) && $data['locations_of_interest'] !== null) {
+            if (!is_array($data['locations_of_interest'])) {
+                return [
+                    'valid' => false,
+                    'message' => 'locations_of_interest must be an array of FSA codes or null',
+                ];
+            }
+            foreach ($data['locations_of_interest'] as $code) {
+                if (!is_string($code) || !preg_match('/^[A-Za-z]\d[A-Za-z]$/', $code)) {
+                    return [
+                        'valid' => false,
+                        'message' => 'Each locations_of_interest item must be a 3-character FSA code (e.g. K1A)',
+                    ];
+                }
+            }
         }
 
         // area: non-negative integer or null
@@ -1541,6 +1878,48 @@ class ProjectController
                 return [
                     'valid' => false,
                     'message' => 'Invalid level. Allowed: ' . implode(', ', self::ALLOWED_PROJECT_LEVELS)
+                ];
+            }
+        }
+
+        if (array_key_exists('clinic_model_type', $data) && $data['clinic_model_type'] !== null && $data['clinic_model_type'] !== '') {
+            if (!in_array($data['clinic_model_type'], self::ALLOWED_CLINIC_MODEL_TYPES, true)) {
+                return [
+                    'valid' => false,
+                    'message' => 'Invalid clinic_model_type. Allowed: ' . implode(', ', self::ALLOWED_CLINIC_MODEL_TYPES),
+                ];
+            }
+        }
+
+        if (array_key_exists('healthcare_services', $data) && $data['healthcare_services'] !== null && $data['healthcare_services'] !== '') {
+            if (!in_array($data['healthcare_services'], self::ALLOWED_HEALTHCARE_SERVICES, true)) {
+                return [
+                    'valid' => false,
+                    'message' => 'Invalid healthcare_services. Allowed: ' . implode(', ', self::ALLOWED_HEALTHCARE_SERVICES),
+                ];
+            }
+        }
+
+        if (array_key_exists('long_term_fm_team_size', $data) && $data['long_term_fm_team_size'] !== null && $data['long_term_fm_team_size'] !== '') {
+            if (!in_array($data['long_term_fm_team_size'], self::ALLOWED_LONG_TERM_FM_TEAM_SIZES, true)) {
+                return [
+                    'valid' => false,
+                    'message' => 'Invalid long_term_fm_team_size. Allowed: ' . implode(', ', self::ALLOWED_LONG_TERM_FM_TEAM_SIZES),
+                ];
+            }
+        }
+
+        if (array_key_exists('monthly_budget_first_year', $data) && $data['monthly_budget_first_year'] !== null && $data['monthly_budget_first_year'] !== '') {
+            if (!is_string($data['monthly_budget_first_year']) && !is_numeric($data['monthly_budget_first_year'])) {
+                return [
+                    'valid' => false,
+                    'message' => 'monthly_budget_first_year must be a string or null',
+                ];
+            }
+            if (strlen(trim((string) $data['monthly_budget_first_year'])) > 100) {
+                return [
+                    'valid' => false,
+                    'message' => 'monthly_budget_first_year must not exceed 100 characters',
                 ];
             }
         }
@@ -2368,5 +2747,442 @@ class ProjectController
         ]);
 
         return $updated;
+    }
+
+    private function projectClientsTablePresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$projectClientsTableExists !== null) {
+            return self::$projectClientsTableExists;
+        }
+
+        try {
+            $row = $connection->executeQuery(
+                "SHOW TABLES LIKE 'fw_project_clients'"
+            )->fetchOne();
+            self::$projectClientsTableExists = !empty($row);
+        } catch (\Exception $e) {
+            self::$projectClientsTableExists = false;
+        }
+
+        return self::$projectClientsTableExists;
+    }
+
+    private function locationsOfInterestColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$locationsOfInterestColumnExists !== null) {
+            return self::$locationsOfInterestColumnExists;
+        }
+
+        try {
+            $row = $connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE 'locations_of_interest'"
+            )->fetchOne();
+            self::$locationsOfInterestColumnExists = !empty($row);
+        } catch (\Exception $e) {
+            self::$locationsOfInterestColumnExists = false;
+        }
+
+        return self::$locationsOfInterestColumnExists;
+    }
+
+    private function locationsOfInterestSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        if (!$this->locationsOfInterestColumnPresent($connection)) {
+            return '';
+        }
+
+        return ', p.locations_of_interest';
+    }
+
+    private function clinicModelTypeColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$clinicModelTypeColumnExists !== null) {
+            return self::$clinicModelTypeColumnExists;
+        }
+
+        try {
+            $row = $connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE 'clinic_model_type'"
+            )->fetchOne();
+            self::$clinicModelTypeColumnExists = !empty($row);
+        } catch (\Exception $e) {
+            self::$clinicModelTypeColumnExists = false;
+        }
+
+        return self::$clinicModelTypeColumnExists;
+    }
+
+    private function clinicModelTypeSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        if (!$this->clinicModelTypeColumnPresent($connection)) {
+            return '';
+        }
+
+        return ', p.clinic_model_type';
+    }
+
+    private function healthcareServicesColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$healthcareServicesColumnExists !== null) {
+            return self::$healthcareServicesColumnExists;
+        }
+
+        try {
+            $row = $connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE 'healthcare_services'"
+            )->fetchOne();
+            self::$healthcareServicesColumnExists = !empty($row);
+        } catch (\Exception $e) {
+            self::$healthcareServicesColumnExists = false;
+        }
+
+        return self::$healthcareServicesColumnExists;
+    }
+
+    private function healthcareServicesSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        if (!$this->healthcareServicesColumnPresent($connection)) {
+            return '';
+        }
+
+        return ', p.healthcare_services';
+    }
+
+    private function longTermFmTeamSizeColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$longTermFmTeamSizeColumnExists !== null) {
+            return self::$longTermFmTeamSizeColumnExists;
+        }
+
+        try {
+            $row = $connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE 'long_term_fm_team_size'"
+            )->fetchOne();
+            self::$longTermFmTeamSizeColumnExists = !empty($row);
+        } catch (\Exception $e) {
+            self::$longTermFmTeamSizeColumnExists = false;
+        }
+
+        return self::$longTermFmTeamSizeColumnExists;
+    }
+
+    private function longTermFmTeamSizeSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        if (!$this->longTermFmTeamSizeColumnPresent($connection)) {
+            return '';
+        }
+
+        return ', p.long_term_fm_team_size';
+    }
+
+    private function monthlyBudgetFirstYearColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$monthlyBudgetFirstYearColumnExists !== null) {
+            return self::$monthlyBudgetFirstYearColumnExists;
+        }
+
+        try {
+            $row = $connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE 'monthly_budget_first_year'"
+            )->fetchOne();
+            self::$monthlyBudgetFirstYearColumnExists = !empty($row);
+        } catch (\Exception $e) {
+            self::$monthlyBudgetFirstYearColumnExists = false;
+        }
+
+        return self::$monthlyBudgetFirstYearColumnExists;
+    }
+
+    private function monthlyBudgetFirstYearSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        if (!$this->monthlyBudgetFirstYearColumnPresent($connection)) {
+            return '';
+        }
+
+        return ', p.monthly_budget_first_year';
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<string>|null
+     */
+    private function parseLocationsOfInterest($raw): ?array
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+
+        if (is_array($raw)) {
+            return $this->normalizeLocationsOfInterestInput($raw);
+        }
+
+        if (!is_string($raw)) {
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+            return null;
+        }
+
+        return $this->normalizeLocationsOfInterestInput($decoded);
+    }
+
+    /**
+     * @param mixed $input
+     * @return list<string>|null null means empty/cleared
+     */
+    private function normalizeLocationsOfInterestInput($input): ?array
+    {
+        if ($input === null) {
+            return null;
+        }
+        if (!is_array($input)) {
+            return null;
+        }
+        if ($input === []) {
+            return [];
+        }
+
+        $out = [];
+        $seen = [];
+        foreach ($input as $code) {
+            if (!is_string($code)) {
+                continue;
+            }
+            $normalized = strtoupper(trim($code));
+            if (!preg_match('/^[A-Z]\d[A-Z]$/', $normalized)) {
+                continue;
+            }
+            if (isset($seen[$normalized])) {
+                continue;
+            }
+            $seen[$normalized] = true;
+            $out[] = $normalized;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<string>|null $codes
+     */
+    private function encodeLocationsOfInterest(?array $codes): ?string
+    {
+        if ($codes === null) {
+            return null;
+        }
+
+        return json_encode(array_values($codes));
+    }
+
+    /**
+     * @param array<int, mixed> $items
+     * @return array<int, array{client_id:int, client_type:?string, client_table:string, client_data:?array, client_name:?string}>
+     */
+    private function normalizeAdditionalClientsPayload(array $items, ?int $primaryClientId, ?string $primaryClientTable): array
+    {
+        $normalized = [];
+        $seen = [];
+
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $clientId = isset($item['client_id']) ? (int) $item['client_id'] : 0;
+            $clientTable = isset($item['client_table']) ? (string) $item['client_table'] : '';
+            if ($clientId <= 0 || !in_array($clientTable, self::ALLOWED_CLIENT_TABLES, true)) {
+                continue;
+            }
+            if (
+                $primaryClientId !== null
+                && $primaryClientTable !== null
+                && $clientId === $primaryClientId
+                && $clientTable === $primaryClientTable
+            ) {
+                continue;
+            }
+            $key = $clientTable . ':' . $clientId;
+            if (isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+
+            $clientName = isset($item['client_name']) && is_string($item['client_name']) && $item['client_name'] !== ''
+                ? $item['client_name']
+                : $this->getClientName($clientTable, $clientId);
+
+            $normalized[] = [
+                'client_id' => $clientId,
+                'client_type' => isset($item['client_type']) ? (string) $item['client_type'] : null,
+                'client_table' => $clientTable,
+                'client_data' => is_array($item['client_data'] ?? null) ? $item['client_data'] : null,
+                'client_name' => $clientName,
+            ];
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Replace non-primary rows and mirror primary into fw_project_clients.
+     *
+     * @param array<int, array{client_id:int, client_type:?string, client_table:string, client_data:?array, client_name:?string}> $additional
+     */
+    private function syncProjectClients(
+        \Doctrine\DBAL\Connection $connection,
+        int $projectId,
+        ?int $primaryClientId,
+        ?string $primaryClientType,
+        ?string $primaryClientTable,
+        $primaryClientData,
+        ?string $primaryClientName,
+        array $additional,
+    ): void {
+        if (!$this->projectClientsTablePresent($connection)) {
+            return;
+        }
+
+        $connection->executeStatement(
+            'DELETE FROM fw_project_clients WHERE project_id = ?',
+            [$projectId]
+        );
+
+        if (
+            $primaryClientId
+            && $primaryClientTable
+            && in_array($primaryClientTable, self::ALLOWED_CLIENT_TABLES, true)
+        ) {
+            $connection->executeStatement(
+                'INSERT INTO fw_project_clients
+                    (project_id, client_id, client_type, client_table, client_name, client_data, is_primary, sort_order)
+                 VALUES (?, ?, ?, ?, ?, ?, 1, 0)',
+                [
+                    $projectId,
+                    $primaryClientId,
+                    $primaryClientType,
+                    $primaryClientTable,
+                    $primaryClientName,
+                    $this->encodeClientData($primaryClientData),
+                ]
+            );
+        }
+
+        $sort = 1;
+        foreach ($additional as $row) {
+            $connection->executeStatement(
+                'INSERT INTO fw_project_clients
+                    (project_id, client_id, client_type, client_table, client_name, client_data, is_primary, sort_order)
+                 VALUES (?, ?, ?, ?, ?, ?, 0, ?)',
+                [
+                    $projectId,
+                    $row['client_id'],
+                    $row['client_type'],
+                    $row['client_table'],
+                    $row['client_name'],
+                    $this->encodeClientData($row['client_data'] ?? null),
+                    $sort,
+                ]
+            );
+            $sort++;
+        }
+    }
+
+    /**
+     * @param array<int, int|string> $projectIds
+     * @return array<int, list<array<string, mixed>>>
+     */
+    private function loadAdditionalClientsByProjectIds(\Doctrine\DBAL\Connection $connection, array $projectIds): array
+    {
+        $out = [];
+        foreach ($projectIds as $id) {
+            $out[(int) $id] = [];
+        }
+
+        if ($projectIds === [] || !$this->projectClientsTablePresent($connection)) {
+            return $out;
+        }
+
+        $ids = array_values(array_unique(array_map('intval', $projectIds)));
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $rows = $connection->executeQuery(
+            "SELECT id, project_id, client_id, client_type, client_table, client_name, client_data, sort_order
+             FROM fw_project_clients
+             WHERE project_id IN ({$placeholders}) AND is_primary = 0
+             ORDER BY project_id ASC, sort_order ASC, id ASC",
+            $ids
+        )->fetchAllAssociative();
+
+        foreach ($rows as $row) {
+            $projectId = (int) $row['project_id'];
+            $out[$projectId][] = [
+                'id' => (int) $row['id'],
+                'client_id' => (int) $row['client_id'],
+                'client_type' => $row['client_type'] ?? null,
+                'client_table' => $row['client_table'] ?? null,
+                'client_name' => $row['client_name'] ?? null,
+                'client_data' => $this->parseClientData($row['client_data'] ?? null),
+                'sort_order' => isset($row['sort_order']) ? (int) $row['sort_order'] : 0,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Fallback when junction table empty: expose legacy client2 as single additional client.
+     *
+     * @param array<string, mixed> $project
+     * @return list<array<string, mixed>>
+     */
+    private function additionalClientsFromLegacyClient2(array $project): array
+    {
+        if (empty($project['client2_id']) || empty($project['client2_table'])) {
+            return [];
+        }
+        if (!in_array((string) $project['client2_table'], self::ALLOWED_CLIENT_TABLES, true)) {
+            return [];
+        }
+
+        $client2Data = $this->parseClientData($project['client2_data'] ?? null);
+
+        return [[
+            'id' => null,
+            'client_id' => (int) $project['client2_id'],
+            'client_type' => $project['client2_type'] ?? null,
+            'client_table' => $project['client2_table'],
+            'client_name' => $this->getClient2NameWithFallback($project, $client2Data),
+            'client_data' => $client2Data,
+            'sort_order' => 1,
+        ]];
+    }
+
+    /**
+     * Mirror first additional client into legacy client2_* columns.
+     *
+     * @param array<int, array{client_id:int, client_type:?string, client_table:string, client_data:?array, client_name:?string}> $additional
+     * @return array{client2_id:?int, client2_type:?string, client2_table:?string, client2_data:mixed, client2_name:?string}
+     */
+    private function client2FieldsFromAdditional(array $additional): array
+    {
+        if ($additional === []) {
+            return [
+                'client2_id' => null,
+                'client2_type' => null,
+                'client2_table' => null,
+                'client2_data' => null,
+                'client2_name' => null,
+            ];
+        }
+
+        $first = $additional[0];
+
+        return [
+            'client2_id' => $first['client_id'],
+            'client2_type' => $first['client_type'],
+            'client2_table' => $first['client_table'],
+            'client2_data' => $first['client_data'],
+            'client2_name' => $first['client_name'],
+        ];
     }
 }
