@@ -84,6 +84,41 @@ class ProjectController
         '11-15',
     ];
 
+    private const ALLOWED_HR_VISION_SPECIALTIES = [
+        'Anesthesiology', 'Art Therapist', 'Athletic Therapist', 'Audiologist', 'Behaviour Analyst',
+        'Cardiology', 'Cardiology Technologist', 'Cardiovascular Perfusionist', 'Child Life Specialist',
+        'Chiropodist', 'Clinical Research Professional', 'Cytotechnologist', 'Dental', 'Dental Assistant',
+        'Dental Hygienist', 'Dental Technologist', 'Dental Therapist', 'Denturist', 'Dermatology',
+        'Diagnostic Medical Sonographer', 'Drama Therapist', 'Electroneurophysiology Technologist',
+        'Emergency Medical Responder', 'Emergency Medicine', 'Endocrinology', 'Environmental Health Officer',
+        'Exercise Physiologist', 'Family Medicine', 'Gastroenterology', 'General Surgery',
+        'Genetic Counsellor', 'Geriatric Medicine', 'Health Information Management Professional',
+        'Hearing Instrument Specialist', 'Hematology', 'Histotechnologist', 'Infectious Disease',
+        'Internal Medicine', 'Kinesiologist', 'Lactation Consultant',
+        'Magnetic Resonance Imaging Technologist', 'Massage Therapist', 'Medical Device Reprocessing Technician',
+        'Medical Genetics', 'Medical Laboratory Assistant', 'Medical Laboratory Technologist', 'Music Therapist',
+        'Nephrology', 'Neurology', 'Nuclear Medicine', 'Nuclear Medicine Technologist',
+        'Nutritionist (regulated in some jurisdictions)', 'Obstetrics and Gynecology', 'Occupational Medicine',
+        'Occupational Therapist', 'Operating Department Practitioner', 'Ophthalmic Medical Technologist',
+        'Ophthalmology', 'Optician', 'Orthopedic Surgery', 'Orthoptist', 'Orthotist',
+        'Orthotist-Prosthetist', 'Otolaryngology', 'Paramedic', "Pathologists' Assistant", 'Pathology',
+        'Pediatrics', 'Pedorthist', 'Pharmacist', 'Pharmacy', 'Pharmacy Technician',
+        'Physical Medicine and Rehabilitation', 'Physiotherapist', 'Plastic Surgery', 'Podiatrist',
+        'Preventive Medicine', 'Prosthetist', 'Psychiatry', 'Psychological Associate', 'Psychologist',
+        'Psychotherapist', 'Pulmonary Function Technologist', 'Pulmonology', 'Radiation Therapist',
+        'Radiologic Technologist', 'Radiology', 'Recreation Therapist', 'Registered Dietitian',
+        'Respiratory Therapist', 'Rheumatology', 'Social Worker', 'Speech-Language Pathologist',
+        'Thoracic Surgery', 'Urology',
+    ];
+
+    private const ALLOWED_MARKETING_STRATEGIES = [
+        'Print Flyer',
+        'Digital',
+        'Brining a Roster of Patients',
+        'Road Signage',
+        'Social Media Posting & Ads',
+    ];
+
     private Logger $logger;
     private Database $database;
     private EventLoggingService $eventLoggingService;
@@ -101,6 +136,16 @@ class ProjectController
     private static ?bool $longTermFmTeamSizeColumnExists = null;
 
     private static ?bool $monthlyBudgetFirstYearColumnExists = null;
+
+    private static ?bool $estClinicalHoursMdsOnSiteColumnExists = null;
+
+    private static ?bool $hrVisionColumnExists = null;
+
+    private static ?bool $operationalHoursColumnExists = null;
+
+    private static ?bool $contentsOfSpaceColumnExists = null;
+
+    private static ?bool $marketingStrategyColumnExists = null;
 
     private const ALLOWED_CLIENT_TABLES = ['pharma', 'physician', 'pharmacist', 'medical_clinic'];
 
@@ -259,6 +304,11 @@ class ProjectController
             $healthcareServicesSelect = $this->healthcareServicesSelectSql($connection);
             $longTermFmTeamSizeSelect = $this->longTermFmTeamSizeSelectSql($connection);
             $monthlyBudgetFirstYearSelect = $this->monthlyBudgetFirstYearSelectSql($connection);
+            $estClinicalHoursMdsOnSiteSelect = $this->estClinicalHoursMdsOnSiteSelectSql($connection);
+            $hrVisionSelect = $this->hrVisionSelectSql($connection);
+            $operationalHoursSelect = $this->operationalHoursSelectSql($connection);
+            $contentsOfSpaceSelect = $this->contentsOfSpaceSelectSql($connection);
+            $marketingStrategySelect = $this->marketingStrategySelectSql($connection);
 
             // Базовый SQL запрос
             $sql = "SELECT
@@ -274,6 +324,11 @@ class ProjectController
                         {$healthcareServicesSelect}
                         {$longTermFmTeamSizeSelect}
                         {$monthlyBudgetFirstYearSelect}
+                        {$estClinicalHoursMdsOnSiteSelect}
+                        {$hrVisionSelect}
+                        {$operationalHoursSelect}
+                        {$contentsOfSpaceSelect}
+                        {$marketingStrategySelect}
                     FROM fw_projects p
                     LEFT JOIN fw_v_users u ON p.prj_manager = u.id
                     LEFT JOIN fw_v_users creator ON p.created_by = creator.id
@@ -415,6 +470,11 @@ class ProjectController
                     'healthcare_services' => $project['healthcare_services'] ?? null,
                     'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
                     'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
+                    'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
+                    'hr_vision' => $this->parseHrVision($project['hr_vision'] ?? null),
+                    'operational_hours' => $project['operational_hours'] ?? null,
+                    'contents_of_space' => $project['contents_of_space'] ?? null,
+                    'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
                     'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                     'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                     'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -556,6 +616,11 @@ class ProjectController
             $healthcareServicesSelect = $this->healthcareServicesSelectSql($connection);
             $longTermFmTeamSizeSelect = $this->longTermFmTeamSizeSelectSql($connection);
             $monthlyBudgetFirstYearSelect = $this->monthlyBudgetFirstYearSelectSql($connection);
+            $estClinicalHoursMdsOnSiteSelect = $this->estClinicalHoursMdsOnSiteSelectSql($connection);
+            $hrVisionSelect = $this->hrVisionSelectSql($connection);
+            $operationalHoursSelect = $this->operationalHoursSelectSql($connection);
+            $contentsOfSpaceSelect = $this->contentsOfSpaceSelectSql($connection);
+            $marketingStrategySelect = $this->marketingStrategySelectSql($connection);
             
             $sql = "SELECT
                         p.id, p.prj_name, p.address, p.date_start, p.date_end,
@@ -570,6 +635,11 @@ class ProjectController
                         {$healthcareServicesSelect}
                         {$longTermFmTeamSizeSelect}
                         {$monthlyBudgetFirstYearSelect}
+                        {$estClinicalHoursMdsOnSiteSelect}
+                        {$hrVisionSelect}
+                        {$operationalHoursSelect}
+                        {$contentsOfSpaceSelect}
+                        {$marketingStrategySelect}
                     FROM fw_projects p
                     LEFT JOIN fw_v_users u ON p.prj_manager = u.id
                     LEFT JOIN fw_v_users creator ON p.created_by = creator.id
@@ -627,6 +697,11 @@ class ProjectController
                 'healthcare_services' => $project['healthcare_services'] ?? null,
                 'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
                 'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
+                'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
+                'hr_vision' => $this->parseHrVision($project['hr_vision'] ?? null),
+                'operational_hours' => $project['operational_hours'] ?? null,
+                'contents_of_space' => $project['contents_of_space'] ?? null,
+                'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                 'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                 'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -883,6 +958,50 @@ class ProjectController
                     : null;
             }
 
+            if ($this->estClinicalHoursMdsOnSiteColumnPresent($connection)) {
+                $insertColumns .= ', est_clinical_hours_mds_on_site';
+                $insertPlaceholders .= ', ?';
+                $params[] = isset($data['est_clinical_hours_mds_on_site']) && trim((string) $data['est_clinical_hours_mds_on_site']) !== ''
+                    ? trim((string) $data['est_clinical_hours_mds_on_site'])
+                    : null;
+            }
+
+            if ($this->hrVisionColumnPresent($connection)) {
+                $insertColumns .= ', hr_vision';
+                $insertPlaceholders .= ', ?';
+                $params[] = $this->encodeHrVision(
+                    array_key_exists('hr_vision', $data)
+                        ? $this->normalizeHrVisionInput($data['hr_vision'])
+                        : null
+                );
+            }
+
+            if ($this->operationalHoursColumnPresent($connection)) {
+                $insertColumns .= ', operational_hours';
+                $insertPlaceholders .= ', ?';
+                $params[] = isset($data['operational_hours']) && trim((string) $data['operational_hours']) !== ''
+                    ? trim((string) $data['operational_hours'])
+                    : null;
+            }
+
+            if ($this->contentsOfSpaceColumnPresent($connection)) {
+                $insertColumns .= ', contents_of_space';
+                $insertPlaceholders .= ', ?';
+                $params[] = isset($data['contents_of_space']) && trim((string) $data['contents_of_space']) !== ''
+                    ? trim((string) $data['contents_of_space'])
+                    : null;
+            }
+
+            if ($this->marketingStrategyColumnPresent($connection)) {
+                $insertColumns .= ', marketing_strategy';
+                $insertPlaceholders .= ', ?';
+                $params[] = $this->encodeMarketingStrategy(
+                    array_key_exists('marketing_strategy', $data)
+                        ? $this->normalizeMarketingStrategyInput($data['marketing_strategy'])
+                        : null
+                );
+            }
+
             $sql = "INSERT INTO fw_projects ({$insertColumns}) VALUES ({$insertPlaceholders})";
 
             $connection->executeStatement($sql, $params);
@@ -971,6 +1090,11 @@ class ProjectController
                         'healthcare_services' => $project['healthcare_services'] ?? null,
                         'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
                         'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
+                        'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
+                        'hr_vision' => $this->parseHrVision($project['hr_vision'] ?? null),
+                        'operational_hours' => $project['operational_hours'] ?? null,
+                        'contents_of_space' => $project['contents_of_space'] ?? null,
+                        'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                         'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -1329,12 +1453,57 @@ class ProjectController
                     : null;
             }
             if (
+                array_key_exists('est_clinical_hours_mds_on_site', $data)
+                && $this->estClinicalHoursMdsOnSiteColumnPresent($connection)
+            ) {
+                $updateFields[] = 'est_clinical_hours_mds_on_site = ?';
+                $params[] = isset($data['est_clinical_hours_mds_on_site']) && trim((string) $data['est_clinical_hours_mds_on_site']) !== ''
+                    ? trim((string) $data['est_clinical_hours_mds_on_site'])
+                    : null;
+            }
+            if (
                 array_key_exists('locations_of_interest', $data)
                 && $this->locationsOfInterestColumnPresent($connection)
             ) {
                 $updateFields[] = 'locations_of_interest = ?';
                 $params[] = $this->encodeLocationsOfInterest(
                     $this->normalizeLocationsOfInterestInput($data['locations_of_interest'])
+                );
+            }
+            if (
+                array_key_exists('hr_vision', $data)
+                && $this->hrVisionColumnPresent($connection)
+            ) {
+                $updateFields[] = 'hr_vision = ?';
+                $params[] = $this->encodeHrVision(
+                    $this->normalizeHrVisionInput($data['hr_vision'])
+                );
+            }
+            if (
+                array_key_exists('operational_hours', $data)
+                && $this->operationalHoursColumnPresent($connection)
+            ) {
+                $updateFields[] = 'operational_hours = ?';
+                $params[] = isset($data['operational_hours']) && trim((string) $data['operational_hours']) !== ''
+                    ? trim((string) $data['operational_hours'])
+                    : null;
+            }
+            if (
+                array_key_exists('contents_of_space', $data)
+                && $this->contentsOfSpaceColumnPresent($connection)
+            ) {
+                $updateFields[] = 'contents_of_space = ?';
+                $params[] = isset($data['contents_of_space']) && trim((string) $data['contents_of_space']) !== ''
+                    ? trim((string) $data['contents_of_space'])
+                    : null;
+            }
+            if (
+                array_key_exists('marketing_strategy', $data)
+                && $this->marketingStrategyColumnPresent($connection)
+            ) {
+                $updateFields[] = 'marketing_strategy = ?';
+                $params[] = $this->encodeMarketingStrategy(
+                    $this->normalizeMarketingStrategyInput($data['marketing_strategy'])
                 );
             }
 
@@ -1446,6 +1615,10 @@ class ProjectController
                     'purchase_or_lease' => $project['purchase_or_lease'],
                     'notes' => $project['notes'] ?? null,
                     'locations_of_interest' => $this->parseLocationsOfInterest($project['locations_of_interest'] ?? null),
+                    'hr_vision' => $this->parseHrVision($project['hr_vision'] ?? null),
+                    'operational_hours' => $project['operational_hours'] ?? null,
+                    'contents_of_space' => $project['contents_of_space'] ?? null,
+                    'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
                     'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                     'client_type' => $project['client_type'] ?? null,
                     'client_table' => $project['client_table'] ?? null,
@@ -1498,6 +1671,11 @@ class ProjectController
                             'healthcare_services' => $beforeData['healthcare_services'] ?? null,
                             'long_term_fm_team_size' => $beforeData['long_term_fm_team_size'] ?? null,
                             'monthly_budget_first_year' => $beforeData['monthly_budget_first_year'] ?? null,
+                            'est_clinical_hours_mds_on_site' => $beforeData['est_clinical_hours_mds_on_site'] ?? null,
+                            'hr_vision' => $this->parseHrVision($beforeData['hr_vision'] ?? null),
+                            'operational_hours' => $beforeData['operational_hours'] ?? null,
+                            'contents_of_space' => $beforeData['contents_of_space'] ?? null,
+                            'marketing_strategy' => $this->parseMarketingStrategy($beforeData['marketing_strategy'] ?? null),
                             'prj_manager' => $beforeData['prj_manager'] ? (int)$beforeData['prj_manager'] : null,
                             'created_by' => $beforeData['created_by'] ? (int)$beforeData['created_by'] : null
                         ],
@@ -1580,6 +1758,11 @@ class ProjectController
                         'healthcare_services' => $project['healthcare_services'] ?? null,
                         'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
                         'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
+                        'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
+                        'hr_vision' => $this->parseHrVision($project['hr_vision'] ?? null),
+                        'operational_hours' => $project['operational_hours'] ?? null,
+                        'contents_of_space' => $project['contents_of_space'] ?? null,
+                        'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'project_foreman_id' => isset($project['project_foreman_id']) && $project['project_foreman_id']
                             ? (int) $project['project_foreman_id']
@@ -1862,6 +2045,40 @@ class ProjectController
             }
         }
 
+        if (array_key_exists('hr_vision', $data) && $data['hr_vision'] !== null) {
+            if (!is_array($data['hr_vision'])) {
+                return [
+                    'valid' => false,
+                    'message' => 'hr_vision must be an array of specialties or null',
+                ];
+            }
+            foreach ($data['hr_vision'] as $specialty) {
+                if (!is_string($specialty) || !in_array($specialty, self::ALLOWED_HR_VISION_SPECIALTIES, true)) {
+                    return [
+                        'valid' => false,
+                        'message' => 'Each hr_vision item must be an allowed specialty',
+                    ];
+                }
+            }
+        }
+
+        if (array_key_exists('marketing_strategy', $data) && $data['marketing_strategy'] !== null) {
+            if (!is_array($data['marketing_strategy'])) {
+                return [
+                    'valid' => false,
+                    'message' => 'marketing_strategy must be an array of channels or null',
+                ];
+            }
+            foreach ($data['marketing_strategy'] as $strategy) {
+                if (!is_string($strategy) || !in_array($strategy, self::ALLOWED_MARKETING_STRATEGIES, true)) {
+                    return [
+                        'valid' => false,
+                        'message' => 'Each marketing_strategy item must be an allowed channel',
+                    ];
+                }
+            }
+        }
+
         // area: non-negative integer or null
         if (array_key_exists('area', $data) && $data['area'] !== null) {
             if (!is_numeric($data['area']) || (int)$data['area'] < 0) {
@@ -1921,6 +2138,38 @@ class ProjectController
                     'valid' => false,
                     'message' => 'monthly_budget_first_year must not exceed 100 characters',
                 ];
+            }
+        }
+
+        if (array_key_exists('est_clinical_hours_mds_on_site', $data) && $data['est_clinical_hours_mds_on_site'] !== null && $data['est_clinical_hours_mds_on_site'] !== '') {
+            if (!is_string($data['est_clinical_hours_mds_on_site']) && !is_numeric($data['est_clinical_hours_mds_on_site'])) {
+                return [
+                    'valid' => false,
+                    'message' => 'est_clinical_hours_mds_on_site must be a string or null',
+                ];
+            }
+            if (strlen(trim((string) $data['est_clinical_hours_mds_on_site'])) > 100) {
+                return [
+                    'valid' => false,
+                    'message' => 'est_clinical_hours_mds_on_site must not exceed 100 characters',
+                ];
+            }
+        }
+
+        foreach (['operational_hours' => 100, 'contents_of_space' => 2000] as $field => $maxLength) {
+            if (array_key_exists($field, $data) && $data[$field] !== null && $data[$field] !== '') {
+                if (!is_string($data[$field])) {
+                    return [
+                        'valid' => false,
+                        'message' => "{$field} must be a string or null",
+                    ];
+                }
+                if (strlen(trim($data[$field])) > $maxLength) {
+                    return [
+                        'valid' => false,
+                        'message' => "{$field} must not exceed {$maxLength} characters",
+                    ];
+                }
             }
         }
 
@@ -2902,6 +3151,120 @@ class ProjectController
         return ', p.monthly_budget_first_year';
     }
 
+    private function estClinicalHoursMdsOnSiteColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$estClinicalHoursMdsOnSiteColumnExists !== null) {
+            return self::$estClinicalHoursMdsOnSiteColumnExists;
+        }
+
+        try {
+            $row = $connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE 'est_clinical_hours_mds_on_site'"
+            )->fetchOne();
+            self::$estClinicalHoursMdsOnSiteColumnExists = !empty($row);
+        } catch (\Exception $e) {
+            self::$estClinicalHoursMdsOnSiteColumnExists = false;
+        }
+
+        return self::$estClinicalHoursMdsOnSiteColumnExists;
+    }
+
+    private function estClinicalHoursMdsOnSiteSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        if (!$this->estClinicalHoursMdsOnSiteColumnPresent($connection)) {
+            return '';
+        }
+
+        return ', p.est_clinical_hours_mds_on_site';
+    }
+
+    private function hrVisionColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$hrVisionColumnExists !== null) {
+            return self::$hrVisionColumnExists;
+        }
+
+        try {
+            $row = $connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE 'hr_vision'"
+            )->fetchOne();
+            self::$hrVisionColumnExists = !empty($row);
+        } catch (\Exception $e) {
+            self::$hrVisionColumnExists = false;
+        }
+
+        return self::$hrVisionColumnExists;
+    }
+
+    private function hrVisionSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        if (!$this->hrVisionColumnPresent($connection)) {
+            return '';
+        }
+
+        return ', p.hr_vision';
+    }
+
+    private function operationalHoursColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$operationalHoursColumnExists !== null) {
+            return self::$operationalHoursColumnExists;
+        }
+        try {
+            self::$operationalHoursColumnExists = !empty($connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE 'operational_hours'"
+            )->fetchOne());
+        } catch (\Exception $e) {
+            self::$operationalHoursColumnExists = false;
+        }
+        return self::$operationalHoursColumnExists;
+    }
+
+    private function operationalHoursSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        return $this->operationalHoursColumnPresent($connection) ? ', p.operational_hours' : '';
+    }
+
+    private function contentsOfSpaceColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$contentsOfSpaceColumnExists !== null) {
+            return self::$contentsOfSpaceColumnExists;
+        }
+        try {
+            self::$contentsOfSpaceColumnExists = !empty($connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE 'contents_of_space'"
+            )->fetchOne());
+        } catch (\Exception $e) {
+            self::$contentsOfSpaceColumnExists = false;
+        }
+        return self::$contentsOfSpaceColumnExists;
+    }
+
+    private function contentsOfSpaceSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        return $this->contentsOfSpaceColumnPresent($connection) ? ', p.contents_of_space' : '';
+    }
+
+    private function marketingStrategyColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$marketingStrategyColumnExists !== null) {
+            return self::$marketingStrategyColumnExists;
+        }
+        try {
+            self::$marketingStrategyColumnExists = !empty($connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE 'marketing_strategy'"
+            )->fetchOne());
+        } catch (\Exception $e) {
+            self::$marketingStrategyColumnExists = false;
+        }
+        return self::$marketingStrategyColumnExists;
+    }
+
+    private function marketingStrategySelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        return $this->marketingStrategyColumnPresent($connection) ? ', p.marketing_strategy' : '';
+    }
+
     /**
      * @param mixed $raw
      * @return list<string>|null
@@ -2974,6 +3337,121 @@ class ProjectController
         }
 
         return json_encode(array_values($codes));
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<string>|null
+     */
+    private function parseHrVision($raw): ?array
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+
+        if (is_array($raw)) {
+            return $this->normalizeHrVisionInput($raw);
+        }
+
+        if (!is_string($raw)) {
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+            return null;
+        }
+
+        return $this->normalizeHrVisionInput($decoded);
+    }
+
+    /**
+     * @param mixed $input
+     * @return list<string>|null null means empty/cleared
+     */
+    private function normalizeHrVisionInput($input): ?array
+    {
+        if ($input === null) {
+            return null;
+        }
+        if (!is_array($input)) {
+            return null;
+        }
+
+        $out = [];
+        $seen = [];
+        foreach ($input as $specialty) {
+            if (!is_string($specialty) || !in_array($specialty, self::ALLOWED_HR_VISION_SPECIALTIES, true)) {
+                continue;
+            }
+            if (isset($seen[$specialty])) {
+                continue;
+            }
+            $seen[$specialty] = true;
+            $out[] = $specialty;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<string>|null $specialties
+     */
+    private function encodeHrVision(?array $specialties): ?string
+    {
+        if ($specialties === null) {
+            return null;
+        }
+
+        return json_encode(array_values($specialties));
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<string>|null
+     */
+    private function parseMarketingStrategy($raw): ?array
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (is_array($raw)) {
+            return $this->normalizeMarketingStrategyInput($raw);
+        }
+        if (!is_string($raw)) {
+            return null;
+        }
+        $decoded = json_decode($raw, true);
+        return json_last_error() === JSON_ERROR_NONE && is_array($decoded)
+            ? $this->normalizeMarketingStrategyInput($decoded)
+            : null;
+    }
+
+    /**
+     * @param mixed $input
+     * @return list<string>|null
+     */
+    private function normalizeMarketingStrategyInput($input): ?array
+    {
+        if ($input === null || !is_array($input)) {
+            return $input === null ? null : [];
+        }
+        $result = [];
+        foreach ($input as $strategy) {
+            if (is_string($strategy)
+                && in_array($strategy, self::ALLOWED_MARKETING_STRATEGIES, true)
+                && !in_array($strategy, $result, true)
+            ) {
+                $result[] = $strategy;
+            }
+        }
+        return $result;
+    }
+
+    /** @param list<string>|null $strategies */
+    private function encodeMarketingStrategy(?array $strategies): ?string
+    {
+        return $strategies === null ? null : json_encode(array_values($strategies));
     }
 
     /**
