@@ -119,6 +119,69 @@ class ProjectController
         'Social Media Posting & Ads',
     ];
 
+    /** @var list<string> Operational Hours week days */
+    private const OPERATIONAL_HOURS_DAYS = [
+        'monday',
+        'tuesday',
+        'wednesday',
+        'thursday',
+        'friday',
+        'saturday',
+        'sunday',
+    ];
+
+    /** @var list<string> Operational Hours Open/Close select options */
+    private const OPERATIONAL_HOURS_TIME_OPTIONS = [
+        '24 Hours',
+        '6am',
+        '7am',
+        '8am',
+        '9am',
+        '10am',
+        '11am',
+        '12pm',
+        '1pm',
+        '2pm',
+        '3pm',
+        '4pm',
+        '5pm',
+        '6pm',
+        '7pm',
+        '8pm',
+        '9pm',
+        '10pm',
+    ];
+
+    /** @var array<string, int> Contents of Space calc rows: key => set size (sq/ft) */
+    private const CONTENTS_OF_SPACE_CALC_SET_SIZES = [
+        'waiting_area' => 24,
+        'dedicated_kids_area' => 50,
+        'reception_area' => 16,
+        'additional_waiting_bay' => 24,
+        'nursing_room_office' => 80,
+        'triage_room' => 80,
+        'baby_area_room' => 60,
+        'managers_office' => 80,
+        'exam_rooms' => 88,
+        'procedure_room' => 168,
+        'doctor_lounge_office' => 24,
+        'barrier_free_bathroom' => 80,
+        'additional_patient_bathrooms' => 32,
+        'staff_only_bathrooms' => 32,
+        'storage_rooms' => 6,
+        'staff_room' => 150,
+        'kitchen' => 100,
+        'boardroom' => 200,
+    ];
+
+    /** @var array<string, list<int>> Contents of Space select rows: key => allowed sq/ft options */
+    private const CONTENTS_OF_SPACE_SELECT_OPTIONS = [
+        'pharmacy' => [300, 400, 500, 600, 700, 800],
+        'specialists_office' => [300, 400, 500, 600, 700, 800],
+        'sports_medicine' => [300, 400, 500, 600, 700, 800, 1000, 1200, 1500],
+        'allied_health_providers' => [300, 400, 500, 600, 700, 800, 1000, 1200, 1500],
+    ];
+
     private Logger $logger;
     private Database $database;
     private EventLoggingService $eventLoggingService;
@@ -472,8 +535,8 @@ class ProjectController
                     'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                     'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
                     'hr_vision' => $this->parseHrVision($project['hr_vision'] ?? null),
-                    'operational_hours' => $project['operational_hours'] ?? null,
-                    'contents_of_space' => $project['contents_of_space'] ?? null,
+                    'operational_hours' => $this->parseOperationalHours($project['operational_hours'] ?? null),
+                    'contents_of_space' => $this->parseContentsOfSpace($project['contents_of_space'] ?? null),
                     'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
                     'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                     'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
@@ -699,8 +762,8 @@ class ProjectController
                 'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                 'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
                 'hr_vision' => $this->parseHrVision($project['hr_vision'] ?? null),
-                'operational_hours' => $project['operational_hours'] ?? null,
-                'contents_of_space' => $project['contents_of_space'] ?? null,
+                'operational_hours' => $this->parseOperationalHours($project['operational_hours'] ?? null),
+                'contents_of_space' => $this->parseContentsOfSpace($project['contents_of_space'] ?? null),
                 'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                 'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
@@ -979,17 +1042,21 @@ class ProjectController
             if ($this->operationalHoursColumnPresent($connection)) {
                 $insertColumns .= ', operational_hours';
                 $insertPlaceholders .= ', ?';
-                $params[] = isset($data['operational_hours']) && trim((string) $data['operational_hours']) !== ''
-                    ? trim((string) $data['operational_hours'])
-                    : null;
+                $params[] = $this->encodeOperationalHours(
+                    array_key_exists('operational_hours', $data)
+                        ? $this->normalizeOperationalHoursInput($data['operational_hours'])
+                        : $this->normalizeOperationalHoursInput(null)
+                );
             }
 
             if ($this->contentsOfSpaceColumnPresent($connection)) {
                 $insertColumns .= ', contents_of_space';
                 $insertPlaceholders .= ', ?';
-                $params[] = isset($data['contents_of_space']) && trim((string) $data['contents_of_space']) !== ''
-                    ? trim((string) $data['contents_of_space'])
-                    : null;
+                $params[] = $this->encodeContentsOfSpace(
+                    array_key_exists('contents_of_space', $data)
+                        ? $this->normalizeContentsOfSpaceInput($data['contents_of_space'])
+                        : $this->normalizeContentsOfSpaceInput(null)
+                );
             }
 
             if ($this->marketingStrategyColumnPresent($connection)) {
@@ -1092,8 +1159,8 @@ class ProjectController
                         'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                         'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
                         'hr_vision' => $this->parseHrVision($project['hr_vision'] ?? null),
-                        'operational_hours' => $project['operational_hours'] ?? null,
-                        'contents_of_space' => $project['contents_of_space'] ?? null,
+                        'operational_hours' => $this->parseOperationalHours($project['operational_hours'] ?? null),
+                        'contents_of_space' => $this->parseContentsOfSpace($project['contents_of_space'] ?? null),
                         'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
@@ -1484,18 +1551,18 @@ class ProjectController
                 && $this->operationalHoursColumnPresent($connection)
             ) {
                 $updateFields[] = 'operational_hours = ?';
-                $params[] = isset($data['operational_hours']) && trim((string) $data['operational_hours']) !== ''
-                    ? trim((string) $data['operational_hours'])
-                    : null;
+                $params[] = $this->encodeOperationalHours(
+                    $this->normalizeOperationalHoursInput($data['operational_hours'])
+                );
             }
             if (
                 array_key_exists('contents_of_space', $data)
                 && $this->contentsOfSpaceColumnPresent($connection)
             ) {
                 $updateFields[] = 'contents_of_space = ?';
-                $params[] = isset($data['contents_of_space']) && trim((string) $data['contents_of_space']) !== ''
-                    ? trim((string) $data['contents_of_space'])
-                    : null;
+                $params[] = $this->encodeContentsOfSpace(
+                    $this->normalizeContentsOfSpaceInput($data['contents_of_space'])
+                );
             }
             if (
                 array_key_exists('marketing_strategy', $data)
@@ -1616,8 +1683,8 @@ class ProjectController
                     'notes' => $project['notes'] ?? null,
                     'locations_of_interest' => $this->parseLocationsOfInterest($project['locations_of_interest'] ?? null),
                     'hr_vision' => $this->parseHrVision($project['hr_vision'] ?? null),
-                    'operational_hours' => $project['operational_hours'] ?? null,
-                    'contents_of_space' => $project['contents_of_space'] ?? null,
+                    'operational_hours' => $this->parseOperationalHours($project['operational_hours'] ?? null),
+                    'contents_of_space' => $this->parseContentsOfSpace($project['contents_of_space'] ?? null),
                     'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
                     'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                     'client_type' => $project['client_type'] ?? null,
@@ -1673,8 +1740,8 @@ class ProjectController
                             'monthly_budget_first_year' => $beforeData['monthly_budget_first_year'] ?? null,
                             'est_clinical_hours_mds_on_site' => $beforeData['est_clinical_hours_mds_on_site'] ?? null,
                             'hr_vision' => $this->parseHrVision($beforeData['hr_vision'] ?? null),
-                            'operational_hours' => $beforeData['operational_hours'] ?? null,
-                            'contents_of_space' => $beforeData['contents_of_space'] ?? null,
+                            'operational_hours' => $this->parseOperationalHours($beforeData['operational_hours'] ?? null),
+                            'contents_of_space' => $this->parseContentsOfSpace($beforeData['contents_of_space'] ?? null),
                             'marketing_strategy' => $this->parseMarketingStrategy($beforeData['marketing_strategy'] ?? null),
                             'prj_manager' => $beforeData['prj_manager'] ? (int)$beforeData['prj_manager'] : null,
                             'created_by' => $beforeData['created_by'] ? (int)$beforeData['created_by'] : null
@@ -1760,8 +1827,8 @@ class ProjectController
                         'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                         'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
                         'hr_vision' => $this->parseHrVision($project['hr_vision'] ?? null),
-                        'operational_hours' => $project['operational_hours'] ?? null,
-                        'contents_of_space' => $project['contents_of_space'] ?? null,
+                        'operational_hours' => $this->parseOperationalHours($project['operational_hours'] ?? null),
+                        'contents_of_space' => $this->parseContentsOfSpace($project['contents_of_space'] ?? null),
                         'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'project_foreman_id' => isset($project['project_foreman_id']) && $project['project_foreman_id']
@@ -2156,20 +2223,42 @@ class ProjectController
             }
         }
 
-        foreach (['operational_hours' => 100, 'contents_of_space' => 2000] as $field => $maxLength) {
-            if (array_key_exists($field, $data) && $data[$field] !== null && $data[$field] !== '') {
-                if (!is_string($data[$field])) {
-                    return [
-                        'valid' => false,
-                        'message' => "{$field} must be a string or null",
-                    ];
-                }
-                if (strlen(trim($data[$field])) > $maxLength) {
-                    return [
-                        'valid' => false,
-                        'message' => "{$field} must not exceed {$maxLength} characters",
-                    ];
-                }
+        if (array_key_exists('operational_hours', $data) && $data['operational_hours'] !== null) {
+            if (!is_array($data['operational_hours'])) {
+                return [
+                    'valid' => false,
+                    'message' => 'operational_hours must be an object with days or null',
+                ];
+            }
+            $normalizedHours = $this->normalizeOperationalHoursInput($data['operational_hours']);
+            if ($normalizedHours === null) {
+                return [
+                    'valid' => false,
+                    'message' => 'operational_hours is invalid',
+                ];
+            }
+            $hoursOrderError = $this->validateOperationalHoursOpenBeforeClose($normalizedHours);
+            if ($hoursOrderError !== null) {
+                return [
+                    'valid' => false,
+                    'message' => $hoursOrderError,
+                ];
+            }
+        }
+
+        if (array_key_exists('contents_of_space', $data) && $data['contents_of_space'] !== null) {
+            if (!is_array($data['contents_of_space'])) {
+                return [
+                    'valid' => false,
+                    'message' => 'contents_of_space must be an object with rows or null',
+                ];
+            }
+            $normalizedContents = $this->normalizeContentsOfSpaceInput($data['contents_of_space']);
+            if ($normalizedContents === null) {
+                return [
+                    'valid' => false,
+                    'message' => 'contents_of_space is invalid',
+                ];
             }
         }
 
@@ -3452,6 +3541,258 @@ class ProjectController
     private function encodeMarketingStrategy(?array $strategies): ?string
     {
         return $strategies === null ? null : json_encode(array_values($strategies));
+    }
+
+    /**
+     * @param mixed $raw
+     * @return array{days: list<array{day:string, open:?string, close:?string}>}|null
+     */
+    private function parseOperationalHours($raw): ?array
+    {
+        if ($raw === null || $raw === '') {
+            return $this->normalizeOperationalHoursInput(null);
+        }
+        if (is_array($raw)) {
+            return $this->normalizeOperationalHoursInput($raw);
+        }
+        if (!is_string($raw)) {
+            return $this->normalizeOperationalHoursInput(null);
+        }
+        $decoded = json_decode($raw, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+            // Legacy free-text values are discarded
+            return $this->normalizeOperationalHoursInput(null);
+        }
+        return $this->normalizeOperationalHoursInput($decoded);
+    }
+
+    /**
+     * @param mixed $input
+     * @return array{days: list<array{day:string, open:?string, close:?string}>}|null
+     */
+    private function normalizeOperationalHoursInput($input): ?array
+    {
+        if ($input !== null && !is_array($input)) {
+            return null;
+        }
+
+        $byDay = [];
+        $daysInput = [];
+        if (is_array($input)) {
+            if (isset($input['days']) && is_array($input['days'])) {
+                $daysInput = $input['days'];
+            } elseif ($input !== [] && array_keys($input) === range(0, count($input) - 1)) {
+                $daysInput = $input;
+            }
+        }
+
+        foreach ($daysInput as $row) {
+            if (!is_array($row) || !isset($row['day']) || !is_string($row['day'])) {
+                continue;
+            }
+            $day = $row['day'];
+            if (!in_array($day, self::OPERATIONAL_HOURS_DAYS, true)) {
+                continue;
+            }
+            $byDay[$day] = [
+                'day' => $day,
+                'open' => $this->normalizeOperationalHoursTime($row['open'] ?? null),
+                'close' => $this->normalizeOperationalHoursTime($row['close'] ?? null),
+            ];
+        }
+
+        $days = [];
+        foreach (self::OPERATIONAL_HOURS_DAYS as $day) {
+            $days[] = $byDay[$day] ?? [
+                'day' => $day,
+                'open' => null,
+                'close' => null,
+            ];
+        }
+
+        return ['days' => $days];
+    }
+
+    /**
+     * @param mixed $raw
+     */
+    private function normalizeOperationalHoursTime($raw): ?string
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (!is_string($raw)) {
+            return null;
+        }
+        return in_array($raw, self::OPERATIONAL_HOURS_TIME_OPTIONS, true) ? $raw : null;
+    }
+
+    /**
+     * @param array{days: list<array{day:string, open:?string, close:?string}>}|null $data
+     */
+    private function encodeOperationalHours(?array $data): ?string
+    {
+        $normalized = $this->normalizeOperationalHoursInput($data);
+        return $normalized === null ? null : json_encode($normalized);
+    }
+
+    /**
+     * Open must be strictly before Close for clock times.
+     * "24 Hours" is valid only when both Open and Close are "24 Hours".
+     *
+     * @param array{days: list<array{day:string, open:?string, close:?string}>} $data
+     */
+    private function validateOperationalHoursOpenBeforeClose(array $data): ?string
+    {
+        $invalid = [];
+        foreach ($data['days'] as $row) {
+            $day = $row['day'] ?? '';
+            $open = $row['open'] ?? null;
+            $close = $row['close'] ?? null;
+            if ($open === null || $close === null || $open === '' || $close === '') {
+                continue;
+            }
+            if ($open === '24 Hours' || $close === '24 Hours') {
+                if ($open === '24 Hours' && $close === '24 Hours') {
+                    continue;
+                }
+                $invalid[] = $day;
+                continue;
+            }
+            $openMinutes = $this->operationalHoursTimeToMinutes((string) $open);
+            $closeMinutes = $this->operationalHoursTimeToMinutes((string) $close);
+            if ($openMinutes === null || $closeMinutes === null) {
+                continue;
+            }
+            if ($openMinutes >= $closeMinutes) {
+                $invalid[] = $day;
+            }
+        }
+        if ($invalid === []) {
+            return null;
+        }
+        return 'Open must be before Close for: ' . implode(', ', $invalid);
+    }
+
+    private function operationalHoursTimeToMinutes(string $value): ?int
+    {
+        if ($value === '24 Hours') {
+            return null;
+        }
+        if (!preg_match('/^(\d{1,2})(am|pm)$/', $value, $matches)) {
+            return null;
+        }
+        $hour = (int) $matches[1];
+        $meridiem = $matches[2];
+        if ($meridiem === 'am') {
+            if ($hour === 12) {
+                $hour = 0;
+            }
+        } elseif ($hour !== 12) {
+            $hour += 12;
+        }
+        return $hour * 60;
+    }
+
+    /**
+     * @param mixed $raw
+     * @return array{rows: list<array<string, mixed>>}|null
+     */
+    private function parseContentsOfSpace($raw): ?array
+    {
+        if ($raw === null || $raw === '') {
+            return $this->normalizeContentsOfSpaceInput(null);
+        }
+        if (is_array($raw)) {
+            return $this->normalizeContentsOfSpaceInput($raw);
+        }
+        if (!is_string($raw)) {
+            return $this->normalizeContentsOfSpaceInput(null);
+        }
+        $decoded = json_decode($raw, true);
+        if (json_last_error() !== JSON_ERROR_NONE || !is_array($decoded)) {
+            // Legacy free-text values are discarded
+            return $this->normalizeContentsOfSpaceInput(null);
+        }
+        return $this->normalizeContentsOfSpaceInput($decoded);
+    }
+
+    /**
+     * Build a complete Contents of Space payload (zeros / null selects).
+     *
+     * @param mixed $input
+     * @return array{rows: list<array<string, mixed>>}|null
+     */
+    private function normalizeContentsOfSpaceInput($input): ?array
+    {
+        if ($input !== null && !is_array($input)) {
+            return null;
+        }
+
+        $quantityByKey = [];
+        $valueByKey = [];
+
+        $rowsInput = [];
+        if (is_array($input)) {
+            if (isset($input['rows']) && is_array($input['rows'])) {
+                $rowsInput = $input['rows'];
+            } elseif ($input !== [] && array_keys($input) === range(0, count($input) - 1)) {
+                $rowsInput = $input;
+            }
+        }
+
+        foreach ($rowsInput as $row) {
+            if (!is_array($row) || !isset($row['key'], $row['kind']) || !is_string($row['key'])) {
+                continue;
+            }
+            $key = $row['key'];
+            if ($row['kind'] === 'calc' && isset(self::CONTENTS_OF_SPACE_CALC_SET_SIZES[$key])) {
+                $qty = $row['quantity'] ?? 0;
+                if ($qty === null || $qty === '') {
+                    $qty = 0;
+                }
+                if (!is_numeric($qty) || (float) $qty < 0) {
+                    $qty = 0;
+                }
+                $quantityByKey[$key] = (int) floor((float) $qty);
+            } elseif ($row['kind'] === 'select' && isset(self::CONTENTS_OF_SPACE_SELECT_OPTIONS[$key])) {
+                $value = $row['value'] ?? null;
+                if ($value === null || $value === '') {
+                    $valueByKey[$key] = null;
+                } elseif (is_numeric($value) && in_array((int) $value, self::CONTENTS_OF_SPACE_SELECT_OPTIONS[$key], true)) {
+                    $valueByKey[$key] = (int) $value;
+                } else {
+                    $valueByKey[$key] = null;
+                }
+            }
+        }
+
+        $rows = [];
+        foreach (self::CONTENTS_OF_SPACE_CALC_SET_SIZES as $key => $_setSize) {
+            $rows[] = [
+                'key' => $key,
+                'kind' => 'calc',
+                'quantity' => $quantityByKey[$key] ?? 0,
+            ];
+        }
+        foreach (self::CONTENTS_OF_SPACE_SELECT_OPTIONS as $key => $_options) {
+            $rows[] = [
+                'key' => $key,
+                'kind' => 'select',
+                'value' => array_key_exists($key, $valueByKey) ? $valueByKey[$key] : null,
+            ];
+        }
+
+        return ['rows' => $rows];
+    }
+
+    /**
+     * @param array{rows: list<array<string, mixed>>}|null $data
+     */
+    private function encodeContentsOfSpace(?array $data): ?string
+    {
+        $normalized = $this->normalizeContentsOfSpaceInput($data);
+        return $normalized === null ? null : json_encode($normalized);
     }
 
     /**

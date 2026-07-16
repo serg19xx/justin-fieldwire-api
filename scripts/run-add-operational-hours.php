@@ -15,7 +15,7 @@ $exists = $connection->executeQuery(
 if (!$exists) {
     $connection->executeStatement(
         'ALTER TABLE `fw_projects`
-         ADD COLUMN `operational_hours` VARCHAR(100) NULL DEFAULT NULL AFTER `hr_vision`'
+         ADD COLUMN `operational_hours` JSON NULL DEFAULT NULL AFTER `hr_vision`'
     );
 }
 
