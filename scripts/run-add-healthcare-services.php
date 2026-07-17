@@ -23,7 +23,7 @@ if ($col) {
 } else {
     $conn->executeStatement(
         'ALTER TABLE `fw_projects`
-         ADD COLUMN `healthcare_services` VARCHAR(100) NULL DEFAULT NULL AFTER `clinic_model_type`'
+         ADD COLUMN `healthcare_services` JSON NULL DEFAULT NULL AFTER `clinic_model_type`'
     );
     echo "COLUMN created\n";
 }

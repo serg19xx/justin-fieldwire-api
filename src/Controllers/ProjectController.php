@@ -75,6 +75,117 @@ class ProjectController
         'PRP',
     ];
 
+    /** Allowed Project Inclusions values */
+    private const ALLOWED_PROJECT_INCLUSIONS = [
+        "Architectural, Structural & Mechanical",
+        "Sprinkler Drawings",
+        "Structural Drawings",
+        "City Fee's",
+        "Key Sets & Keybox",
+        "Design & Aesthetic Consultant",
+        "Demo Bins",
+        "Concrete & Fill Bins",
+        "Casual Dump Runs",
+        "General Cleaning of Space",
+        "Storage Bin",
+        "Moving of Equipment & Supplies",
+        "Major Equipment Rentals",
+        "Block Wall Penetrations",
+        "Structural Changes",
+        "Sprinkler Install (Supply & Install)",
+        "Fire Separation Ceiling or Demising Walls",
+        "Fire Alarm, Horns Install",
+        "Fire Caulking Materials",
+        "Penetrations",
+        "HVAC New Units Install",
+        "New System",
+        "Thermostat",
+        "Venting Flashing",
+        "Plumbing Fixtures as per Contractor Grade",
+        "Electrical Rough In & Finish As Per Drawing",
+        "Electrical Decor Finishes",
+        "Insulated Partitions",
+        "Taping & Patching",
+        "TV Inserts",
+        "Corner Guards 4'",
+        "Corner Guards Full Corner",
+        "Network Lines Runs",
+        "Network Line Finish",
+        "Network Switch Finish",
+        "Paint Entire Space",
+        "Epoxy Paint",
+        "Solid Core Doors With Knockdown Frames",
+        "Custom Doors & Frames",
+        "Commercial Hardware",
+        "Door Stoppers",
+        "Barrier Free Bathroom Automation",
+        "Entry/Exit Door Automation",
+        "Interior Door Automation",
+        "Bathroom Door Closers",
+        "Door Closers",
+        "T-Bar Ceiling & Commercial Tiles",
+        "Sound Reduction Tiles",
+        "Flooring As Per Drawing With Commercial Finishes",
+        "Autoclave Room",
+        "Bathroom Vanity",
+        "Benches",
+        "Charting Room",
+        "Diagnostic Room",
+        "Doctors Lounge",
+        "Exam Rooms",
+        "Exercise Room",
+        "Hallway Desk",
+        "Hallway Storage",
+        "Kitchen",
+        "Managers Office",
+        "Medical Reception",
+        "Nursing",
+        "Pharmacy",
+        "Pharmacy Island",
+        "Pharmacy Shelves",
+        "Adult Change Table",
+        "Baby Change Table",
+        "Barrier Free Equipment",
+        "Coat Hangers",
+        "Door Numbers",
+        "Eye Wash Station",
+        "Female Hygiene Dispenser",
+        "Hand Paper Towel Dispensers",
+        "Mirrors",
+        "Pictures &/Or Artwork",
+        "Soap Dispensers",
+        "Toilet Paper Dispenser",
+        "Support For Gate",
+        "Pharmacy Security Gate",
+        "Window Security Gate",
+        "Windows Security Gate Install",
+        "Install Security System",
+        "Install Security Camera System",
+        "Baseboard",
+        "Commercial Finish Trim",
+        "Raised Platform",
+        "Recessed TV's",
+        "Welcome Mat",
+        "Custom Wrapped Doors",
+        "Tiled Walls",
+        "Skylight Install",
+        "Millwork Planter",
+        "Custom Wood Wall",
+        "Glass Work",
+        "Metal Work",
+        "Stone Work",
+        "Final Commercial Clean",
+        "Branding Package",
+        "Way Finding",
+        "Door Numbers Installed",
+        "Install Speaker System",
+        "TV Mounts",
+        "TV's",
+        "Exterior Primary Sign",
+        "Windows Signs",
+        "Pileon Sign",
+    ];
+
     /** Allowed Long Term Family Medicine team size values */
     private const ALLOWED_LONG_TERM_FM_TEAM_SIZES = [
         'Solo',
@@ -196,6 +307,8 @@ class ProjectController
 
     private static ?bool $healthcareServicesColumnExists = null;
 
+    private static ?bool $projectInclusionsColumnExists = null;
+
     private static ?bool $longTermFmTeamSizeColumnExists = null;
 
     private static ?bool $monthlyBudgetFirstYearColumnExists = null;
@@ -219,6 +332,7 @@ class ProjectController
         'project_fee_per_doctor' => 100,
         'cost_per_sq_ft' => 100,
         'mark_up' => 100,
+        'daily_patient_volumes' => 100,
     ];
 
     private const ALLOWED_CLIENT_TABLES = ['pharma', 'physician', 'pharmacist', 'medical_clinic'];
@@ -376,6 +490,7 @@ class ProjectController
             $locationsSelect = $this->locationsOfInterestSelectSql($connection);
             $clinicModelSelect = $this->clinicModelTypeSelectSql($connection);
             $healthcareServicesSelect = $this->healthcareServicesSelectSql($connection);
+            $projectInclusionsSelect = $this->projectInclusionsSelectSql($connection);
             $longTermFmTeamSizeSelect = $this->longTermFmTeamSizeSelectSql($connection);
             $monthlyBudgetFirstYearSelect = $this->monthlyBudgetFirstYearSelectSql($connection);
             $estClinicalHoursMdsOnSiteSelect = $this->estClinicalHoursMdsOnSiteSelectSql($connection);
@@ -397,6 +512,7 @@ class ProjectController
                         {$locationsSelect}
                         {$clinicModelSelect}
                         {$healthcareServicesSelect}
+                        {$projectInclusionsSelect}
                         {$longTermFmTeamSizeSelect}
                         {$monthlyBudgetFirstYearSelect}
                         {$estClinicalHoursMdsOnSiteSelect}
@@ -543,7 +659,8 @@ class ProjectController
                     'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
                     'level' => $project['level'] ?? null,
                     'clinic_model_type' => $project['clinic_model_type'] ?? null,
-                    'healthcare_services' => $project['healthcare_services'] ?? null,
+                    'healthcare_services' => $this->parseHealthcareServices($project['healthcare_services'] ?? null),
+                    'project_inclusions' => $this->parseProjectInclusions($project['project_inclusions'] ?? null),
                     'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
                     'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                     'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
@@ -555,6 +672,7 @@ class ProjectController
                     'project_fee_per_doctor' => $project['project_fee_per_doctor'] ?? null,
                     'cost_per_sq_ft' => $project['cost_per_sq_ft'] ?? null,
                     'mark_up' => $project['mark_up'] ?? null,
+                    'daily_patient_volumes' => $project['daily_patient_volumes'] ?? null,
                     'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                     'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                     'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -694,6 +812,7 @@ class ProjectController
             $locationsSelect = $this->locationsOfInterestSelectSql($connection);
             $clinicModelSelect = $this->clinicModelTypeSelectSql($connection);
             $healthcareServicesSelect = $this->healthcareServicesSelectSql($connection);
+            $projectInclusionsSelect = $this->projectInclusionsSelectSql($connection);
             $longTermFmTeamSizeSelect = $this->longTermFmTeamSizeSelectSql($connection);
             $monthlyBudgetFirstYearSelect = $this->monthlyBudgetFirstYearSelectSql($connection);
             $estClinicalHoursMdsOnSiteSelect = $this->estClinicalHoursMdsOnSiteSelectSql($connection);
@@ -714,6 +833,7 @@ class ProjectController
                         {$locationsSelect}
                         {$clinicModelSelect}
                         {$healthcareServicesSelect}
+                        {$projectInclusionsSelect}
                         {$longTermFmTeamSizeSelect}
                         {$monthlyBudgetFirstYearSelect}
                         {$estClinicalHoursMdsOnSiteSelect}
@@ -776,7 +896,8 @@ class ProjectController
                 'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
                 'level' => $project['level'] ?? null,
                 'clinic_model_type' => $project['clinic_model_type'] ?? null,
-                'healthcare_services' => $project['healthcare_services'] ?? null,
+                'healthcare_services' => $this->parseHealthcareServices($project['healthcare_services'] ?? null),
+                'project_inclusions' => $this->parseProjectInclusions($project['project_inclusions'] ?? null),
                 'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
                 'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                 'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
@@ -788,6 +909,7 @@ class ProjectController
                     'project_fee_per_doctor' => $project['project_fee_per_doctor'] ?? null,
                     'cost_per_sq_ft' => $project['cost_per_sq_ft'] ?? null,
                     'mark_up' => $project['mark_up'] ?? null,
+                    'daily_patient_volumes' => $project['daily_patient_volumes'] ?? null,
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                 'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                 'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -1027,7 +1149,21 @@ class ProjectController
             if ($this->healthcareServicesColumnPresent($connection)) {
                 $insertColumns .= ', healthcare_services';
                 $insertPlaceholders .= ', ?';
-                $params[] = !empty($data['healthcare_services']) ? (string) $data['healthcare_services'] : null;
+                $params[] = $this->encodeHealthcareServices(
+                    array_key_exists('healthcare_services', $data)
+                        ? $this->normalizeHealthcareServicesInput($data['healthcare_services'])
+                        : null
+                );
+            }
+
+            if ($this->projectInclusionsColumnPresent($connection)) {
+                $insertColumns .= ', project_inclusions';
+                $insertPlaceholders .= ', ?';
+                $params[] = $this->encodeProjectInclusions(
+                    array_key_exists('project_inclusions', $data)
+                        ? $this->normalizeProjectInclusionsInput($data['project_inclusions'])
+                        : null
+                );
             }
 
             if ($this->longTermFmTeamSizeColumnPresent($connection)) {
@@ -1186,7 +1322,8 @@ class ProjectController
                         'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
                         'level' => $project['level'] ?? null,
                         'clinic_model_type' => $project['clinic_model_type'] ?? null,
-                        'healthcare_services' => $project['healthcare_services'] ?? null,
+                        'healthcare_services' => $this->parseHealthcareServices($project['healthcare_services'] ?? null),
+                        'project_inclusions' => $this->parseProjectInclusions($project['project_inclusions'] ?? null),
                         'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
                         'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                         'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
@@ -1198,6 +1335,7 @@ class ProjectController
                     'project_fee_per_doctor' => $project['project_fee_per_doctor'] ?? null,
                     'cost_per_sq_ft' => $project['cost_per_sq_ft'] ?? null,
                     'mark_up' => $project['mark_up'] ?? null,
+                    'daily_patient_volumes' => $project['daily_patient_volumes'] ?? null,
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                         'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -1537,7 +1675,18 @@ class ProjectController
                 && $this->healthcareServicesColumnPresent($connection)
             ) {
                 $updateFields[] = 'healthcare_services = ?';
-                $params[] = !empty($data['healthcare_services']) ? (string) $data['healthcare_services'] : null;
+                $params[] = $this->encodeHealthcareServices(
+                    $this->normalizeHealthcareServicesInput($data['healthcare_services'])
+                );
+            }
+            if (
+                array_key_exists('project_inclusions', $data)
+                && $this->projectInclusionsColumnPresent($connection)
+            ) {
+                $updateFields[] = 'project_inclusions = ?';
+                $params[] = $this->encodeProjectInclusions(
+                    $this->normalizeProjectInclusionsInput($data['project_inclusions'])
+                );
             }
             if (
                 array_key_exists('long_term_fm_team_size', $data)
@@ -1737,6 +1886,7 @@ class ProjectController
                     'project_fee_per_doctor' => $project['project_fee_per_doctor'] ?? null,
                     'cost_per_sq_ft' => $project['cost_per_sq_ft'] ?? null,
                     'mark_up' => $project['mark_up'] ?? null,
+                    'daily_patient_volumes' => $project['daily_patient_volumes'] ?? null,
                     'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                     'client_type' => $project['client_type'] ?? null,
                     'client_table' => $project['client_table'] ?? null,
@@ -1786,7 +1936,8 @@ class ProjectController
                             'area' => isset($beforeData['area']) && $beforeData['area'] !== null ? (int)$beforeData['area'] : null,
                             'level' => $beforeData['level'] ?? null,
                             'clinic_model_type' => $beforeData['clinic_model_type'] ?? null,
-                            'healthcare_services' => $beforeData['healthcare_services'] ?? null,
+                            'healthcare_services' => $this->parseHealthcareServices($beforeData['healthcare_services'] ?? null),
+                            'project_inclusions' => $this->parseProjectInclusions($beforeData['project_inclusions'] ?? null),
                             'long_term_fm_team_size' => $beforeData['long_term_fm_team_size'] ?? null,
                             'monthly_budget_first_year' => $beforeData['monthly_budget_first_year'] ?? null,
                             'est_clinical_hours_mds_on_site' => $beforeData['est_clinical_hours_mds_on_site'] ?? null,
@@ -1798,6 +1949,7 @@ class ProjectController
                             'project_fee_per_doctor' => $beforeData['project_fee_per_doctor'] ?? null,
                             'cost_per_sq_ft' => $beforeData['cost_per_sq_ft'] ?? null,
                             'mark_up' => $beforeData['mark_up'] ?? null,
+                            'daily_patient_volumes' => $beforeData['daily_patient_volumes'] ?? null,
                             'prj_manager' => $beforeData['prj_manager'] ? (int)$beforeData['prj_manager'] : null,
                             'created_by' => $beforeData['created_by'] ? (int)$beforeData['created_by'] : null
                         ],
@@ -1877,7 +2029,8 @@ class ProjectController
                         'area' => isset($project['area']) && $project['area'] !== null ? (int)$project['area'] : null,
                         'level' => $project['level'] ?? null,
                         'clinic_model_type' => $project['clinic_model_type'] ?? null,
-                        'healthcare_services' => $project['healthcare_services'] ?? null,
+                        'healthcare_services' => $this->parseHealthcareServices($project['healthcare_services'] ?? null),
+                        'project_inclusions' => $this->parseProjectInclusions($project['project_inclusions'] ?? null),
                         'long_term_fm_team_size' => $project['long_term_fm_team_size'] ?? null,
                         'monthly_budget_first_year' => $project['monthly_budget_first_year'] ?? null,
                         'est_clinical_hours_mds_on_site' => $project['est_clinical_hours_mds_on_site'] ?? null,
@@ -1889,6 +2042,7 @@ class ProjectController
                     'project_fee_per_doctor' => $project['project_fee_per_doctor'] ?? null,
                     'cost_per_sq_ft' => $project['cost_per_sq_ft'] ?? null,
                     'mark_up' => $project['mark_up'] ?? null,
+                    'daily_patient_volumes' => $project['daily_patient_volumes'] ?? null,
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'project_foreman_id' => isset($project['project_foreman_id']) && $project['project_foreman_id']
                             ? (int) $project['project_foreman_id']
@@ -2234,12 +2388,37 @@ class ProjectController
             }
         }
 
-        if (array_key_exists('healthcare_services', $data) && $data['healthcare_services'] !== null && $data['healthcare_services'] !== '') {
-            if (!in_array($data['healthcare_services'], self::ALLOWED_HEALTHCARE_SERVICES, true)) {
+        if (array_key_exists('healthcare_services', $data) && $data['healthcare_services'] !== null) {
+            if (!is_array($data['healthcare_services'])) {
                 return [
                     'valid' => false,
-                    'message' => 'Invalid healthcare_services. Allowed: ' . implode(', ', self::ALLOWED_HEALTHCARE_SERVICES),
+                    'message' => 'healthcare_services must be an array of services or null',
                 ];
+            }
+            foreach ($data['healthcare_services'] as $service) {
+                if (!is_string($service) || !in_array($service, self::ALLOWED_HEALTHCARE_SERVICES, true)) {
+                    return [
+                        'valid' => false,
+                        'message' => 'Each healthcare_services item must be an allowed service',
+                    ];
+                }
+            }
+        }
+
+        if (array_key_exists('project_inclusions', $data) && $data['project_inclusions'] !== null) {
+            if (!is_array($data['project_inclusions'])) {
+                return [
+                    'valid' => false,
+                    'message' => 'project_inclusions must be an array of inclusions or null',
+                ];
+            }
+            foreach ($data['project_inclusions'] as $inclusion) {
+                if (!is_string($inclusion) || !in_array($inclusion, self::ALLOWED_PROJECT_INCLUSIONS, true)) {
+                    return [
+                        'valid' => false,
+                        'message' => 'Each project_inclusions item must be an allowed inclusion',
+                    ];
+                }
             }
         }
 
@@ -3263,6 +3442,26 @@ class ProjectController
         return ', p.healthcare_services';
     }
 
+    private function projectInclusionsColumnPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        if (self::$projectInclusionsColumnExists !== null) {
+            return self::$projectInclusionsColumnExists;
+        }
+        try {
+            self::$projectInclusionsColumnExists = !empty($connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE 'project_inclusions'"
+            )->fetchOne());
+        } catch (\Exception $e) {
+            self::$projectInclusionsColumnExists = false;
+        }
+        return self::$projectInclusionsColumnExists;
+    }
+
+    private function projectInclusionsSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        return $this->projectInclusionsColumnPresent($connection) ? ', p.project_inclusions' : '';
+    }
+
     private function longTermFmTeamSizeColumnPresent(\Doctrine\DBAL\Connection $connection): bool
     {
         if (self::$longTermFmTeamSizeColumnExists !== null) {
@@ -3429,6 +3628,105 @@ class ProjectController
     private function marketingStrategySelectSql(\Doctrine\DBAL\Connection $connection): string
     {
         return $this->marketingStrategyColumnPresent($connection) ? ', p.marketing_strategy' : '';
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<string>|null
+     */
+    private function parseHealthcareServices($raw): ?array
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (is_array($raw)) {
+            return $this->normalizeHealthcareServicesInput($raw);
+        }
+        if (!is_string($raw)) {
+            return null;
+        }
+        $decoded = json_decode($raw, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            return $this->normalizeHealthcareServicesInput($decoded);
+        }
+        // Legacy single VARCHAR value
+        return in_array($raw, self::ALLOWED_HEALTHCARE_SERVICES, true) ? [$raw] : null;
+    }
+
+    /**
+     * @param mixed $input
+     * @return list<string>|null
+     */
+    private function normalizeHealthcareServicesInput($input): ?array
+    {
+        if ($input === null || !is_array($input)) {
+            return $input === null ? null : [];
+        }
+        $result = [];
+        foreach ($input as $service) {
+            if (is_string($service)
+                && in_array($service, self::ALLOWED_HEALTHCARE_SERVICES, true)
+                && !in_array($service, $result, true)
+            ) {
+                $result[] = $service;
+            }
+        }
+        return $result;
+    }
+
+    /** @param list<string>|null $services */
+    private function encodeHealthcareServices(?array $services): ?string
+    {
+        return $services === null ? null : json_encode(array_values($services));
+    }
+
+    /**
+     * @param mixed $raw
+     * @return list<string>|null
+     */
+    private function parseProjectInclusions($raw): ?array
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (is_array($raw)) {
+            return $this->normalizeProjectInclusionsInput($raw);
+        }
+        if (!is_string($raw)) {
+            return null;
+        }
+        $decoded = json_decode($raw, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($decoded)) {
+            return $this->normalizeProjectInclusionsInput($decoded);
+        }
+        return in_array($raw, self::ALLOWED_PROJECT_INCLUSIONS, true) ? [$raw] : null;
+    }
+
+    /**
+     * @param mixed $input
+     * @return list<string>|null
+     */
+    private function normalizeProjectInclusionsInput($input): ?array
+    {
+        if ($input === null || !is_array($input)) {
+            return $input === null ? null : [];
+        }
+        $result = [];
+        foreach ($input as $item) {
+            if (is_string($item)
+                && in_array($item, self::ALLOWED_PROJECT_INCLUSIONS, true)
+                && !in_array($item, $result, true)
+            ) {
+                $result[] = $item;
+            }
+        }
+        return $result;
+    }
+
+    /** @param list<string>|null $items */
+    private function encodeProjectInclusions(?array $items): ?string
+    {
+        return $items === null ? null : json_encode(array_values($items));
     }
 
     private function optionalProjectTextColumnPresent(
