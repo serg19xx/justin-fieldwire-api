@@ -210,6 +210,17 @@ class ProjectController
 
     private static ?bool $marketingStrategyColumnExists = null;
 
+    /** @var array<string, bool|null> */
+    private static array $optionalProjectTextColumnExists = [];
+
+    /** Optional free-text project columns: field => max length */
+    private const OPTIONAL_PROJECT_TEXT_FIELDS = [
+        'total_doctors' => 100,
+        'project_fee_per_doctor' => 100,
+        'cost_per_sq_ft' => 100,
+        'mark_up' => 100,
+    ];
+
     private const ALLOWED_CLIENT_TABLES = ['pharma', 'physician', 'pharmacist', 'medical_clinic'];
 
     public function __construct(Logger $logger)
@@ -372,6 +383,7 @@ class ProjectController
             $operationalHoursSelect = $this->operationalHoursSelectSql($connection);
             $contentsOfSpaceSelect = $this->contentsOfSpaceSelectSql($connection);
             $marketingStrategySelect = $this->marketingStrategySelectSql($connection);
+            $optionalProjectTextSelect = $this->optionalProjectTextFieldsSelectSql($connection);
 
             // Базовый SQL запрос
             $sql = "SELECT
@@ -392,6 +404,7 @@ class ProjectController
                         {$operationalHoursSelect}
                         {$contentsOfSpaceSelect}
                         {$marketingStrategySelect}
+                        {$optionalProjectTextSelect}
                     FROM fw_projects p
                     LEFT JOIN fw_v_users u ON p.prj_manager = u.id
                     LEFT JOIN fw_v_users creator ON p.created_by = creator.id
@@ -538,6 +551,10 @@ class ProjectController
                     'operational_hours' => $this->parseOperationalHours($project['operational_hours'] ?? null),
                     'contents_of_space' => $this->parseContentsOfSpace($project['contents_of_space'] ?? null),
                     'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
+                    'total_doctors' => $project['total_doctors'] ?? null,
+                    'project_fee_per_doctor' => $project['project_fee_per_doctor'] ?? null,
+                    'cost_per_sq_ft' => $project['cost_per_sq_ft'] ?? null,
+                    'mark_up' => $project['mark_up'] ?? null,
                     'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                     'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                     'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -684,6 +701,7 @@ class ProjectController
             $operationalHoursSelect = $this->operationalHoursSelectSql($connection);
             $contentsOfSpaceSelect = $this->contentsOfSpaceSelectSql($connection);
             $marketingStrategySelect = $this->marketingStrategySelectSql($connection);
+            $optionalProjectTextSelect = $this->optionalProjectTextFieldsSelectSql($connection);
             
             $sql = "SELECT
                         p.id, p.prj_name, p.address, p.date_start, p.date_end,
@@ -703,6 +721,7 @@ class ProjectController
                         {$operationalHoursSelect}
                         {$contentsOfSpaceSelect}
                         {$marketingStrategySelect}
+                        {$optionalProjectTextSelect}
                     FROM fw_projects p
                     LEFT JOIN fw_v_users u ON p.prj_manager = u.id
                     LEFT JOIN fw_v_users creator ON p.created_by = creator.id
@@ -765,6 +784,10 @@ class ProjectController
                 'operational_hours' => $this->parseOperationalHours($project['operational_hours'] ?? null),
                 'contents_of_space' => $this->parseContentsOfSpace($project['contents_of_space'] ?? null),
                 'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
+                    'total_doctors' => $project['total_doctors'] ?? null,
+                    'project_fee_per_doctor' => $project['project_fee_per_doctor'] ?? null,
+                    'cost_per_sq_ft' => $project['cost_per_sq_ft'] ?? null,
+                    'mark_up' => $project['mark_up'] ?? null,
                 'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                 'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                 'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -1069,6 +1092,15 @@ class ProjectController
                 );
             }
 
+            foreach (self::OPTIONAL_PROJECT_TEXT_FIELDS as $field => $_max) {
+                if (!$this->optionalProjectTextColumnPresent($connection, $field)) {
+                    continue;
+                }
+                $insertColumns .= ", {$field}";
+                $insertPlaceholders .= ', ?';
+                $params[] = $this->normalizeOptionalProjectTextValue($data[$field] ?? null);
+            }
+
             $sql = "INSERT INTO fw_projects ({$insertColumns}) VALUES ({$insertPlaceholders})";
 
             $connection->executeStatement($sql, $params);
@@ -1162,6 +1194,10 @@ class ProjectController
                         'operational_hours' => $this->parseOperationalHours($project['operational_hours'] ?? null),
                         'contents_of_space' => $this->parseContentsOfSpace($project['contents_of_space'] ?? null),
                         'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
+                    'total_doctors' => $project['total_doctors'] ?? null,
+                    'project_fee_per_doctor' => $project['project_fee_per_doctor'] ?? null,
+                    'cost_per_sq_ft' => $project['cost_per_sq_ft'] ?? null,
+                    'mark_up' => $project['mark_up'] ?? null,
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'created_by' => $project['created_by'] ? (int)$project['created_by'] : null,
                         'created_by_name' => $project['created_by_first_name'] && $project['created_by_last_name']
@@ -1574,6 +1610,17 @@ class ProjectController
                 );
             }
 
+            foreach (self::OPTIONAL_PROJECT_TEXT_FIELDS as $field => $_max) {
+                if (
+                    !array_key_exists($field, $data)
+                    || !$this->optionalProjectTextColumnPresent($connection, $field)
+                ) {
+                    continue;
+                }
+                $updateFields[] = "{$field} = ?";
+                $params[] = $this->normalizeOptionalProjectTextValue($data[$field]);
+            }
+
             if (empty($updateFields)) {
                 Flight::json([
                     'error_code' => 400,
@@ -1686,6 +1733,10 @@ class ProjectController
                     'operational_hours' => $this->parseOperationalHours($project['operational_hours'] ?? null),
                     'contents_of_space' => $this->parseContentsOfSpace($project['contents_of_space'] ?? null),
                     'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
+                    'total_doctors' => $project['total_doctors'] ?? null,
+                    'project_fee_per_doctor' => $project['project_fee_per_doctor'] ?? null,
+                    'cost_per_sq_ft' => $project['cost_per_sq_ft'] ?? null,
+                    'mark_up' => $project['mark_up'] ?? null,
                     'client_id' => $project['client_id'] ? (int)$project['client_id'] : null,
                     'client_type' => $project['client_type'] ?? null,
                     'client_table' => $project['client_table'] ?? null,
@@ -1743,6 +1794,10 @@ class ProjectController
                             'operational_hours' => $this->parseOperationalHours($beforeData['operational_hours'] ?? null),
                             'contents_of_space' => $this->parseContentsOfSpace($beforeData['contents_of_space'] ?? null),
                             'marketing_strategy' => $this->parseMarketingStrategy($beforeData['marketing_strategy'] ?? null),
+                            'total_doctors' => $beforeData['total_doctors'] ?? null,
+                            'project_fee_per_doctor' => $beforeData['project_fee_per_doctor'] ?? null,
+                            'cost_per_sq_ft' => $beforeData['cost_per_sq_ft'] ?? null,
+                            'mark_up' => $beforeData['mark_up'] ?? null,
                             'prj_manager' => $beforeData['prj_manager'] ? (int)$beforeData['prj_manager'] : null,
                             'created_by' => $beforeData['created_by'] ? (int)$beforeData['created_by'] : null
                         ],
@@ -1830,6 +1885,10 @@ class ProjectController
                         'operational_hours' => $this->parseOperationalHours($project['operational_hours'] ?? null),
                         'contents_of_space' => $this->parseContentsOfSpace($project['contents_of_space'] ?? null),
                         'marketing_strategy' => $this->parseMarketingStrategy($project['marketing_strategy'] ?? null),
+                    'total_doctors' => $project['total_doctors'] ?? null,
+                    'project_fee_per_doctor' => $project['project_fee_per_doctor'] ?? null,
+                    'cost_per_sq_ft' => $project['cost_per_sq_ft'] ?? null,
+                    'mark_up' => $project['mark_up'] ?? null,
                         'prj_manager' => $project['prj_manager'] ? (int)$project['prj_manager'] : null,
                         'project_foreman_id' => isset($project['project_foreman_id']) && $project['project_foreman_id']
                             ? (int) $project['project_foreman_id']
@@ -2204,6 +2263,24 @@ class ProjectController
                 return [
                     'valid' => false,
                     'message' => 'monthly_budget_first_year must not exceed 100 characters',
+                ];
+            }
+        }
+
+        foreach (self::OPTIONAL_PROJECT_TEXT_FIELDS as $field => $maxLength) {
+            if (!array_key_exists($field, $data) || $data[$field] === null || $data[$field] === '') {
+                continue;
+            }
+            if (!is_string($data[$field]) && !is_numeric($data[$field])) {
+                return [
+                    'valid' => false,
+                    'message' => "{$field} must be a string or null",
+                ];
+            }
+            if (strlen(trim((string) $data[$field])) > $maxLength) {
+                return [
+                    'valid' => false,
+                    'message' => "{$field} must not exceed {$maxLength} characters",
                 ];
             }
         }
@@ -3352,6 +3429,51 @@ class ProjectController
     private function marketingStrategySelectSql(\Doctrine\DBAL\Connection $connection): string
     {
         return $this->marketingStrategyColumnPresent($connection) ? ', p.marketing_strategy' : '';
+    }
+
+    private function optionalProjectTextColumnPresent(
+        \Doctrine\DBAL\Connection $connection,
+        string $field
+    ): bool {
+        if (!array_key_exists($field, self::OPTIONAL_PROJECT_TEXT_FIELDS)) {
+            return false;
+        }
+        if (array_key_exists($field, self::$optionalProjectTextColumnExists)
+            && self::$optionalProjectTextColumnExists[$field] !== null
+        ) {
+            return self::$optionalProjectTextColumnExists[$field];
+        }
+        try {
+            self::$optionalProjectTextColumnExists[$field] = !empty($connection->executeQuery(
+                "SHOW COLUMNS FROM fw_projects LIKE '{$field}'"
+            )->fetchOne());
+        } catch (\Exception $e) {
+            self::$optionalProjectTextColumnExists[$field] = false;
+        }
+        return (bool) self::$optionalProjectTextColumnExists[$field];
+    }
+
+    private function optionalProjectTextFieldsSelectSql(\Doctrine\DBAL\Connection $connection): string
+    {
+        $parts = [];
+        foreach (array_keys(self::OPTIONAL_PROJECT_TEXT_FIELDS) as $field) {
+            if ($this->optionalProjectTextColumnPresent($connection, $field)) {
+                $parts[] = ", p.{$field}";
+            }
+        }
+        return implode('', $parts);
+    }
+
+    /**
+     * @param mixed $value
+     */
+    private function normalizeOptionalProjectTextValue($value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        $trimmed = trim((string) $value);
+        return $trimmed === '' ? null : $trimmed;
     }
 
     /**
