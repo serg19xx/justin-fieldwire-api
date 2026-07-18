@@ -271,19 +271,7 @@ class DriverController
 
             $sql = "UPDATE driver SET " . implode(', ', $fields) . " WHERE id = ?";
             
-            $stmt = $this->database->getConnection()->executeStatement($sql, $values);
-            
-            $affectedRows = $stmt->rowCount();
-
-            if ($affectedRows === 0) {
-                Flight::json([
-                    'error_code' => 400,
-                    'status' => 'error',
-                    'message' => 'No changes made to driver',
-                    'data' => null
-                ], 400);
-                return;
-            }
+            $affectedRows = $this->database->getConnection()->executeStatement($sql, $values);
 
             Flight::json([
                 'error_code' => 0,
@@ -340,9 +328,7 @@ class DriverController
 
             // Удалить водителя
             $sql = "DELETE FROM driver WHERE id = ?";
-            $stmt = $this->database->getConnection()->executeStatement($sql, [$id]);
-            
-            $affectedRows = $stmt->rowCount();
+            $affectedRows = $this->database->getConnection()->executeStatement($sql, [$id]);
 
             if ($affectedRows === 0) {
                 Flight::json([

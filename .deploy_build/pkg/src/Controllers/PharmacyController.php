@@ -3,6 +3,8 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Support\ClientListContactFilter;
+use App\Support\ClientListSort;
 use Flight;
 use Exception;
 use Monolog\Logger;
@@ -53,6 +55,10 @@ class PharmacyController
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
+            $city = Flight::request()->query->city ?? null;
+            $subType = Flight::request()->query->sub_type ?? null;
+            $salesCycle = Flight::request()->query->sales_cycle ?? null;
+            $search = trim((string)(Flight::request()->query->search ?? ''));
             $page = (int)(Flight::request()->query->page ?? 1);
             $limit = (int)(Flight::request()->query->limit ?? 50);
             $offset = ($page - 1) * $limit;
@@ -70,6 +76,41 @@ class PharmacyController
                 $params[] = $region;
             }
 
+            if ($city) {
+                $whereConditions[] = "city = ?";
+                $params[] = $city;
+            }
+
+            if ($subType) {
+                $whereConditions[] = "sub_type = ?";
+                $params[] = $subType;
+            }
+
+            if ($salesCycle) {
+                $whereConditions[] = "sales_cycle = ?";
+                $params[] = $salesCycle;
+            }
+
+            if ($search !== '') {
+                if (ctype_digit($search)) {
+                    $whereConditions[] = "(id = ? OR operName LIKE ? OR legalName LIKE ? OR email LIKE ? OR contact LIKE ? OR city LIKE ? OR street LIKE ?)";
+                    $searchTerm = '%' . $search . '%';
+                    array_push($params, (int)$search, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm);
+                } else {
+                    $whereConditions[] = "(operName LIKE ? OR legalName LIKE ? OR email LIKE ? OR contact LIKE ? OR city LIKE ? OR street LIKE ?)";
+                    $searchTerm = '%' . $search . '%';
+                    array_push($params, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm);
+                }
+            }
+
+            ClientListContactFilter::apply(
+                'pharma',
+                $whereConditions,
+                Flight::request()->query->nonEmpty ?? null,
+                Flight::request()->query->empty ?? null,
+                Flight::request()->query->missingContacts ?? null,
+            );
+
             $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
 
             // Получить общее количество
@@ -77,8 +118,23 @@ class PharmacyController
             $countResult = $this->database->getConnection()->executeQuery($countSql, $params);
             $total = $countResult->fetchAssociative()['total'];
 
+            $orderBy = ClientListSort::resolveOrderBy(
+                Flight::request()->query->sortBy ?? null,
+                Flight::request()->query->sortDir ?? null,
+                [
+                    'id' => 'id',
+                    'operName' => 'operName',
+                    'legalName' => 'legalName',
+                    'country' => 'country',
+                    'region' => 'region',
+                    'city' => 'city',
+                    'email' => 'email',
+                ],
+                'operName',
+            );
+
             // Получить аптеки
-            $sql = "SELECT id, operName, legalName, contact, owner, manager, unitNumb, phone, cell, email, fax, twilioPhone, fullAddress, street, city, region, country, postcode, lat, lng, `no-centrals`, otpFee, marketingFee, sub_type, comp_volumes, sales_cycle, notes FROM pharma $whereClause ORDER BY operName LIMIT $limit OFFSET $offset";
+            $sql = "SELECT id, operName, legalName, contact, owner, manager, unitNumb, phone, cell, email, fax, twilioPhone, fullAddress, street, city, region, country, postcode, lat, lng, `no-centrals`, otpFee, marketingFee, sub_type, comp_volumes, sales_cycle, notes FROM pharma $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
             $pharmacies = $result->fetchAllAssociative();
@@ -243,6 +299,14 @@ class PharmacyController
 
             $data = Flight::request()->data;
 
+            $allowedFields = [
+                'operName', 'legalName', 'contact', 'owner', 'manager',
+                'unitNumb', 'phone', 'cell', 'email', 'fax', 'twilioPhone',
+                'fullAddress', 'street', 'city', 'region', 'country', 'postcode',
+                'lat', 'lng', 'otpFee', 'marketingFee', 'sub_type', 'comp_volumes',
+                'sales_cycle', 'notes',
+            ];
+
             // Проверить существование аптеки
             $checkSql = "SELECT id FROM pharma WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
@@ -262,28 +326,27 @@ class PharmacyController
             $values = [];
 
             foreach ($data as $key => $value) {
-                if (in_array($key, ['id'])) continue; // Пропускаем ID
+                if (in_array($key, ['id'], true)) continue;
+                if (!in_array($key, $allowedFields, true)) continue;
                 $fields[] = "$key = ?";
                 $values[] = $value;
+            }
+
+            if (empty($fields)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'No valid fields to update',
+                    'data' => null
+                ], 400);
+                return;
             }
 
             $values[] = $id; // Для WHERE условия
 
             $sql = "UPDATE pharma SET " . implode(', ', $fields) . " WHERE id = ?";
             
-            $stmt = $this->database->getConnection()->executeStatement($sql, $values);
-            
-            $affectedRows = $stmt->rowCount();
-
-            if ($affectedRows === 0) {
-                Flight::json([
-                    'error_code' => 400,
-                    'status' => 'error',
-                    'message' => 'No changes made to pharmacy',
-                    'data' => null
-                ], 400);
-                return;
-            }
+            $affectedRows = $this->database->getConnection()->executeStatement($sql, $values);
 
             Flight::json([
                 'error_code' => 0,
@@ -340,9 +403,7 @@ class PharmacyController
 
             // Удалить аптеку
             $sql = "DELETE FROM pharma WHERE id = ?";
-            $stmt = $this->database->getConnection()->executeStatement($sql, [$id]);
-            
-            $affectedRows = $stmt->rowCount();
+            $affectedRows = $this->database->getConnection()->executeStatement($sql, [$id]);
 
             if ($affectedRows === 0) {
                 Flight::json([

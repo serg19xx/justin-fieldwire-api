@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Database\Database;
 use App\Services\EventLoggingService;
+use App\Services\FieldWorkNotificationService;
 use App\Services\TaskAuthorizationService;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception;
@@ -51,6 +52,7 @@ class TaskController
     private Database $database;
     private EventLoggingService $eventLoggingService;
     private TaskAuthorizationService $taskAuth;
+    private FieldWorkNotificationService $fieldWorkNotifications;
 
     public function __construct(Logger $logger)
     {
@@ -60,6 +62,7 @@ class TaskController
             $this->database = new Database();
             $this->eventLoggingService = new EventLoggingService($logger);
             $this->taskAuth = new TaskAuthorizationService();
+            $this->fieldWorkNotifications = new FieldWorkNotificationService($logger);
         } catch (\Exception $e) {
             $this->logger->error('Failed to initialize TaskController', [
                 'error' => $e->getMessage()
@@ -2059,6 +2062,8 @@ class TaskController
                     );
                 }
 
+                $notifyUrgent = $this->isTruthyRequestFlag($data['notify_urgent'] ?? $data['urgent'] ?? null);
+
                 if (
                     array_key_exists('field_work_started_at', $data)
                     && ($beforeData['field_work_started_at'] ?? null) !== ($task['field_work_started_at'] ?? null)
@@ -2073,6 +2078,16 @@ class TaskController
                         'TASK_FIELD_WORK_STARTED',
                         'started',
                     );
+                    if (($task['field_work_started_at'] ?? null) !== null) {
+                        $this->fieldWorkNotifications->notifyManagers(
+                            $projectId,
+                            $taskId,
+                            $task,
+                            $actorId,
+                            'started',
+                            $notifyUrgent,
+                        );
+                    }
                 }
 
                 if (
@@ -2089,6 +2104,16 @@ class TaskController
                         'TASK_FIELD_WORK_ENDED',
                         'ended',
                     );
+                    if (($task['field_work_ended_at'] ?? null) !== null) {
+                        $this->fieldWorkNotifications->notifyManagers(
+                            $projectId,
+                            $taskId,
+                            $task,
+                            $actorId,
+                            'ended',
+                            $notifyUrgent,
+                        );
+                    }
                 }
 
                 // Если изменилось расписание (start_planned, end_planned, start_time или end_time), логируем событие
@@ -4658,6 +4683,22 @@ class TaskController
         } catch (\Exception) {
             return null;
         }
+    }
+
+    private function isTruthyRequestFlag(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_float($value)) {
+            return (int) $value === 1;
+        }
+        if (!is_string($value)) {
+            return false;
+        }
+        $normalized = strtolower(trim($value));
+
+        return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
     }
 
     /**

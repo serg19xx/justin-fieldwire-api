@@ -16,6 +16,9 @@ use OpenApi\Annotations as OA;
  */
 class PlanController
 {
+    /** Synthetic plan-tree file ids: -(offset + photoId). Must not overlap schedule slot docs (-docId). */
+    private const TASK_FIELD_PHOTO_PLAN_FILE_ID_OFFSET = 1000000000;
+
     private Logger $logger;
     private Database $database;
 
@@ -158,6 +161,8 @@ class PlanController
             }
             unset($node);
 
+            $this->mergeTaskFieldPhotosIntoFolderTree($idToNode, (int) $projectId, $connection);
+
             $scheduleBranch = $this->buildScheduleSlotDocumentsTreeRoot((int) $projectId, $connection);
             if ($scheduleBranch !== null) {
                 $roots[] = $scheduleBranch;
@@ -213,6 +218,9 @@ class PlanController
                 }
 
                 $payload = $this->getScheduleSlotDocumentsFolderPayload($projectId, $folderId, $connection);
+                if ($payload === null) {
+                    $payload = $this->getTaskFieldPhotosFolderPayload($projectId, $folderId, $connection);
+                }
                 if ($payload === null) {
                     Flight::json([
                         'error_code' => 404,
@@ -850,6 +858,30 @@ class PlanController
     {
         try {
             $connection = $this->database->getConnection();
+
+            // Virtual plan tree files for task field photos use -(offset + photoId).
+            if ($fileId <= -self::TASK_FIELD_PHOTO_PLAN_FILE_ID_OFFSET) {
+                $photoId = -self::TASK_FIELD_PHOTO_PLAN_FILE_ID_OFFSET - $fileId;
+                if ($photoId <= 0 || !$this->taskFieldPhotosTableExists($connection)) {
+                    Flight::json([
+                        'error' => 'File not found',
+                    ], 404);
+                    return;
+                }
+                $loc = $connection->executeQuery(
+                    'SELECT project_id, task_id FROM fw_task_field_photos WHERE id = ? AND deleted_at IS NULL',
+                    [$photoId]
+                )->fetchAssociative();
+                if (!$loc) {
+                    Flight::json([
+                        'error' => 'File not found',
+                    ], 404);
+                    return;
+                }
+                $fieldPhotos = new TaskFieldPhotoController($this->logger);
+                $fieldPhotos->download((int) $loc['project_id'], (int) $loc['task_id'], $photoId);
+                return;
+            }
 
             // Virtual plan tree files for schedule slots use negative ids (-schedule_document_id).
             if ($fileId < 0) {
@@ -2389,6 +2421,453 @@ class PlanController
         usort(
             $subfolders,
             static fn ($a, $b) => strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''))
+        );
+
+        return [
+            'folder' => [
+                'id' => $n['id'],
+                'name' => $n['name'],
+                'parent_id' => $n['parent_id'],
+                'edited' => $n['edited'],
+                'created_at' => $n['created_at'],
+                'updated_at' => $n['updated_at'],
+            ],
+            'subfolders' => $subfolders,
+            'files' => $n['files'],
+        ];
+    }
+
+    private function taskFieldPhotosTableExists($connection): bool
+    {
+        try {
+            $n = $connection->executeQuery(
+                'SELECT COUNT(*) FROM information_schema.tables
+                 WHERE table_schema = DATABASE() AND table_name = ?',
+                ['fw_task_field_photos']
+            )->fetchOne();
+
+            return (int) $n > 0;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    private function findExecutionLogsFolderId($connection, int $projectId): ?int
+    {
+        $row = $connection->executeQuery(
+            'SELECT id FROM fw_plan_folders
+             WHERE project_id = ? AND LOWER(TRIM(name)) = ?
+             ORDER BY id ASC
+             LIMIT 1',
+            [$projectId, 'execution logs']
+        )->fetchAssociative();
+        if (!$row) {
+            return null;
+        }
+
+        return (int) $row['id'];
+    }
+
+    /**
+     * Stable synthetic folder id (negative) for virtual task field photo paths.
+     */
+    private function taskFieldPhotoVirtualFolderId(string $pathKey): int
+    {
+        $crc = crc32($pathKey);
+        if ($crc < 0) {
+            $crc += 4294967296;
+        }
+        $masked = ($crc & 0x7FFFFFFF) | 0x40000000;
+
+        return -(int) $masked;
+    }
+
+    /**
+     * @return array{flat: array<int, array<string, mixed>>, task_root_ids: list<int>}|null
+     */
+    private function buildTaskFieldPhotosFlat(int $projectId, int $executionLogsFolderId, $connection): ?array
+    {
+        if (!$this->taskFieldPhotosTableExists($connection)) {
+            return null;
+        }
+
+        $flat = [];
+        $taskRootIds = [];
+
+        $ensureLink = static function (array &$flat, int $parentId, int $childId): void {
+            if (!isset($flat[$parentId]['child_folder_ids'])) {
+                $flat[$parentId]['child_folder_ids'] = [];
+            }
+            if (!in_array($childId, $flat[$parentId]['child_folder_ids'], true)) {
+                $flat[$parentId]['child_folder_ids'][] = $childId;
+            }
+        };
+
+        $rows = $connection->executeQuery(
+            'SELECT p.id, p.file_name, p.original_name, p.mime_type, p.file_size, p.uploaded_by, p.uploaded_at,
+                    p.slot, p.work_date, p.task_id, p.project_id,
+                    t.name AS task_name, t.start_planned, t.end_planned
+             FROM fw_task_field_photos p
+             LEFT JOIN fw_prj_tasks t ON t.id = p.task_id AND t.project_id = p.project_id
+             WHERE p.project_id = ? AND p.deleted_at IS NULL
+             ORDER BY t.start_planned, t.name, p.work_date, p.slot, p.uploaded_at, p.id',
+            [$projectId]
+        )->fetchAllAssociative();
+
+        foreach ($rows as $doc) {
+            $taskId = (int) $doc['task_id'];
+            $taskName = isset($doc['task_name']) && is_string($doc['task_name']) ? trim($doc['task_name']) : '';
+            $taskLabel = $this->formatTaskFieldPhotoTaskFolderName(
+                $doc['start_planned'] ?? null,
+                $doc['end_planned'] ?? null,
+                $taskName,
+                $taskId
+            );
+            $taskSortKey = $this->normalizeDateOnly($doc['start_planned'] ?? null) ?? '9999-12-31';
+
+            $wd = $doc['work_date'];
+            if ($wd instanceof \DateTimeInterface) {
+                $wd = $wd->format('Y-m-d');
+            } else {
+                $wd = (string) $wd;
+            }
+            $workDayLabel = $this->formatTaskFieldPhotoWorkDayLabel($wd);
+            $slot = (string) $doc['slot'];
+
+            $taskKey = 'tfp:task:' . $projectId . ':' . $taskId;
+            $taskFolderId = $this->taskFieldPhotoVirtualFolderId($taskKey);
+
+            $dateKey = 'tfp:date:' . $projectId . ':' . $taskId . ':' . $wd;
+            $dateFolderId = $this->taskFieldPhotoVirtualFolderId($dateKey);
+
+            if (!isset($flat[$taskFolderId])) {
+                $flat[$taskFolderId] = [
+                    'id' => $taskFolderId,
+                    'name' => $taskLabel,
+                    'sort_key' => $taskSortKey,
+                    'parent_id' => $executionLogsFolderId,
+                    'edited' => 0,
+                    'created_at' => null,
+                    'updated_at' => null,
+                    'child_folder_ids' => [],
+                    'files' => [],
+                ];
+                $taskRootIds[] = $taskFolderId;
+            }
+
+            if (!isset($flat[$dateFolderId])) {
+                $flat[$dateFolderId] = [
+                    'id' => $dateFolderId,
+                    'name' => $workDayLabel,
+                    'sort_key' => $wd,
+                    'parent_id' => $taskFolderId,
+                    'edited' => 0,
+                    'created_at' => null,
+                    'updated_at' => null,
+                    'child_folder_ids' => [],
+                    'files' => [],
+                ];
+                $ensureLink($flat, $taskFolderId, $dateFolderId);
+            }
+
+            $flat[$dateFolderId]['files'][] = $this->formatTaskFieldPhotoAsPlanFile($doc, $dateFolderId, $projectId);
+        }
+
+        foreach ($flat as &$node) {
+            if (($node['files'] ?? []) === []) {
+                continue;
+            }
+            usort(
+                $node['files'],
+                static function (array $a, array $b): int {
+                    $slotOrder = static function (array $file): int {
+                        $slot = strtolower((string) ($file['slot'] ?? ''));
+                        if ($slot === 'before') {
+                            return 0;
+                        }
+                        if ($slot === 'after') {
+                            return 1;
+                        }
+
+                        return 2;
+                    };
+                    $sa = $slotOrder($a);
+                    $sb = $slotOrder($b);
+                    if ($sa !== $sb) {
+                        return $sa <=> $sb;
+                    }
+                    $ta = (string) ($a['uploaded_at'] ?? '');
+                    $tb = (string) ($b['uploaded_at'] ?? '');
+                    $cmp = strcmp($ta, $tb);
+                    if ($cmp !== 0) {
+                        return $cmp;
+                    }
+
+                    return ((int) ($a['field_work_photo_id'] ?? 0)) <=> ((int) ($b['field_work_photo_id'] ?? 0));
+                }
+            );
+        }
+        unset($node);
+
+        return [
+            'flat' => $flat,
+            'task_root_ids' => array_values(array_unique($taskRootIds)),
+        ];
+    }
+
+    private function normalizeDateOnly(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return $value->format('Y-m-d');
+        }
+        $s = trim((string) $value);
+        if ($s === '') {
+            return null;
+        }
+        if (strlen($s) >= 10 && preg_match('/^\d{4}-\d{2}-\d{2}/', $s) === 1) {
+            return substr($s, 0, 10);
+        }
+
+        return null;
+    }
+
+    private function formatShortPlanDate(?string $dateYmd): ?string
+    {
+        if ($dateYmd === null) {
+            return null;
+        }
+        try {
+            return (new \DateTimeImmutable($dateYmd))->format('j M');
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function formatTaskFieldPhotoWorkDayLabel(string $workDateYmd): string
+    {
+        $normalized = $this->normalizeDateOnly($workDateYmd);
+        if ($normalized === null) {
+            return $workDateYmd;
+        }
+        try {
+            return (new \DateTimeImmutable($normalized))->format('j M, D');
+        } catch (\Throwable) {
+            return $workDateYmd;
+        }
+    }
+
+    private function formatTaskFieldPhotoTaskFolderName(
+        mixed $startPlanned,
+        mixed $endPlanned,
+        string $taskName,
+        int $taskId
+    ): string {
+        $name = $taskName !== '' ? $taskName : ('Task #' . $taskId);
+        $start = $this->normalizeDateOnly($startPlanned);
+        $end = $this->normalizeDateOnly($endPlanned);
+        $startLabel = $this->formatShortPlanDate($start);
+        $endLabel = $this->formatShortPlanDate($end);
+
+        if ($startLabel === null && $endLabel === null) {
+            return $name;
+        }
+        if ($startLabel !== null && ($endLabel === null || $end === $start)) {
+            return $startLabel . ' · ' . $name;
+        }
+        if ($startLabel !== null && $endLabel !== null) {
+            return $startLabel . ' – ' . $endLabel . ' · ' . $name;
+        }
+        if ($endLabel !== null) {
+            return $endLabel . ' · ' . $name;
+        }
+
+        return $name;
+    }
+
+    /** @param array<string, mixed> $doc */
+    private function formatTaskFieldPhotoAsPlanFile(array $doc, int $virtualFolderId, int $projectId): array
+    {
+        $photoId = (int) $doc['id'];
+        $workDate = $doc['work_date'] ?? '';
+        if ($workDate instanceof \DateTimeInterface) {
+            $workDate = $workDate->format('Y-m-d');
+        } else {
+            $workDate = (string) $workDate;
+        }
+
+        return [
+            'id' => -self::TASK_FIELD_PHOTO_PLAN_FILE_ID_OFFSET - $photoId,
+            'file_name' => basename((string) $doc['file_name']),
+            'original_name' => (string) $doc['original_name'],
+            'file_path' => '/' . ltrim((string) $doc['file_name'], '/'),
+            'folder_id' => $virtualFolderId,
+            'file_size' => (int) $doc['file_size'],
+            'mime_type' => (string) $doc['mime_type'],
+            'category' => 'task_field_photo',
+            'description' => '',
+            'version' => '1.0',
+            'uploaded_by' => (int) $doc['uploaded_by'],
+            'uploaded_at' => $doc['uploaded_at'],
+            'updated_at' => $doc['uploaded_at'],
+            'field_work_photo_id' => $photoId,
+            'task_id' => (int) $doc['task_id'],
+            'project_id' => $projectId,
+            'slot' => (string) $doc['slot'],
+            'work_date' => $workDate,
+        ];
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $flat
+     */
+    private function materializeTaskFieldPhotosTree(array $flat, int $id): array
+    {
+        $n = $flat[$id];
+        $children = [];
+        foreach ($n['child_folder_ids'] as $cid) {
+            $children[] = $this->materializeTaskFieldPhotosTree($flat, $cid);
+        }
+
+        return [
+            'id' => $n['id'],
+            'name' => $n['name'],
+            'parent_id' => $n['parent_id'],
+            'edited' => $n['edited'],
+            'created_at' => $n['created_at'],
+            'updated_at' => $n['updated_at'],
+            'sort_key' => $n['sort_key'] ?? null,
+            'children' => $children,
+            'files' => $n['files'],
+        ];
+    }
+
+    /** @param array<string, mixed> $node */
+    private function sortTaskFieldPhotosVirtualTree(array &$node): void
+    {
+        usort(
+            $node['children'],
+            static function ($a, $b): int {
+                $aKey = (string) ($a['sort_key'] ?? $a['name'] ?? '');
+                $bKey = (string) ($b['sort_key'] ?? $b['name'] ?? '');
+                $cmp = strcmp($aKey, $bKey);
+                if ($cmp !== 0) {
+                    return $cmp;
+                }
+
+                return strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+            }
+        );
+        foreach ($node['children'] as &$child) {
+            $this->sortTaskFieldPhotosVirtualTree($child);
+        }
+        unset($child);
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $idToNode
+     */
+    private function mergeTaskFieldPhotosIntoFolderTree(array &$idToNode, int $projectId, $connection): void
+    {
+        $executionLogsId = $this->findExecutionLogsFolderId($connection, $projectId);
+        if ($executionLogsId === null || !isset($idToNode[$executionLogsId])) {
+            return;
+        }
+
+        $built = $this->buildTaskFieldPhotosFlat($projectId, $executionLogsId, $connection);
+        if ($built === null || $built['task_root_ids'] === []) {
+            return;
+        }
+
+        $materializedRoots = [];
+        foreach ($built['task_root_ids'] as $rootVid) {
+            if (!isset($built['flat'][$rootVid])) {
+                continue;
+            }
+            $treeNode = $this->materializeTaskFieldPhotosTree($built['flat'], $rootVid);
+            $this->sortTaskFieldPhotosVirtualTree($treeNode);
+            $materializedRoots[] = [
+                'sort_key' => (string) ($built['flat'][$rootVid]['sort_key'] ?? ''),
+                'node' => $treeNode,
+            ];
+        }
+
+        usort(
+            $materializedRoots,
+            static function (array $a, array $b): int {
+                $cmp = strcmp($a['sort_key'], $b['sort_key']);
+                if ($cmp !== 0) {
+                    return $cmp;
+                }
+
+                return strcasecmp(
+                    (string) ($a['node']['name'] ?? ''),
+                    (string) ($b['node']['name'] ?? '')
+                );
+            }
+        );
+
+        foreach ($materializedRoots as $entry) {
+            $idToNode[$executionLogsId]['children'][] = $entry['node'];
+        }
+
+        usort(
+            $idToNode[$executionLogsId]['children'],
+            static function ($a, $b): int {
+                $aVirtual = isset($a['id']) && (int) $a['id'] < 0;
+                $bVirtual = isset($b['id']) && (int) $b['id'] < 0;
+                if ($aVirtual !== $bVirtual) {
+                    return $aVirtual ? 1 : -1;
+                }
+
+                return strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+            }
+        );
+    }
+
+    /**
+     * @return array{folder: array<string, mixed>, subfolders: list<array<string, mixed>>, files: list<array<string, mixed>>}|null
+     */
+    private function getTaskFieldPhotosFolderPayload(int $projectId, int $folderId, $connection): ?array
+    {
+        $executionLogsId = $this->findExecutionLogsFolderId($connection, $projectId);
+        if ($executionLogsId === null) {
+            return null;
+        }
+
+        $built = $this->buildTaskFieldPhotosFlat($projectId, $executionLogsId, $connection);
+        if ($built === null || !isset($built['flat'][$folderId])) {
+            return null;
+        }
+
+        $n = $built['flat'][$folderId];
+        $subfolders = [];
+        foreach ($n['child_folder_ids'] as $cid) {
+            $c = $built['flat'][$cid];
+            $subfolders[] = [
+                'id' => $c['id'],
+                'name' => $c['name'],
+                'parent_id' => $c['parent_id'],
+                'edited' => $c['edited'],
+                'created_at' => $c['created_at'],
+                'updated_at' => $c['updated_at'],
+                'sort_key' => $c['sort_key'] ?? null,
+            ];
+        }
+        usort(
+            $subfolders,
+            static function (array $a, array $b): int {
+                $aKey = (string) ($a['sort_key'] ?? $a['name'] ?? '');
+                $bKey = (string) ($b['sort_key'] ?? $b['name'] ?? '');
+                $cmp = strcmp($aKey, $bKey);
+                if ($cmp !== 0) {
+                    return $cmp;
+                }
+
+                return strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
+            }
         );
 
         return [

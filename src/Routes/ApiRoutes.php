@@ -257,7 +257,29 @@ class ApiRoutes
                     $pushSubscriptionController->sendTest();
                 }
             });
-            
+
+            $notificationPreferencesController = new \App\Controllers\NotificationPreferencesController($this->logger);
+            Flight::route('GET /api/v1/me/notification-preferences', function() use ($notificationPreferencesController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $notificationPreferencesController->getMine();
+                }
+            });
+            Flight::route('PATCH /api/v1/me/notification-preferences', function() use ($notificationPreferencesController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $notificationPreferencesController->patchMine();
+                }
+            });
+            Flight::route('GET /api/v1/me/notification-preferences/events', function() use ($notificationPreferencesController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $notificationPreferencesController->getMyEvents();
+                }
+            });
+            Flight::route('PATCH /api/v1/me/notification-preferences/events/@event_type', function($event_type) use ($notificationPreferencesController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $notificationPreferencesController->patchMyEvent((string) $event_type);
+                }
+            });
+
             Flight::route('PUT /api/v1/profile', function() use ($profileController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
                     $profileController->updateProfile();
@@ -1532,6 +1554,35 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $eventController = new \App\Controllers\EventProcessingController($this->logger);
                 $eventController->getEventStats();
+            }
+        });
+
+        // Report archive (immutable snapshots): list / metadata / HTML view
+        Flight::route('GET /api/v1/reports', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $reportsController = new \App\Controllers\ReportsController($this->logger);
+                $reportsController->list();
+            }
+        });
+
+        Flight::route('GET /api/v1/reports/@id:[0-9]+', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $reportsController = new \App\Controllers\ReportsController($this->logger);
+                $reportsController->get((int) $id);
+            }
+        });
+
+        Flight::route('GET /api/v1/reports/@id:[0-9]+/view', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $reportsController = new \App\Controllers\ReportsController($this->logger);
+                $reportsController->view((int) $id);
+            }
+        });
+
+        Flight::route('GET /api/v1/projects/@project_id:[0-9]+/reports', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $reportsController = new \App\Controllers\ReportsController($this->logger);
+                $reportsController->listForProject((int) $project_id);
             }
         });
 

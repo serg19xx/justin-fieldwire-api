@@ -9,6 +9,7 @@
         "doctrine/dbal": "^3.6",
         "firebase/php-jwt": "^6.11",
         "mikecao/flight": "^2.0",
+        "minishlink/web-push": "^10.1",
         "monolog/monolog": "^3.4",
         "phpmailer/phpmailer": "^6.10",
         "ramsey/uuid": "^4.7",

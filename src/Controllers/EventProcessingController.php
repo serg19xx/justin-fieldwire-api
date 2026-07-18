@@ -89,16 +89,18 @@ class EventProcessingController
             // Ограничиваем лимит для безопасности
             $limit = min($limit, 1000);
             
-            // Обрабатываем события
-            $this->notificationService->processPendingEvents($limit);
-            
+            $stats = $this->notificationService->processPendingEvents($limit);
+
             Flight::json([
                 'error_code' => 0,
                 'status' => 'success',
                 'message' => 'Events processed successfully',
                 'data' => [
-                    'processed_count' => $limit,
-                    'limit' => $limit
+                    'processed_count' => $stats['processed'],
+                    'sent_count' => $stats['sent'],
+                    'skipped_count' => $stats['skipped'],
+                    'error_count' => $stats['errors'],
+                    'limit' => $limit,
                 ]
             ]);
 

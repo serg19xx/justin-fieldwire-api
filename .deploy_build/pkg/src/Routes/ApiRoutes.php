@@ -14,6 +14,7 @@ use App\Controllers\ProjectTeamController;
 use App\Controllers\ScheduleWeekController;
 use App\Controllers\ScheduleEntryMessageController;
 use App\Controllers\ScheduleEntryDocumentController;
+use App\Controllers\TaskFieldPhotoController;
 use App\Controllers\EventLogController;
 use App\Controllers\N8nIntegrationController;
 use App\Controllers\LanguageController;
@@ -239,7 +240,46 @@ class ApiRoutes
                     $scheduleWeekController->getUserSchedule((int) $user_id);
                 }
             });
-            
+
+            $pushSubscriptionController = new \App\Controllers\PushSubscriptionController($this->logger);
+            Flight::route('POST /api/v1/me/push-subscriptions', function() use ($pushSubscriptionController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $pushSubscriptionController->upsert();
+                }
+            });
+            Flight::route('DELETE /api/v1/me/push-subscriptions', function() use ($pushSubscriptionController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $pushSubscriptionController->delete();
+                }
+            });
+            Flight::route('POST /api/v1/me/push-subscriptions/test', function() use ($pushSubscriptionController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $pushSubscriptionController->sendTest();
+                }
+            });
+
+            $notificationPreferencesController = new \App\Controllers\NotificationPreferencesController($this->logger);
+            Flight::route('GET /api/v1/me/notification-preferences', function() use ($notificationPreferencesController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $notificationPreferencesController->getMine();
+                }
+            });
+            Flight::route('PATCH /api/v1/me/notification-preferences', function() use ($notificationPreferencesController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $notificationPreferencesController->patchMine();
+                }
+            });
+            Flight::route('GET /api/v1/me/notification-preferences/events', function() use ($notificationPreferencesController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $notificationPreferencesController->getMyEvents();
+                }
+            });
+            Flight::route('PATCH /api/v1/me/notification-preferences/events/@event_type', function($event_type) use ($notificationPreferencesController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $notificationPreferencesController->patchMyEvent((string) $event_type);
+                }
+            });
+
             Flight::route('PUT /api/v1/profile', function() use ($profileController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
                     $profileController->updateProfile();
@@ -760,6 +800,132 @@ class ApiRoutes
             }
         });
 
+        Flight::route('GET /api/v1/sendgrid/dynamic-templates', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->listDynamicTemplates();
+            }
+        });
+
+        // Client outbound communications (SMS / email / fax)
+        Flight::route('POST /api/v1/clients/@type/@id/send-sms', function($type, $id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->sendSms((string) $type, (int) $id);
+            }
+        });
+
+        Flight::route('POST /api/v1/clients/@type/@id/send-email', function($type, $id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->sendEmail((string) $type, (int) $id);
+            }
+        });
+
+        Flight::route('POST /api/v1/clients/@type/@id/send-fax', function($type, $id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->sendFax((string) $type, (int) $id);
+            }
+        });
+
+        Flight::route('POST /api/v1/clients/@type/send-sms/bulk', function($type) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->sendBulkSms((string) $type);
+            }
+        });
+
+        Flight::route('POST /api/v1/clients/@type/send-email/bulk', function($type) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\ClientCommunicationController(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                    new \App\Services\EmailService($this->logger),
+                    new \App\Services\HumbleFaxService($this->logger),
+                );
+                $controller->sendBulkEmail((string) $type);
+            }
+        });
+
+        // SMS meeting slot invites (PM schedules call; client replies 1/2/3)
+        Flight::route('GET /api/v1/meeting-invite/day-schedule', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\SmsMeetingInviteController(
+                    $this->logger,
+                    new \App\Services\SmsMeetingInviteService(
+                        $this->logger,
+                        new \App\Services\TwilioService($this->logger),
+                    ),
+                );
+                $controller->suggestedSlots();
+            }
+        });
+
+        Flight::route('POST /api/v1/clients/@type/@id/send-meeting-invite', function($type, $id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\SmsMeetingInviteController(
+                    $this->logger,
+                    new \App\Services\SmsMeetingInviteService(
+                        $this->logger,
+                        new \App\Services\TwilioService($this->logger),
+                    ),
+                );
+                $controller->send((string) $type, (int) $id);
+            }
+        });
+
+        Flight::route('GET /api/v1/clients/@type/@id/meeting-invite/latest', function($type, $id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\SmsMeetingInviteController(
+                    $this->logger,
+                    new \App\Services\SmsMeetingInviteService(
+                        $this->logger,
+                        new \App\Services\TwilioService($this->logger),
+                    ),
+                );
+                $controller->latest((string) $type, (int) $id);
+            }
+        });
+
+        // Twilio inbound SMS webhook (no JWT — Twilio signature validation)
+        Flight::route('POST /api/v1/twilio/sms/inbound', function() {
+            $controller = new \App\Controllers\TwilioSmsWebhookController(
+                $this->logger,
+                new \App\Services\SmsMeetingInviteService(
+                    $this->logger,
+                    new \App\Services\TwilioService($this->logger),
+                ),
+                new \App\Services\TwilioService($this->logger),
+            );
+            $controller->inboundSms();
+        });
+
         // Role routes v1 (protected)
         Flight::route('GET /api/v1/roles', function() use ($authMiddleware) {
             if ($authMiddleware->handle()) {
@@ -890,6 +1056,13 @@ class ApiRoutes
             }
         });
 
+        Flight::route('GET /api/v1/projects/@project_id/tasks/stats', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getTaskStats((int)$project_id);
+            }
+        });
+
         Flight::route('PUT /api/v1/projects/@project_id/tasks/reorder', function($project_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
                 $taskController = new \App\Controllers\TaskController($this->logger);
@@ -959,6 +1132,35 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $taskController = new \App\Controllers\TaskController($this->logger);
                 $taskController->updateTask((int)$project_id, (int)$task_id);
+            }
+        });
+
+        Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/submit', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->submitTask((int)$project_id, (int)$task_id);
+            }
+        });
+
+        $taskFieldPhotoController = new TaskFieldPhotoController($this->logger);
+        Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/field-photos', function($project_id, $task_id) use ($authMiddleware, $taskFieldPhotoController) {
+            if ($authMiddleware->handle()) {
+                $taskFieldPhotoController->index((int) $project_id, (int) $task_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/field-photos', function($project_id, $task_id) use ($authMiddleware, $taskFieldPhotoController) {
+            if ($authMiddleware->handle()) {
+                $taskFieldPhotoController->upload((int) $project_id, (int) $task_id);
+            }
+        });
+        Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/field-photos/@photo_id/download', function($project_id, $task_id, $photo_id) use ($authMiddleware, $taskFieldPhotoController) {
+            if ($authMiddleware->handle()) {
+                $taskFieldPhotoController->download((int) $project_id, (int) $task_id, (int) $photo_id);
+            }
+        });
+        Flight::route('DELETE /api/v1/projects/@project_id/tasks/@task_id/field-photos/@photo_id', function($project_id, $task_id, $photo_id) use ($authMiddleware, $taskFieldPhotoController) {
+            if ($authMiddleware->handle()) {
+                $taskFieldPhotoController->delete((int) $project_id, (int) $task_id, (int) $photo_id);
             }
         });
 
@@ -1352,6 +1554,35 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $eventController = new \App\Controllers\EventProcessingController($this->logger);
                 $eventController->getEventStats();
+            }
+        });
+
+        // Report archive (immutable snapshots): list / metadata / HTML view
+        Flight::route('GET /api/v1/reports', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $reportsController = new \App\Controllers\ReportsController($this->logger);
+                $reportsController->list();
+            }
+        });
+
+        Flight::route('GET /api/v1/reports/@id:[0-9]+', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $reportsController = new \App\Controllers\ReportsController($this->logger);
+                $reportsController->get((int) $id);
+            }
+        });
+
+        Flight::route('GET /api/v1/reports/@id:[0-9]+/view', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $reportsController = new \App\Controllers\ReportsController($this->logger);
+                $reportsController->view((int) $id);
+            }
+        });
+
+        Flight::route('GET /api/v1/projects/@project_id:[0-9]+/reports', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $reportsController = new \App\Controllers\ReportsController($this->logger);
+                $reportsController->listForProject((int) $project_id);
             }
         });
 

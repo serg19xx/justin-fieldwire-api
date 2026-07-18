@@ -4,6 +4,9 @@ namespace App\Controllers;
 
 use App\Database\Database;
 use App\Services\EventLoggingService;
+use App\Services\FieldWorkNotificationService;
+use App\Services\TaskAuthorizationService;
+use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
@@ -19,9 +22,37 @@ class TaskController
 {
     private const TASK_ADDRESS_MAX_LEN = 500;
 
+    /** Base columns always present on fw_prj_tasks. */
+    private const TASK_DETAIL_BASE_COLUMNS = [
+        'id', 'task_order', 'project_id', 'address', 'name', 'start_planned', 'end_planned',
+        'start_time', 'end_time', 'milestone', 'status', 'progress_pct', 'notes', 'resources',
+        'baseline_start', 'baseline_end', 'actual_start', 'actual_end', 'slack_days',
+        'created_at', 'updated_at',
+    ];
+
+    /** Optional columns added by field-work migrations (may be missing on older DBs). */
+    private const TASK_DETAIL_OPTIONAL_COLUMNS = [
+        'field_submitted_at',
+        'field_submitted_by',
+        'field_work_started_at',
+        'field_work_started_by',
+        'field_work_ended_at',
+        'field_work_ended_by',
+        'field_notes',
+        'field_work_start_reason',
+        'field_work_end_reason',
+    ];
+
+    private static ?string $resolvedTaskDetailSelect = null;
+
+    /** @var array<string, bool>|null */
+    private static ?array $taskOptionalColumnExists = null;
+
     private Logger $logger;
     private Database $database;
     private EventLoggingService $eventLoggingService;
+    private TaskAuthorizationService $taskAuth;
+    private FieldWorkNotificationService $fieldWorkNotifications;
 
     public function __construct(Logger $logger)
     {
@@ -30,6 +61,8 @@ class TaskController
         try {
             $this->database = new Database();
             $this->eventLoggingService = new EventLoggingService($logger);
+            $this->taskAuth = new TaskAuthorizationService();
+            $this->fieldWorkNotifications = new FieldWorkNotificationService($logger);
         } catch (\Exception $e) {
             $this->logger->error('Failed to initialize TaskController', [
                 'error' => $e->getMessage()
@@ -78,6 +111,130 @@ class TaskController
         }
 
         return $s;
+    }
+
+    /**
+     * @param array<string, mixed> $task
+     * @return array<string, mixed>
+     */
+    private function fieldSubmissionPayloadFromRow(array $task): array
+    {
+        return [
+            'field_submitted_at' => $task['field_submitted_at'] ?? null,
+            'field_submitted_by' => isset($task['field_submitted_by']) && $task['field_submitted_by'] !== null
+                ? (int) $task['field_submitted_by']
+                : null,
+            'field_work_started_at' => $task['field_work_started_at'] ?? null,
+            'field_work_started_by' => isset($task['field_work_started_by']) && $task['field_work_started_by'] !== null
+                ? (int) $task['field_work_started_by']
+                : null,
+            'field_work_ended_at' => $task['field_work_ended_at'] ?? null,
+            'field_work_ended_by' => isset($task['field_work_ended_by']) && $task['field_work_ended_by'] !== null
+                ? (int) $task['field_work_ended_by']
+                : null,
+            'field_work_start_reason' => $task['field_work_start_reason'] ?? null,
+            'field_work_end_reason' => $task['field_work_end_reason'] ?? null,
+            'field_notes' => $task['field_notes'] ?? null,
+        ];
+    }
+
+    private function columnExistsOnTable(Connection $connection, string $table, string $column): bool
+    {
+        $row = $connection->executeQuery(
+            'SELECT COUNT(*) AS c FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?',
+            [$table, $column]
+        )->fetchAssociative();
+
+        return (int) ($row['c'] ?? 0) > 0;
+    }
+
+    /** @return array<string, bool> */
+    private function taskOptionalColumnMap(Connection $connection): array
+    {
+        if (self::$taskOptionalColumnExists !== null) {
+            return self::$taskOptionalColumnExists;
+        }
+        $map = [];
+        foreach (self::TASK_DETAIL_OPTIONAL_COLUMNS as $column) {
+            $map[$column] = $this->columnExistsOnTable($connection, 'fw_prj_tasks', $column);
+        }
+        self::$taskOptionalColumnExists = $map;
+
+        return $map;
+    }
+
+    /**
+     * @param array<string, mixed> $task
+     * @param array<string, mixed> $beforeData
+     */
+    private function logFieldWorkInitiatorEvent(
+        Connection $connection,
+        int $projectId,
+        int $taskId,
+        array $task,
+        array $beforeData,
+        int $actorId,
+        string $eventType,
+        string $phase,
+    ): void {
+        $accountableForemanId = $this->taskAuth->resolveAccountableForemanUserId($connection, $projectId, $taskId);
+        $onBehalfOfForeman = $accountableForemanId !== null && $actorId !== $accountableForemanId;
+        $timeKey = $phase === 'ended' ? 'field_work_ended_at' : 'field_work_started_at';
+        $byKey = $phase === 'ended' ? 'field_work_ended_by' : 'field_work_started_by';
+
+        $this->eventLoggingService->logEvent(
+            'task',
+            $taskId,
+            $eventType,
+            $this->fieldSubmissionPayloadFromRow($beforeData),
+            array_merge(
+                $this->fieldSubmissionPayloadFromRow($task),
+                [
+                    'task_id' => $taskId,
+                    'project_id' => $projectId,
+                    'task_name' => $task['name'] ?? null,
+                    'project_foreman_id' => $this->taskAuth->resolveProjectForemanUserId($connection, $projectId),
+                    'task_lead_id' => $this->taskAuth->resolveTaskLeadUserId($connection, $taskId),
+                    'accountable_foreman_id' => $accountableForemanId,
+                    'initiated_by_user_id' => $actorId,
+                    $timeKey => $task[$timeKey] ?? null,
+                    $byKey => isset($task[$byKey]) ? (int) $task[$byKey] : $actorId,
+                    'on_behalf_of_foreman' => $onBehalfOfForeman,
+                ]
+            ),
+            [$timeKey, $byKey],
+            [
+                'actor_type' => 'user',
+                'actor_id' => $actorId,
+                'comment' => $onBehalfOfForeman
+                    ? "Field work {$phase} recorded on behalf of accountable foreman"
+                    : "Field work {$phase} recorded by accountable foreman",
+                'ip' => Flight::request()->ip ?? null,
+                'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+            ]
+        );
+    }
+
+    private function resolveTaskDetailSelect(Connection $connection): string
+    {
+        if (self::$resolvedTaskDetailSelect !== null) {
+            return self::$resolvedTaskDetailSelect;
+        }
+        $columns = self::TASK_DETAIL_BASE_COLUMNS;
+        foreach (self::TASK_DETAIL_OPTIONAL_COLUMNS as $column) {
+            if ($this->taskOptionalColumnMap($connection)[$column]) {
+                $columns[] = $column;
+            }
+        }
+        self::$resolvedTaskDetailSelect = implode(', ', $columns);
+
+        return self::$resolvedTaskDetailSelect;
+    }
+
+    private function taskOptionalColumnPresent(Connection $connection, string $column): bool
+    {
+        return $this->taskOptionalColumnMap($connection)[$column] ?? false;
     }
 
     /**
@@ -236,63 +393,79 @@ class TaskController
                 return;
             }
 
-            // Базовый SQL запрос - task_lead_id и team_members теперь в fw_prj_team_members
-            $sql = "SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE project_id = ?";
+            // Base WHERE clause (shared by COUNT and SELECT)
+            $whereSql = ' WHERE project_id = ?';
             $params = [$projectId];
 
-            // Фильтр по статусу
             if ($status) {
-                $sql .= " AND status = ?";
+                $whereSql .= ' AND status = ?';
                 $params[] = $status;
             }
 
-            // Фильтр по milestone (ENUM: 'inspection','visit','meeting','review','delivery','approval','other' или NULL)
             if ($milestone !== null && $milestone !== '') {
-                // Если milestone = 'true' или true, фильтруем задачи где milestone IS NOT NULL
-                // Если milestone = 'false' или false, фильтруем задачи где milestone IS NULL
-                // Иначе фильтруем по конкретному значению enum
                 $milestoneValue = filter_var($milestone, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
                 if ($milestoneValue === true || $milestone === 'true' || $milestone === true) {
-                    $sql .= " AND milestone IS NOT NULL";
+                    $whereSql .= ' AND milestone IS NOT NULL';
                 } elseif ($milestoneValue === false || $milestone === 'false' || $milestone === false) {
-                    $sql .= " AND milestone IS NULL";
+                    $whereSql .= ' AND milestone IS NULL';
                 } else {
-                    // Фильтруем по конкретному значению enum
                     $validMilestones = ['inspection', 'visit', 'meeting', 'review', 'delivery', 'approval', 'other'];
                     if (in_array($milestone, $validMilestones, true)) {
-                        $sql .= " AND milestone = ?";
+                        $whereSql .= ' AND milestone = ?';
                         $params[] = $milestone;
                     }
                 }
             }
 
-            // Поиск по названию, заметкам и адресу
             if ($search) {
                 $term = '%' . $search . '%';
-                $sql .= " AND (name LIKE ? OR notes LIKE ? OR address LIKE ?)";
+                $whereSql .= ' AND (name LIKE ? OR notes LIKE ? OR address LIKE ?)';
                 $params[] = $term;
                 $params[] = $term;
                 $params[] = $term;
             }
 
-            // Фильтр задач по назначению пользователя
             if ($userId !== null && $userId !== '' && is_numeric($userId)) {
-                $sql .= " AND EXISTS (
+                $whereSql .= ' AND EXISTS (
                     SELECT 1
                     FROM fw_prj_team_members tm
                     WHERE tm.project_id = ?
                       AND tm.task_id = fw_prj_tasks.id
                       AND tm.user_id = ?
-                )";
+                )';
                 $params[] = $projectId;
                 $params[] = (int)$userId;
             }
 
-            // Добавляем сортировку
-            $sql .= " ORDER BY task_order ASC, start_planned ASC";
+            $countResult = $connection->executeQuery(
+                'SELECT COUNT(*) FROM fw_prj_tasks' . $whereSql,
+                $params
+            );
+            $totalTasks = (int)$countResult->fetchOne();
+
+            $page = max(1, (int)($request->query['page'] ?? 1));
+            $limitParam = $request->query['limit'] ?? null;
+            $limit = null;
+            if ($limitParam !== null && $limitParam !== '') {
+                $limit = min(max((int)$limitParam, 1), 2000);
+            }
+
+            $sql = 'SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks'
+                . $whereSql
+                . ' ORDER BY task_order ASC, start_planned ASC';
+
+            if ($limit !== null) {
+                $offset = ($page - 1) * $limit;
+                $sql .= ' LIMIT ' . $limit . ' OFFSET ' . $offset;
+            } else {
+                $page = 1;
+            }
 
             $result = $connection->executeQuery($sql, $params);
             $tasks = $result->fetchAllAssociative();
+
+            $effectivePerPage = $limit ?? $totalTasks;
+            $lastPage = $limit !== null ? max(1, (int)ceil($totalTasks / $limit)) : 1;
 
             // Получаем зависимости из отдельной таблицы
             $dependenciesResult = $connection->executeQuery(
@@ -324,58 +497,52 @@ class TaskController
             $taskInvitedPeople = []; // Инициализируем всегда
             
             if (!empty($taskIds)) {
-                $placeholders = str_repeat('?,', count($taskIds) - 1) . '?';
-                
-                // Сначала получаем информацию о milestone для каждой задачи
-                $milestoneSql = "SELECT id, milestone FROM fw_prj_tasks WHERE id IN ($placeholders)";
-                $milestoneResult = $connection->executeQuery($milestoneSql, $taskIds);
-                $milestoneData = $milestoneResult->fetchAllAssociative();
-                $taskMilestones = []; // Для определения, какие задачи являются milestone
-                foreach ($milestoneData as $milestoneRow) {
-                    $taskMilestones[(int)$milestoneRow['id']] = $milestoneRow['milestone'] !== null && $milestoneRow['milestone'] !== '';
-                }
-                
-                // Получаем всех назначенных на задачи (исполнители, бригадиры и приглашенные)
-                $assigneesSql = "SELECT task_id, user_id, role_in_project, invited_people FROM fw_prj_team_members WHERE task_id IN ($placeholders)";
-                $assigneesResult = $connection->executeQuery($assigneesSql, $taskIds);
-                $assigneesData = $assigneesResult->fetchAllAssociative();
-                
-                // Группируем по task_id и определяем бригадира, исполнителей и приглашенных
-                foreach ($assigneesData as $assignee) {
-                    $taskId = (int)$assignee['task_id'];
-                    $role = $assignee['role_in_project'] ?? null;
-                    $isMilestone = isset($taskMilestones[$taskId]) && $taskMilestones[$taskId];
-                    
-                    if ($isMilestone && $role === 'task_lead') {
-                        // Для milestone: ОДНА запись с role_in_project = 'task_lead' и invited_people (JSON массив)
-                        $invitedPeopleRaw = $assignee['invited_people'] ?? null;
-                        if ($invitedPeopleRaw !== null && $invitedPeopleRaw !== '') {
-                            $invitedPeopleArray = json_decode($invitedPeopleRaw, true);
-                            if (is_array($invitedPeopleArray)) {
-                                $taskInvitedPeople[$taskId] = $invitedPeopleArray;
+                $taskMilestones = [];
+
+                foreach (array_chunk($taskIds, 200) as $taskIdChunk) {
+                    $placeholders = str_repeat('?,', count($taskIdChunk) - 1) . '?';
+
+                    $milestoneSql = "SELECT id, milestone FROM fw_prj_tasks WHERE id IN ($placeholders)";
+                    $milestoneResult = $connection->executeQuery($milestoneSql, $taskIdChunk);
+                    $milestoneData = $milestoneResult->fetchAllAssociative();
+                    foreach ($milestoneData as $milestoneRow) {
+                        $taskMilestones[(int)$milestoneRow['id']] = $milestoneRow['milestone'] !== null && $milestoneRow['milestone'] !== '';
+                    }
+
+                    $assigneesSql = "SELECT task_id, user_id, role_in_project, invited_people FROM fw_prj_team_members WHERE task_id IN ($placeholders)";
+                    $assigneesResult = $connection->executeQuery($assigneesSql, $taskIdChunk);
+                    $assigneesData = $assigneesResult->fetchAllAssociative();
+
+                    foreach ($assigneesData as $assignee) {
+                        $taskId = (int)$assignee['task_id'];
+                        $role = $assignee['role_in_project'] ?? null;
+                        $isMilestone = isset($taskMilestones[$taskId]) && $taskMilestones[$taskId];
+
+                        if ($isMilestone && $role === 'task_lead') {
+                            $invitedPeopleRaw = $assignee['invited_people'] ?? null;
+                            if ($invitedPeopleRaw !== null && $invitedPeopleRaw !== '') {
+                                $invitedPeopleArray = json_decode($invitedPeopleRaw, true);
+                                if (is_array($invitedPeopleArray)) {
+                                    $taskInvitedPeople[$taskId] = $invitedPeopleArray;
+                                } else {
+                                    $taskInvitedPeople[$taskId] = [];
+                                }
                             } else {
                                 $taskInvitedPeople[$taskId] = [];
                             }
-                        } else {
-                            $taskInvitedPeople[$taskId] = [];
-                        }
-                        // task_lead для milestone
-                        if ($assignee['user_id']) {
-                            $taskLeads[$taskId] = (int)$assignee['user_id'];
-                        }
-                    } elseif (!$isMilestone && $assignee['user_id']) {
-                        // Для обычной задачи: отдельные записи для каждого члена бригады
-                        $userId = (int)$assignee['user_id'];
-                        // Бригадир определяется по role_in_project (например, 'task_lead' или 'supervisor')
-                        // Если role указывает на бригадира, сохраняем как task_lead_id
-                        if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
-                            $taskLeads[$taskId] = $userId;
-                        } else {
-                            // Иначе это исполнитель
-                            if (!isset($taskAssignees[$taskId])) {
-                                $taskAssignees[$taskId] = [];
+                            if ($assignee['user_id']) {
+                                $taskLeads[$taskId] = (int)$assignee['user_id'];
                             }
-                            $taskAssignees[$taskId][] = $userId;
+                        } elseif (!$isMilestone && $assignee['user_id']) {
+                            $assigneeUserId = (int)$assignee['user_id'];
+                            if ($this->taskAuth->isTaskLeadProjectRole($role)) {
+                                $taskLeads[$taskId] = $assigneeUserId;
+                            } else {
+                                if (!isset($taskAssignees[$taskId])) {
+                                    $taskAssignees[$taskId] = [];
+                                }
+                                $taskAssignees[$taskId][] = $assigneeUserId;
+                            }
                         }
                     }
                 }
@@ -426,7 +593,13 @@ class TaskController
                 'message' => 'Tasks retrieved successfully',
                 'data' => [
                     'tasks' => $formattedTasks,
-                    'dependencies' => $formattedDependencies
+                    'dependencies' => $formattedDependencies,
+                    'pagination' => [
+                        'current_page' => $page,
+                        'per_page' => $effectivePerPage,
+                        'total' => $totalTasks,
+                        'last_page' => $lastPage,
+                    ],
                 ]
             ]);
 
@@ -524,7 +697,7 @@ class TaskController
         try {
             $connection = $this->database->getConnection();
             
-            $sql = "SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ? AND project_id = ?";
+            $sql = 'SELECT ' . $this->resolveTaskDetailSelect($connection) . ' FROM fw_prj_tasks WHERE id = ? AND project_id = ?';
             $result = $connection->executeQuery($sql, [$taskId, $projectId]);
             $task = $result->fetchAssociative();
 
@@ -625,7 +798,7 @@ class TaskController
                 foreach ($assigneesData as $assignee) {
                     $userId = (int)$assignee['user_id'];
                     $role = $assignee['role_in_project'] ?? null;
-                    if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
+                    if ($this->taskAuth->isTaskLeadProjectRole($role)) {
                         $taskLeadId = $userId;
                     } else {
                         $teamMembers[] = $userId;
@@ -670,7 +843,8 @@ class TaskController
                 'actual_end' => $task['actual_end'],
                 'slack_days' => $task['slack_days'] ? (int)$task['slack_days'] : null,
                 'created_at' => $task['created_at'],
-                'updated_at' => $task['updated_at']
+                'updated_at' => $task['updated_at'],
+                ...$this->fieldSubmissionPayloadFromRow($task),
             ];
 
             Flight::json([
@@ -839,6 +1013,9 @@ class TaskController
             // Обработка task_lead_id - все пользователи должны быть прикреплены к задачам
             // Не проверяем наличие в команде проекта, так как все должны быть назначены на задачи
             $taskLeadId = isset($data['task_lead_id']) && $data['task_lead_id'] ? (int)$data['task_lead_id'] : null;
+            if ($taskLeadId === null) {
+                $taskLeadId = $this->taskAuth->resolveProjectForemanUserId($connection, $projectId);
+            }
 
             $params = [
                 $nextOrder,
@@ -1048,7 +1225,7 @@ class TaskController
                 foreach ($assigneesData as $assignee) {
                     $role = $assignee['role_in_project'] ?? null;
                     
-                    if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
+                    if ($this->taskAuth->isTaskLeadProjectRole($role)) {
                         // Бригадир
                         $taskLeadId = (int)$assignee['user_id'];
                     } elseif ($assignee['user_id']) {
@@ -1264,6 +1441,36 @@ class TaskController
                 return;
             }
 
+            $user = Flight::get('current_user');
+            $actorId = isset($user['id']) ? (int) $user['id'] : 0;
+            if ($actorId <= 0) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Unauthorized',
+                    'data' => null,
+                ], 401);
+                return;
+            }
+
+            $authResult = $this->taskAuth->authorizeTaskUpdate(
+                $connection,
+                $actorId,
+                $projectId,
+                $taskId,
+                is_array($data) ? $data : [],
+            );
+            if (!$authResult['allowed']) {
+                Flight::json([
+                    'error_code' => 403,
+                    'status' => 'error',
+                    'message' => $authResult['message'] ?? 'Forbidden',
+                    'data' => null,
+                ], 403);
+                return;
+            }
+            $data = $authResult['filtered'] ?? $data;
+
             // Валидация данных
             $validation = $this->validateTaskData($data, false);
             if (!$validation['valid']) {
@@ -1278,8 +1485,7 @@ class TaskController
 
             // Получаем текущие данные задачи перед обновлением для логирования
             $beforeResult = $connection->executeQuery(
-                "SELECT id, project_id, name, status, start_planned, end_planned, start_time, end_time, milestone, progress_pct, actual_start, actual_end
-                 FROM fw_prj_tasks WHERE id = ? AND project_id = ?",
+                'SELECT ' . $this->resolveTaskDetailSelect($connection) . ' FROM fw_prj_tasks WHERE id = ? AND project_id = ?',
                 [$taskId, $projectId]
             );
             $beforeData = $beforeResult->fetchAssociative();
@@ -1304,7 +1510,7 @@ class TaskController
                     $beforeInvitedPeople = $invitedPeople;
                 }
                 
-                if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
+                if ($this->taskAuth->isTaskLeadProjectRole($role)) {
                     $beforeTaskLeadId = $userId;
                 } else {
                     $beforeTeamMembers[] = $userId;
@@ -1375,13 +1581,12 @@ class TaskController
                 $taskLeadId = $beforeTaskLeadId;
             }
             $teamMembers = [];
+            $hasTeamMembersInRequest = array_key_exists('team_members', $data);
             
-            if (isset($data['team_members'])) {
-                if (is_array($data['team_members']) && !empty($data['team_members'])) {
-                    // Фильтруем только числовые значения
+            if ($hasTeamMembersInRequest) {
+                if (is_array($data['team_members'])) {
                     $teamMemberIds = array_filter($data['team_members'], 'is_numeric');
-                    $teamMemberIds = array_map('intval', $teamMemberIds);
-                    $teamMembers = $teamMemberIds;
+                    $teamMembers = array_values(array_map('intval', $teamMemberIds));
                 }
             }
             if (isset($data['resources'])) {
@@ -1403,6 +1608,54 @@ class TaskController
             if (isset($data['actual_end'])) {
                 $updateFields[] = "actual_end = ?";
                 $params[] = $data['actual_end'];
+            }
+            if (array_key_exists('field_work_started_at', $data)) {
+                if ($this->taskOptionalColumnPresent($connection, 'field_work_started_at')) {
+                    $updateFields[] = 'field_work_started_at = ?';
+                    $params[] = $this->normalizeNullableDateTime($data['field_work_started_at']);
+                    if (
+                        $data['field_work_started_at'] !== null
+                        && $this->taskOptionalColumnPresent($connection, 'field_work_started_by')
+                    ) {
+                        $updateFields[] = 'field_work_started_by = ?';
+                        $params[] = $actorId;
+                    }
+                }
+            }
+            if (array_key_exists('field_work_ended_at', $data)) {
+                if ($this->taskOptionalColumnPresent($connection, 'field_work_ended_at')) {
+                    $updateFields[] = 'field_work_ended_at = ?';
+                    $params[] = $this->normalizeNullableDateTime($data['field_work_ended_at']);
+                    if (
+                        $data['field_work_ended_at'] !== null
+                        && $this->taskOptionalColumnPresent($connection, 'field_work_ended_by')
+                    ) {
+                        $updateFields[] = 'field_work_ended_by = ?';
+                        $params[] = $actorId;
+                    }
+                }
+            }
+            if (array_key_exists('field_notes', $data)) {
+                if ($this->taskOptionalColumnPresent($connection, 'field_notes')) {
+                    $updateFields[] = 'field_notes = ?';
+                    $params[] = is_string($data['field_notes']) ? $data['field_notes'] : null;
+                }
+            }
+            if (array_key_exists('field_work_start_reason', $data)) {
+                if ($this->taskOptionalColumnPresent($connection, 'field_work_start_reason')) {
+                    $updateFields[] = 'field_work_start_reason = ?';
+                    $params[] = is_string($data['field_work_start_reason'])
+                        ? $data['field_work_start_reason']
+                        : null;
+                }
+            }
+            if (array_key_exists('field_work_end_reason', $data)) {
+                if ($this->taskOptionalColumnPresent($connection, 'field_work_end_reason')) {
+                    $updateFields[] = 'field_work_end_reason = ?';
+                    $params[] = is_string($data['field_work_end_reason'])
+                        ? $data['field_work_end_reason']
+                        : null;
+                }
             }
             if (isset($data['slack_days'])) {
                 $updateFields[] = "slack_days = ?";
@@ -1637,9 +1890,17 @@ class TaskController
                         }
                     }
                 } else {
-                    // Для обычной задачи: отдельные строки для каждого члена бригады
-                    
-                    // Сохраняем task_lead_id с role_in_project = 'task_lead'
+                    // Regular task: replace assignee rows with authoritative set from request
+                    if (!$hasTeamMembersInRequest) {
+                        $teamMembers = $beforeTeamMembers;
+                    }
+
+                    $connection->executeStatement(
+                        "DELETE FROM fw_prj_team_members WHERE task_id = ? AND project_id = ?",
+                        [$taskId, $projectId]
+                    );
+
+                    // task_lead row
                     if ($taskLeadId) {
                         try {
                             $connection->executeStatement(
@@ -1655,9 +1916,12 @@ class TaskController
                         }
                     }
                     
-                    // Сохраняем team_members (исполнители) - отдельные строки
+                    // team members (executors) — skip duplicate of task_lead
                     if (!empty($teamMembers)) {
                         foreach ($teamMembers as $userId) {
+                            if ($taskLeadId && (int) $userId === (int) $taskLeadId) {
+                                continue;
+                            }
                             try {
                                 $connection->executeStatement(
                                     "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project) VALUES (?, ?, ?, 'member')",
@@ -1675,11 +1939,9 @@ class TaskController
                 }
             }
 
-            // Получаем обновленную задачу
-            $result = $connection->executeQuery(
-                "SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
-                [$taskId]
-            );
+            // Получаем обновленную задачу (включая field-work колонки, если есть в БД)
+            $selectSql = 'SELECT ' . $this->resolveTaskDetailSelect($connection) . ' FROM fw_prj_tasks WHERE id = ?';
+            $result = $connection->executeQuery($selectSql, [$taskId]);
             $task = $result->fetchAssociative();
             
             // Получаем task_lead_id, team_members и invited_people из fw_prj_team_members для этой задачи
@@ -1713,7 +1975,7 @@ class TaskController
                 foreach ($assigneesData as $assignee) {
                     $role = $assignee['role_in_project'] ?? null;
                     
-                    if ($role && (stripos($role, 'lead') !== false || stripos($role, 'supervisor') !== false || stripos($role, 'manager') !== false)) {
+                    if ($this->taskAuth->isTaskLeadProjectRole($role)) {
                         // Бригадир
                         $taskLeadId = (int)$assignee['user_id'];
                     } elseif ($assignee['user_id']) {
@@ -1798,6 +2060,60 @@ class TaskController
                             'severity' => 'important'
                         ]
                     );
+                }
+
+                $notifyUrgent = $this->isTruthyRequestFlag($data['notify_urgent'] ?? $data['urgent'] ?? null);
+
+                if (
+                    array_key_exists('field_work_started_at', $data)
+                    && ($beforeData['field_work_started_at'] ?? null) !== ($task['field_work_started_at'] ?? null)
+                ) {
+                    $this->logFieldWorkInitiatorEvent(
+                        $connection,
+                        $projectId,
+                        $taskId,
+                        $task,
+                        $beforeData,
+                        $actorId,
+                        'TASK_FIELD_WORK_STARTED',
+                        'started',
+                    );
+                    if (($task['field_work_started_at'] ?? null) !== null) {
+                        $this->fieldWorkNotifications->notifyManagers(
+                            $projectId,
+                            $taskId,
+                            $task,
+                            $actorId,
+                            'started',
+                            $notifyUrgent,
+                        );
+                    }
+                }
+
+                if (
+                    array_key_exists('field_work_ended_at', $data)
+                    && ($beforeData['field_work_ended_at'] ?? null) !== ($task['field_work_ended_at'] ?? null)
+                ) {
+                    $this->logFieldWorkInitiatorEvent(
+                        $connection,
+                        $projectId,
+                        $taskId,
+                        $task,
+                        $beforeData,
+                        $actorId,
+                        'TASK_FIELD_WORK_ENDED',
+                        'ended',
+                    );
+                    if (($task['field_work_ended_at'] ?? null) !== null) {
+                        $this->fieldWorkNotifications->notifyManagers(
+                            $projectId,
+                            $taskId,
+                            $task,
+                            $actorId,
+                            'ended',
+                            $notifyUrgent,
+                        );
+                    }
                 }
 
                 // Если изменилось расписание (start_planned, end_planned, start_time или end_time), логируем событие
@@ -1984,7 +2300,7 @@ class TaskController
             
             // Получаем task_lead_id из fw_prj_team_members для логирования
             $leadResult = $connection->executeQuery(
-                "SELECT user_id FROM fw_prj_team_members WHERE task_id = ? AND (role_in_project LIKE '%lead%' OR role_in_project LIKE '%supervisor%' OR role_in_project LIKE '%manager%') LIMIT 1",
+                "SELECT user_id FROM fw_prj_team_members WHERE task_id = ? AND (role_in_project LIKE '%lead%' OR role_in_project LIKE '%supervisor%' OR role_in_project LIKE '%manager%' OR role_in_project LIKE '%foreman%') LIMIT 1",
                 [$taskId]
             );
             $taskLeadId = $leadResult->fetchOne();
@@ -2590,7 +2906,8 @@ class TaskController
             'actual_end' => $task['actual_end'] ?? null,
             'slack_days' => isset($task['slack_days']) && $task['slack_days'] ? (int)$task['slack_days'] : null,
             'created_at' => $task['created_at'],
-            'updated_at' => $task['updated_at']
+            'updated_at' => $task['updated_at'],
+            ...$this->fieldSubmissionPayloadFromRow($task),
         ];
     }
 
@@ -3565,6 +3882,79 @@ class TaskController
     }
 
     /**
+     * GET /api/v1/projects/{project_id}/tasks/stats
+     */
+    public function getTaskStats(int $projectId): void
+    {
+        try {
+            $connection = $this->database->getConnection();
+            $projectCheck = $connection->executeQuery(
+                'SELECT id FROM fw_projects WHERE id = ?',
+                [$projectId]
+            );
+
+            if (!$projectCheck->fetchOne()) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => 'Project not found',
+                    'data' => null,
+                ], 404);
+                return;
+            }
+
+            $row = $connection->executeQuery(
+                "SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN status = 'planned' THEN 1 ELSE 0 END) AS planned,
+                    SUM(CASE WHEN status = 'scheduled' THEN 1 ELSE 0 END) AS scheduled,
+                    SUM(CASE WHEN status = 'scheduled_accepted' THEN 1 ELSE 0 END) AS scheduled_accepted,
+                    SUM(CASE WHEN status IN ('in_progress', 'in-progress') THEN 1 ELSE 0 END) AS in_progress,
+                    SUM(CASE WHEN status = 'partially_completed' THEN 1 ELSE 0 END) AS partially_completed,
+                    SUM(CASE WHEN status IN ('delayed_due_to_issue', 'delayed', 'blocked') THEN 1 ELSE 0 END) AS delayed_due_to_issue,
+                    SUM(CASE WHEN status = 'ready_for_inspection' THEN 1 ELSE 0 END) AS ready_for_inspection,
+                    SUM(CASE WHEN status IN ('completed', 'done') THEN 1 ELSE 0 END) AS completed,
+                    SUM(CASE WHEN milestone IS NOT NULL AND milestone != '' THEN 1 ELSE 0 END) AS milestones,
+                    AVG(COALESCE(progress_pct, 0)) AS avg_progress
+                FROM fw_prj_tasks
+                WHERE project_id = ?",
+                [$projectId]
+            )->fetchAssociative();
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Task statistics retrieved successfully',
+                'data' => [
+                    'total' => (int) ($row['total'] ?? 0),
+                    'planned' => (int) ($row['planned'] ?? 0),
+                    'scheduled' => (int) ($row['scheduled'] ?? 0),
+                    'scheduledAccepted' => (int) ($row['scheduled_accepted'] ?? 0),
+                    'inProgress' => (int) ($row['in_progress'] ?? 0),
+                    'partiallyCompleted' => (int) ($row['partially_completed'] ?? 0),
+                    'delayedDueToIssue' => (int) ($row['delayed_due_to_issue'] ?? 0),
+                    'readyForInspection' => (int) ($row['ready_for_inspection'] ?? 0),
+                    'completed' => (int) ($row['completed'] ?? 0),
+                    'milestones' => (int) ($row['milestones'] ?? 0),
+                    'avgProgress' => round((float) ($row['avg_progress'] ?? 0), 1),
+                ],
+            ]);
+        } catch (\Exception $e) {
+            $this->logger->error('Failed to fetch task stats', [
+                'project_id' => $projectId,
+                'error' => $e->getMessage(),
+            ]);
+
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Internal server error',
+                'data' => null,
+            ], 500);
+        }
+    }
+
+    /**
      * Проверить границы проекта для задачи
      * GET /api/v1/projects/{project_id}/tasks/check-bounds
      *
@@ -4105,6 +4495,210 @@ class TaskController
             
             Flight::json($response, 500);
         }
+    }
+
+    /**
+     * Foreman (task_lead) submits field work for PM review. Does not change official task status.
+     */
+    public function submitTask(int $projectId, int $taskId): void
+    {
+        try {
+            $request = Flight::request();
+            $body = json_decode($request->getBody(), true);
+            $fieldNotes = is_array($body) && isset($body['field_notes']) && is_string($body['field_notes'])
+                ? trim($body['field_notes'])
+                : null;
+
+            $connection = $this->database->getConnection();
+
+            $taskRow = $connection->executeQuery(
+                'SELECT ' . $this->resolveTaskDetailSelect($connection) . ' FROM fw_prj_tasks WHERE id = ? AND project_id = ?',
+                [$taskId, $projectId]
+            )->fetchAssociative();
+
+            if (!$taskRow) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => 'Task not found',
+                    'data' => null,
+                ], 404);
+                return;
+            }
+
+            $user = Flight::get('current_user');
+            $actorId = isset($user['id']) ? (int) $user['id'] : 0;
+            if ($actorId <= 0) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Unauthorized',
+                    'data' => null,
+                ], 401);
+                return;
+            }
+
+            if (!$this->taskAuth->canSubmitFieldWork($connection, $projectId, $taskId, $actorId)) {
+                Flight::json([
+                    'error_code' => 403,
+                    'status' => 'error',
+                    'message' => 'You are not allowed to submit field work for this task',
+                    'data' => null,
+                ], 403);
+                return;
+            }
+
+            if (!empty($taskRow['field_submitted_at'])) {
+                Flight::json([
+                    'error_code' => 409,
+                    'status' => 'error',
+                    'message' => 'Work already submitted for PM review',
+                    'data' => null,
+                ], 409);
+                return;
+            }
+
+            if (
+                $this->taskOptionalColumnPresent($connection, 'field_work_started_at')
+                && $this->taskOptionalColumnPresent($connection, 'field_work_ended_at')
+                && (empty($taskRow['field_work_started_at']) || empty($taskRow['field_work_ended_at']))
+            ) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Start and end work times are required before submitting',
+                    'data' => null,
+                ], 400);
+                return;
+            }
+
+            if (
+                !$this->taskOptionalColumnPresent($connection, 'field_submitted_at')
+                || !$this->taskOptionalColumnPresent($connection, 'field_submitted_by')
+            ) {
+                Flight::json([
+                    'error_code' => 503,
+                    'status' => 'error',
+                    'message' => 'Field submission is not available until database migration is applied',
+                    'data' => null,
+                ], 503);
+                return;
+            }
+
+            $updateSql = 'UPDATE fw_prj_tasks SET field_submitted_at = NOW(), field_submitted_by = ?, updated_at = NOW()';
+            $params = [$actorId];
+            if ($fieldNotes !== null && $fieldNotes !== '' && $this->taskOptionalColumnPresent($connection, 'field_notes')) {
+                $updateSql .= ', field_notes = ?';
+                $params[] = $fieldNotes;
+            }
+            $updateSql .= ' WHERE id = ? AND project_id = ?';
+            $params[] = $taskId;
+            $params[] = $projectId;
+            $connection->executeStatement($updateSql, $params);
+
+            $accountableForemanId = $this->taskAuth->resolveAccountableForemanUserId($connection, $projectId, $taskId);
+            $onBehalfOfForeman = $accountableForemanId !== null && $actorId !== $accountableForemanId;
+
+            $afterRow = $connection->executeQuery(
+                'SELECT ' . $this->resolveTaskDetailSelect($connection) . ' FROM fw_prj_tasks WHERE id = ? AND project_id = ?',
+                [$taskId, $projectId]
+            )->fetchAssociative();
+
+            $this->eventLoggingService->logEvent(
+                'task',
+                $taskId,
+                'TASK_FOREMAN_SUBMITTED',
+                $this->fieldSubmissionPayloadFromRow($taskRow),
+                array_merge(
+                    $this->fieldSubmissionPayloadFromRow($afterRow ?: []),
+                    [
+                        'task_id' => $taskId,
+                        'project_id' => $projectId,
+                        'task_name' => $taskRow['name'] ?? null,
+                        'status' => $taskRow['status'] ?? null,
+                        'project_foreman_id' => $this->taskAuth->resolveProjectForemanUserId($connection, $projectId),
+                        'task_lead_id' => $this->taskAuth->resolveTaskLeadUserId($connection, $taskId),
+                        'accountable_foreman_id' => $accountableForemanId,
+                        'initiated_by_user_id' => $actorId,
+                        'submitted_by_user_id' => $actorId,
+                        'submitted_on_behalf_of_lead' => $onBehalfOfForeman,
+                        'on_behalf_of_foreman' => $onBehalfOfForeman,
+                    ]
+                ),
+                ['field_submitted_at', 'field_submitted_by', 'field_notes'],
+                [
+                    'actor_type' => 'user',
+                    'actor_id' => $actorId,
+                    'comment' => $onBehalfOfForeman
+                        ? 'Crew member submitted field work for PM review (accountable foreman on record)'
+                        : 'Foreman submitted field work for PM review',
+                    'ip' => Flight::request()->ip ?? null,
+                    'user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+                ]
+            );
+
+            // Re-use getTask response shape
+            $this->getTask($projectId, $taskId);
+        } catch (Exception $e) {
+            $this->logger->error('Failed to submit task field work', [
+                'project_id' => $projectId,
+                'task_id' => $taskId,
+                'error' => $e->getMessage(),
+            ]);
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Failed to submit work',
+                'data' => null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Normalize datetime for MySQL DATETIME — store wall-clock as entered (no UTC shift).
+     */
+    private function normalizeNullableDateTime(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        if (!is_string($value)) {
+            return null;
+        }
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (preg_match('/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::(\d{2}))?/', $trimmed, $m)) {
+            $sec = isset($m[3]) && $m[3] !== '' ? $m[3] : '00';
+
+            return sprintf('%s %s:%s', $m[1], $m[2], $sec);
+        }
+
+        try {
+            $dt = new \DateTimeImmutable($trimmed);
+
+            return $dt->format('Y-m-d H:i:s');
+        } catch (\Exception) {
+            return null;
+        }
+    }
+
+    private function isTruthyRequestFlag(mixed $value): bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_int($value) || is_float($value)) {
+            return (int) $value === 1;
+        }
+        if (!is_string($value)) {
+            return false;
+        }
+        $normalized = strtolower(trim($value));
+
+        return in_array($normalized, ['1', 'true', 'yes', 'on'], true);
     }
 
     /**

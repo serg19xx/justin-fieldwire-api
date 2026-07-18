@@ -3,6 +3,8 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Support\ClientListContactFilter;
+use App\Support\ClientListSort;
 use Flight;
 use Exception;
 use Monolog\Logger;
@@ -53,7 +55,9 @@ class MedicalClinicController
         try {
             $country = Flight::request()->query->country ?? null;
             $region = Flight::request()->query->region ?? null;
+            $city = Flight::request()->query->city ?? null;
             $clinicType = Flight::request()->query->clinicType ?? null;
+            $search = trim((string)(Flight::request()->query->search ?? ''));
             $page = (int)(Flight::request()->query->page ?? 1);
             $limit = (int)(Flight::request()->query->limit ?? 50);
             $offset = ($page - 1) * $limit;
@@ -71,10 +75,35 @@ class MedicalClinicController
                 $params[] = $region;
             }
 
+            if ($city) {
+                $whereConditions[] = "city = ?";
+                $params[] = $city;
+            }
+
             if ($clinicType) {
                 $whereConditions[] = "clinicType = ?";
                 $params[] = $clinicType;
             }
+
+            if ($search !== '') {
+                if (ctype_digit($search)) {
+                    $whereConditions[] = "(id = ? OR clinicName LIKE ? OR clinicType LIKE ? OR contactName LIKE ? OR email LIKE ? OR phone LIKE ? OR city LIKE ? OR fullAddress LIKE ?)";
+                    $searchTerm = '%' . $search . '%';
+                    array_push($params, (int)$search, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm);
+                } else {
+                    $whereConditions[] = "(clinicName LIKE ? OR clinicType LIKE ? OR contactName LIKE ? OR email LIKE ? OR phone LIKE ? OR city LIKE ? OR fullAddress LIKE ?)";
+                    $searchTerm = '%' . $search . '%';
+                    array_push($params, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm, $searchTerm);
+                }
+            }
+
+            ClientListContactFilter::apply(
+                'medical_clinic',
+                $whereConditions,
+                Flight::request()->query->nonEmpty ?? null,
+                Flight::request()->query->empty ?? null,
+                Flight::request()->query->missingContacts ?? null,
+            );
 
             $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
 
@@ -83,8 +112,21 @@ class MedicalClinicController
             $countResult = $this->database->getConnection()->executeQuery($countSql, $params);
             $total = $countResult->fetchAssociative()['total'];
 
+            $orderBy = ClientListSort::resolveOrderBy(
+                Flight::request()->query->sortBy ?? null,
+                Flight::request()->query->sortDir ?? null,
+                [
+                    'id' => 'id',
+                    'clinicName' => 'clinicName',
+                    'clinicType' => 'clinicType',
+                    'contactName' => 'contactName',
+                    'email' => 'email',
+                ],
+                'clinicName',
+            );
+
             // Получить медицинские клиники
-            $sql = "SELECT id, clinicName, clinicType, contactName, phone, fax, email, unitNumb, streetName, city, region, country, postal, notes, fullAddress, geoAddress, geoCoordinates FROM medical_clinic $whereClause ORDER BY clinicName LIMIT $limit OFFSET $offset";
+            $sql = "SELECT id, clinicName, clinicType, contactName, phone, fax, email, unitNumb, streetName, city, region, country, postal, notes, fullAddress, geoAddress, geoCoordinates FROM medical_clinic $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
             $medicalClinics = $result->fetchAllAssociative();
@@ -249,6 +291,12 @@ class MedicalClinicController
 
             $data = Flight::request()->data;
 
+            $allowedFields = [
+                'clinicName', 'clinicType', 'contactName', 'phone', 'fax', 'email',
+                'unitNumb', 'streetName', 'city', 'region', 'country', 'postal',
+                'notes', 'fullAddress', 'geoAddress', 'geoCoordinates',
+            ];
+
             // Проверить существование клиники
             $checkSql = "SELECT id FROM medical_clinic WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
@@ -268,28 +316,27 @@ class MedicalClinicController
             $values = [];
 
             foreach ($data as $key => $value) {
-                if (in_array($key, ['id'])) continue; // Пропускаем ID
+                if (in_array($key, ['id'], true)) continue;
+                if (!in_array($key, $allowedFields, true)) continue;
                 $fields[] = "$key = ?";
                 $values[] = $value;
+            }
+
+            if (empty($fields)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'No valid fields to update',
+                    'data' => null
+                ], 400);
+                return;
             }
 
             $values[] = $id; // Для WHERE условия
 
             $sql = "UPDATE medical_clinic SET " . implode(', ', $fields) . " WHERE id = ?";
             
-            $stmt = $this->database->getConnection()->executeStatement($sql, $values);
-            
-            $affectedRows = $stmt->rowCount();
-
-            if ($affectedRows === 0) {
-                Flight::json([
-                    'error_code' => 400,
-                    'status' => 'error',
-                    'message' => 'No changes made to medical clinic',
-                    'data' => null
-                ], 400);
-                return;
-            }
+            $affectedRows = $this->database->getConnection()->executeStatement($sql, $values);
 
             Flight::json([
                 'error_code' => 0,
@@ -346,9 +393,7 @@ class MedicalClinicController
 
             // Удалить клинику
             $sql = "DELETE FROM medical_clinic WHERE id = ?";
-            $stmt = $this->database->getConnection()->executeStatement($sql, [$id]);
-            
-            $affectedRows = $stmt->rowCount();
+            $affectedRows = $this->database->getConnection()->executeStatement($sql, [$id]);
 
             if ($affectedRows === 0) {
                 Flight::json([

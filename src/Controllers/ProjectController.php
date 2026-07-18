@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Database\Database;
 use App\Services\EventLoggingService;
+use App\Services\ProjectLifecycleNotificationService;
 use App\Services\TaskAuthorizationService;
 use Doctrine\DBAL\Exception;
 use Flight;
@@ -297,6 +298,7 @@ class ProjectController
     private Database $database;
     private EventLoggingService $eventLoggingService;
     private TaskAuthorizationService $taskAuth;
+    private ProjectLifecycleNotificationService $projectLifecycleNotifications;
     private static ?bool $projectForemanColumnExists = null;
 
     private static ?bool $projectClientsTableExists = null;
@@ -345,6 +347,7 @@ class ProjectController
             $this->database = new Database();
             $this->eventLoggingService = new EventLoggingService($this->logger);
             $this->taskAuth = new TaskAuthorizationService();
+            $this->projectLifecycleNotifications = new ProjectLifecycleNotificationService($this->logger);
         } catch (\Exception $e) {
             $this->logger->error('Failed to initialize ProjectController', [
                 'error' => $e->getMessage()
@@ -1983,6 +1986,46 @@ class ProjectController
                             'user_agent' => $this->getUserAgent(),
                             'severity' => 'important'
                         ]
+                    );
+                }
+
+                // Lifecycle Active ↔ Inactive (sys_status). Draft/pre-active transitions stay silent.
+                if (
+                    array_key_exists('sys_status', $data)
+                    && ($beforeData['sys_status'] ?? null) !== ($project['sys_status'] ?? null)
+                ) {
+                    $this->eventLoggingService->logSimple(
+                        entityType: 'project',
+                        entityId: $id,
+                        eventType: 'PROJECT_SYS_STATUS_CHANGED',
+                        afterData: [
+                            'sys_status' => $project['sys_status'] ?? null,
+                            'previous_sys_status' => $beforeData['sys_status'] ?? null,
+                            'project_id' => $id,
+                            'project_name' => $project['prj_name'] ?? null,
+                        ],
+                        options: [
+                            'actor_type' => 'user',
+                            'actor_id' => $actorId,
+                            'before_data' => ['sys_status' => $beforeData['sys_status'] ?? null],
+                            'changed_fields' => ['sys_status'],
+                            'comment' => sprintf(
+                                "Project lifecycle changed from '%s' to '%s'",
+                                (string) ($beforeData['sys_status'] ?? 'Draft'),
+                                (string) ($project['sys_status'] ?? 'Draft')
+                            ),
+                            'ip' => $this->getClientIp(),
+                            'user_agent' => $this->getUserAgent(),
+                            'severity' => 'important',
+                        ]
+                    );
+
+                    $this->projectLifecycleNotifications->notifyIfLifecycleChanged(
+                        $id,
+                        $project,
+                        isset($beforeData['sys_status']) ? (string) $beforeData['sys_status'] : null,
+                        isset($project['sys_status']) ? (string) $project['sys_status'] : null,
+                        $actorId,
                     );
                 }
             } catch (\Exception $e) {

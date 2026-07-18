@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Database\Database;
+use App\ValueObjects\NotificationRequest;
 use Doctrine\DBAL\Exception;
 use Monolog\Logger;
 
@@ -15,6 +16,7 @@ class ProjectNotificationService
     private Logger $logger;
     private EmailService $emailService;
     private EventLoggingService $eventLoggingService;
+    private NotificationDispatcher $notificationDispatcher;
 
     public function __construct(Database $database, Logger $logger)
     {
@@ -22,75 +24,57 @@ class ProjectNotificationService
         $this->logger = $logger;
         $this->emailService = new EmailService($logger);
         $this->eventLoggingService = new EventLoggingService($logger);
+        $this->notificationDispatcher = new NotificationDispatcher($logger, $this->emailService);
     }
 
     /**
-     * Обрабатывает pending события из outbox
+     * Process pending outbox events (structured notify + legacy actions).
+     *
+     * @return array{processed: int, sent: int, skipped: int, errors: int}
      */
-    public function processPendingEvents(int $limit = 100): void
+    public function processPendingEvents(int $limit = 100): array
     {
         try {
-            $pendingEvents = $this->eventLoggingService->getPendingOutboxEvents($limit);
-            
-            foreach ($pendingEvents as $event) {
-                $this->processEvent($event);
-            }
-            
-            $this->logger->info('Processed pending events', [
-                'count' => count($pendingEvents)
-            ]);
-            
+            $processor = new EventOutboxProcessor(
+                $this->logger,
+                $this->eventLoggingService,
+                $this->notificationDispatcher,
+                $this
+            );
+            return $processor->processPending($limit);
         } catch (Exception $e) {
             $this->logger->error('Failed to process pending events', [
                 'error' => $e->getMessage()
             ]);
+            return ['processed' => 0, 'sent' => 0, 'skipped' => 0, 'errors' => 1];
         }
     }
 
     /**
-     * Обрабатывает одно событие
+     * Run a legacy string action used by older outbox rows / report jobs.
+     *
+     * @param array<string, mixed> $payload
      */
-    private function processEvent(array $event): void
+    public function processLegacyOutboxAction(string $action, array $payload): void
     {
-        try {
-            $payload = $event['payload'];
-            $action = $payload['action'];
-            
-            switch ($action) {
-                case 'notify_project_manager':
-                    $this->notifyProjectManager($payload);
-                    break;
-                case 'notify_admin':
-                    $this->notifyAdmin($payload);
-                    break;
-                case 'send_email_notification':
-                    $this->sendEmailNotification($payload);
-                    break;
-                case 'generate_daily_report':
-                    $this->generateDailyReport($payload);
-                    break;
-                case 'send_email_report':
-                    $this->sendEmailReport($payload);
-                    break;
-                default:
-                    $this->logger->warning('Unknown action', ['action' => $action]);
-            }
-            
-            // Обновляем статус события
-            $this->eventLoggingService->updateOutboxEventStatus($event['id'], 'sent');
-            
-        } catch (Exception $e) {
-            $this->logger->error('Failed to process event', [
-                'event_id' => $event['id'],
-                'error' => $e->getMessage()
-            ]);
-            
-            // Обновляем статус на ошибку
-            $this->eventLoggingService->updateOutboxEventStatus(
-                $event['id'], 
-                'error', 
-                $e->getMessage()
-            );
+        switch ($action) {
+            case 'notify_project_manager':
+                $this->notifyProjectManager($payload);
+                break;
+            case 'notify_admin':
+                $this->notifyAdmin($payload);
+                break;
+            case 'send_email_notification':
+                $this->sendEmailNotification($payload);
+                break;
+            case 'generate_daily_report':
+                $this->generateDailyReport($payload);
+                break;
+            case 'send_email_report':
+                $this->sendEmailReport($payload);
+                break;
+            default:
+                throw new Exception('Unknown legacy outbox action: ' . $action);
         }
     }
 
@@ -124,19 +108,35 @@ class ProjectNotificationService
             
             $subject = "Новый проект назначен: {$projectData['prj_name']}";
             $message = $this->buildProjectManagerNotificationMessage($projectData, $creator);
-            
-            // Отправляем email
-            $this->emailService->sendEmail(
-                $manager['email'],
-                $manager['first_name'] . ' ' . $manager['last_name'],
-                $subject,
-                $message
-            );
+
+            $result = $this->notificationDispatcher->dispatch(new NotificationRequest(
+                recipientUserId: (int) $managerId,
+                type: 'PROJECT_CREATED',
+                title: $subject,
+                message: $message,
+                channels: ['email'],
+                priority: 'high',
+                senderUserId: isset($payload['actor_id']) ? (int) $payload['actor_id'] : null,
+                eventLogId: isset($payload['event_log_id']) ? (int) $payload['event_log_id'] : null,
+                correlationId: isset($payload['correlation_id']) ? (string) $payload['correlation_id'] : null,
+                url: '/projects',
+                data: [
+                    'project_id' => $projectData['id'] ?? null,
+                    'project_name' => $projectData['prj_name'] ?? null,
+                ],
+                emailSubject: $subject,
+                emailHtml: $message,
+            ));
+
+            if ($result->hasFailures() && !$result->hasSent()) {
+                throw new Exception('Failed to notify project manager via dispatcher: ' . $result->overallStatus);
+            }
 
             $this->logger->info('Project manager notified', [
                 'project_id' => $projectData['id'],
                 'manager_id' => $managerId,
-                'manager_email' => $manager['email']
+                'manager_email' => $manager['email'],
+                'dispatch' => $result->toArray(),
             ]);
 
         } catch (Exception $e) {
@@ -178,23 +178,47 @@ class ProjectNotificationService
             // Получаем всех админов
             $admins = $this->getAdminUsers();
             
+            $failedAdmins = 0;
             foreach ($admins as $admin) {
                 $subject = "Новый проект создан: {$projectData['prj_name']}";
                 $message = $this->buildAdminNotificationMessage($projectData, $creator);
-                
-                // Отправляем email
-                $this->emailService->sendEmail(
-                    $admin['email'],
-                    $admin['first_name'] . ' ' . $admin['last_name'],
-                    $subject,
-                    $message
-                );
+
+                $result = $this->notificationDispatcher->dispatch(new NotificationRequest(
+                    recipientUserId: (int) $admin['id'],
+                    type: 'PROJECT_CREATED',
+                    title: $subject,
+                    message: $message,
+                    channels: ['email'],
+                    priority: 'medium',
+                    senderUserId: (int) $creatorId,
+                    eventLogId: isset($payload['event_log_id']) ? (int) $payload['event_log_id'] : null,
+                    correlationId: isset($payload['correlation_id'])
+                        ? ((string) $payload['correlation_id'] . ':admin:' . $admin['id'])
+                        : ('project_created_admin:' . ($projectData['id'] ?? '0') . ':' . $admin['id']),
+                    url: '/projects',
+                    data: [
+                        'project_id' => $projectData['id'] ?? null,
+                        'project_name' => $projectData['prj_name'] ?? null,
+                        'creator_id' => $creatorId,
+                    ],
+                    emailSubject: $subject,
+                    emailHtml: $message,
+                ));
+
+                if ($result->hasFailures() && !$result->hasSent()) {
+                    $failedAdmins++;
+                }
+            }
+
+            if ($failedAdmins > 0 && $failedAdmins === count($admins)) {
+                throw new Exception('Failed to notify any admin via dispatcher');
             }
 
             $this->logger->info('Admins notified about project creation', [
                 'project_id' => $projectData['id'],
                 'creator_id' => $creatorId,
-                'admins_count' => count($admins)
+                'admins_count' => count($admins),
+                'failed_admins' => $failedAdmins,
             ]);
 
         } catch (Exception $e) {
@@ -269,11 +293,12 @@ class ProjectNotificationService
                 $subject = "Ежедневный отчет по проектам - {$reportDate}";
                 $message = $this->buildDailyReportMessage($report);
                 
+                // Correct EmailService signature: to, subject, message, toName
                 $this->emailService->sendEmail(
                     $recipient['email'],
-                    $recipient['first_name'] . ' ' . $recipient['last_name'],
                     $subject,
-                    $message
+                    $message,
+                    $recipient['first_name'] . ' ' . $recipient['last_name']
                 );
             }
 
@@ -348,7 +373,7 @@ class ProjectNotificationService
                 "SELECT u.id, u.email, u.first_name, u.last_name 
                  FROM fw_users u 
                  LEFT JOIN fw_glob_roles r ON u.role_id = r.id 
-                 WHERE r.code = 'admin' AND u.status = 'active'"
+                 WHERE r.code = 'admin' AND u.status = 1 AND u.archived_at IS NULL"
             );
             
             return $result->fetchAllAssociative();
@@ -487,7 +512,9 @@ class ProjectNotificationService
                 "SELECT u.id, u.email, u.first_name, u.last_name, r.code as role_code
                  FROM fw_users u 
                  LEFT JOIN fw_glob_roles r ON u.role_id = r.id 
-                 WHERE r.code IN ('admin', 'project_manager') AND u.status = 'active'"
+                 WHERE r.code IN ('admin', 'project_manager')
+                   AND u.status = 1
+                   AND u.archived_at IS NULL"
             );
             
             return $result->fetchAllAssociative();
