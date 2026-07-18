@@ -240,6 +240,23 @@ class ApiRoutes
                     $scheduleWeekController->getUserSchedule((int) $user_id);
                 }
             });
+
+            $pushSubscriptionController = new \App\Controllers\PushSubscriptionController($this->logger);
+            Flight::route('POST /api/v1/me/push-subscriptions', function() use ($pushSubscriptionController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $pushSubscriptionController->upsert();
+                }
+            });
+            Flight::route('DELETE /api/v1/me/push-subscriptions', function() use ($pushSubscriptionController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $pushSubscriptionController->delete();
+                }
+            });
+            Flight::route('POST /api/v1/me/push-subscriptions/test', function() use ($pushSubscriptionController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $pushSubscriptionController->sendTest();
+                }
+            });
             
             Flight::route('PUT /api/v1/profile', function() use ($profileController, $authMiddleware) {
                 if ($authMiddleware->handle()) {

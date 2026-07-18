@@ -132,6 +132,7 @@ class ProjectNotificationService
                 $subject,
                 $message
             );
+            // TODO: WebPushService->sendToUser((int) $managerId, $subject, strip_tags($message), '/projects')
 
             $this->logger->info('Project manager notified', [
                 'project_id' => $projectData['id'],
