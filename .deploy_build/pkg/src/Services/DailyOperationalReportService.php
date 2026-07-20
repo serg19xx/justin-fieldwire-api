@@ -221,21 +221,29 @@ class DailyOperationalReportService
         $lines[] = '  Events logged: ' . (int) ($counts['events_logged'] ?? 0);
         $lines[] = '';
 
-        $lines = array_merge($lines, $this->renderSection(
-            'Field work started',
-            is_array($payload['field_work_started'] ?? null) ? $payload['field_work_started'] : []
-        ));
-        $lines = array_merge($lines, $this->renderSection(
-            'Field work ended',
-            is_array($payload['field_work_ended'] ?? null) ? $payload['field_work_ended'] : []
-        ));
+        if (array_key_exists('task_activities', $payload)) {
+            $lines = array_merge($lines, $this->renderTaskActivitiesText(
+                is_array($payload['task_activities']) ? $payload['task_activities'] : []
+            ));
+        } else {
+            // Legacy payloads (pre task-activity model).
+            $lines = array_merge($lines, $this->renderSection(
+                'Field work started',
+                is_array($payload['field_work_started'] ?? null) ? $payload['field_work_started'] : []
+            ));
+            $lines = array_merge($lines, $this->renderSection(
+                'Field work ended',
+                is_array($payload['field_work_ended'] ?? null) ? $payload['field_work_ended'] : []
+            ));
+            $lines = array_merge($lines, $this->renderSection(
+                'Foreman submitted',
+                is_array($payload['foreman_submitted'] ?? null) ? $payload['foreman_submitted'] : []
+            ));
+        }
+
         $lines = array_merge($lines, $this->renderSection(
             'Urgent',
             is_array($payload['urgent'] ?? null) ? $payload['urgent'] : []
-        ));
-        $lines = array_merge($lines, $this->renderSection(
-            'Foreman submitted',
-            is_array($payload['foreman_submitted'] ?? null) ? $payload['foreman_submitted'] : []
         ));
         $lines = array_merge($lines, $this->renderSection(
             'Project lifecycle',
@@ -243,6 +251,68 @@ class DailyOperationalReportService
         ));
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $activities
+     * @return list<string>
+     */
+    private function renderTaskActivitiesText(array $activities): array
+    {
+        $lines = ['Task activity:'];
+        if ($activities === []) {
+            $lines[] = '  No task activity';
+            $lines[] = '';
+            return $lines;
+        }
+        foreach ($activities as $activity) {
+            if (!is_array($activity)) {
+                continue;
+            }
+            $lines[] = '  - ' . (string) ($activity['task_name'] ?? ('Task #' . (int) ($activity['task_id'] ?? 0)));
+            $time = trim((string) ($activity['started_at'] ?? '') . ' → ' . (string) ($activity['ended_at'] ?? ''), " \t\n\r\0\x0B→");
+            if ($time !== '') {
+                $worked = $this->formatWorkedMinutes($activity['worked_minutes'] ?? null);
+                $lines[] = '      time: ' . $time . ($worked !== '' ? ' (' . $worked . ')' : '');
+            }
+            if ($activity['progress_pct'] !== null && $activity['progress_pct'] !== '') {
+                $lines[] = '      progress: ' . (int) $activity['progress_pct'] . '%';
+            }
+            if (!empty($activity['start_reason'])) {
+                $lines[] = '      start reason: ' . (string) $activity['start_reason'];
+            }
+            if (!empty($activity['end_reason'])) {
+                $lines[] = '      end reason: ' . (string) $activity['end_reason'];
+            }
+            if (!empty($activity['notes'])) {
+                $lines[] = '      notes: ' . (string) $activity['notes'];
+            }
+            $before = is_array($activity['photos_before'] ?? null) ? count($activity['photos_before']) : 0;
+            $after = is_array($activity['photos_after'] ?? null) ? count($activity['photos_after']) : 0;
+            $lines[] = sprintf('      photos: %d before, %d after', $before, $after);
+        }
+        $lines[] = '';
+        return $lines;
+    }
+
+    private function formatWorkedMinutes(mixed $minutes): string
+    {
+        if (!is_int($minutes) && !(is_string($minutes) && $minutes !== '' && ctype_digit($minutes))) {
+            return '';
+        }
+        $total = (int) $minutes;
+        if ($total < 0) {
+            return '';
+        }
+        $hours = intdiv($total, 60);
+        $mins = $total % 60;
+        if ($hours > 0 && $mins > 0) {
+            return $hours . 'h ' . $mins . 'm';
+        }
+        if ($hours > 0) {
+            return $hours . 'h';
+        }
+        return $mins . 'm';
     }
 
     /**
@@ -319,10 +389,17 @@ class DailyOperationalReportService
         $bars = $this->renderMetricBarsHtml($metrics);
 
         $sections = '';
-        $sections .= $this->renderHtmlSection('Field work started', is_array($payload['field_work_started'] ?? null) ? $payload['field_work_started'] : []);
-        $sections .= $this->renderHtmlSection('Field work ended', is_array($payload['field_work_ended'] ?? null) ? $payload['field_work_ended'] : []);
+        if (array_key_exists('task_activities', $payload)) {
+            $sections .= $this->renderHtmlTaskActivities(
+                is_array($payload['task_activities']) ? $payload['task_activities'] : []
+            );
+        } else {
+            // Legacy payloads (pre task-activity model).
+            $sections .= $this->renderHtmlSection('Field work started', is_array($payload['field_work_started'] ?? null) ? $payload['field_work_started'] : []);
+            $sections .= $this->renderHtmlSection('Field work ended', is_array($payload['field_work_ended'] ?? null) ? $payload['field_work_ended'] : []);
+            $sections .= $this->renderHtmlSection('Foreman submitted', is_array($payload['foreman_submitted'] ?? null) ? $payload['foreman_submitted'] : []);
+        }
         $sections .= $this->renderHtmlSection('Urgent', is_array($payload['urgent'] ?? null) ? $payload['urgent'] : []);
-        $sections .= $this->renderHtmlSection('Foreman submitted', is_array($payload['foreman_submitted'] ?? null) ? $payload['foreman_submitted'] : []);
         $sections .= $this->renderHtmlSection('Project lifecycle', is_array($payload['lifecycle'] ?? null) ? $payload['lifecycle'] : []);
 
         return $this->wrapHtmlDocument(
@@ -504,6 +581,113 @@ class DailyOperationalReportService
             . '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
             . 'style="border:1px solid #e2e8f0;border-radius:6px;border-collapse:separate;overflow:hidden;">'
             . $body . '</table>';
+    }
+
+    /**
+     * @param list<array<string, mixed>> $activities
+     */
+    private function renderHtmlTaskActivities(array $activities): string
+    {
+        $header = '<div style="font:bold 14px Arial,sans-serif;color:#0f172a;margin:16px 0 6px 0;">Task activity</div>';
+        if ($activities === []) {
+            return $header
+                . '<div style="font:13px Arial,sans-serif;color:#94a3b8;font-style:italic;">No task activity</div>';
+        }
+
+        $cards = '';
+        foreach ($activities as $activity) {
+            if (!is_array($activity)) {
+                continue;
+            }
+
+            $name = $this->esc((string) ($activity['task_name'] ?? ('Task #' . (int) ($activity['task_id'] ?? 0))));
+
+            $metaBits = [];
+            $time = trim(
+                (string) ($activity['started_at'] ?? '') . ' → ' . (string) ($activity['ended_at'] ?? ''),
+                " \t\n\r\0\x0B→"
+            );
+            if ($time !== '') {
+                $worked = $this->formatWorkedMinutes($activity['worked_minutes'] ?? null);
+                $metaBits[] = $this->esc($time) . ($worked !== '' ? ' (' . $this->esc($worked) . ')' : '');
+            }
+            if ($activity['progress_pct'] !== null && $activity['progress_pct'] !== '') {
+                $metaBits[] = 'Progress: ' . (int) $activity['progress_pct'] . '%';
+            }
+            if (!empty($activity['status'])) {
+                $metaBits[] = $this->esc((string) $activity['status']);
+            }
+            if (!empty($activity['submitted'])) {
+                $metaBits[] = 'Submitted';
+            }
+            $metaHtml = $metaBits === []
+                ? ''
+                : '<div style="font:12px Arial,sans-serif;color:#64748b;margin-top:3px;">'
+                    . implode(' · ', $metaBits) . '</div>';
+
+            $extra = '';
+            foreach ([
+                'Start reason' => (string) ($activity['start_reason'] ?? ''),
+                'End reason' => (string) ($activity['end_reason'] ?? ''),
+                'Notes' => (string) ($activity['notes'] ?? ''),
+            ] as $label => $value) {
+                if (trim($value) !== '') {
+                    $extra .= '<div style="font:12px Arial,sans-serif;color:#475569;margin-top:4px;">'
+                        . '<span style="color:#94a3b8;">' . $label . ':</span> ' . $this->esc($value) . '</div>';
+                }
+            }
+
+            $photos = $this->renderHtmlPhotoGroup(
+                'Before work',
+                is_array($activity['photos_before'] ?? null) ? $activity['photos_before'] : []
+            );
+            $photos .= $this->renderHtmlPhotoGroup(
+                'After work',
+                is_array($activity['photos_after'] ?? null) ? $activity['photos_after'] : []
+            );
+
+            $cards .= '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:10px;">'
+                . '<div style="font:bold 14px Arial,sans-serif;color:#0f172a;">' . $name . '</div>'
+                . $metaHtml
+                . $extra
+                . $photos
+                . '</div>';
+        }
+
+        return $header . $cards;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $photos
+     */
+    private function renderHtmlPhotoGroup(string $label, array $photos): string
+    {
+        $images = '';
+        foreach ($photos as $photo) {
+            if (!is_array($photo)) {
+                continue;
+            }
+            $dataUri = (string) ($photo['data_uri'] ?? '');
+            if (!str_starts_with($dataUri, 'data:image/')) {
+                continue;
+            }
+            $name = $this->esc((string) ($photo['original_name'] ?? 'Field photo'));
+            $images .= '<img src="' . $this->esc($dataUri) . '" alt="' . $name . '" '
+                . 'style="display:inline-block;width:112px;height:84px;object-fit:cover;border-radius:6px;'
+                . 'border:1px solid #e2e8f0;margin:6px 6px 0 0;vertical-align:top;">';
+        }
+
+        $count = $images === '' ? 0 : substr_count($images, '<img');
+        $caption = '<div style="font:11px Arial,sans-serif;color:#64748b;margin-top:8px;">'
+            . $this->esc($label) . ' (' . $count . ')</div>';
+
+        if ($images === '') {
+            return $caption
+                . '<div style="font:11px Arial,sans-serif;color:#cbd5e1;font-style:italic;margin-top:2px;">'
+                . 'No photos captured</div>';
+        }
+
+        return $caption . '<div>' . $images . '</div>';
     }
 
     private function esc(string $value): string
@@ -692,6 +876,8 @@ class DailyOperationalReportService
         $started = $this->collectFieldWork($projectId, $date, 'started');
         $ended = $this->collectFieldWork($projectId, $date, 'ended');
         $submitted = $this->collectForemanSubmitted($projectId, $date);
+        $fieldPhotos = $this->collectFieldPhotoSnapshots($projectId, $date);
+        $activities = $this->buildTaskActivities($projectId, $date, $started, $ended, $submitted, $fieldPhotos);
         $lifecycle = $this->collectLifecycle($projectId, $date);
         $urgent = $this->collectUrgent($projectId, $date);
         $eventsLogged = $this->countProjectEvents($projectId, $date);
@@ -709,12 +895,276 @@ class DailyOperationalReportService
                 'lifecycle_changes' => count($lifecycle),
                 'events_logged' => $eventsLogged,
             ],
-            'field_work_started' => $started,
-            'field_work_ended' => $ended,
+            'task_activities' => $activities,
             'urgent' => $urgent,
-            'foreman_submitted' => $submitted,
             'lifecycle' => $lifecycle,
         ];
+    }
+
+    /**
+     * Merge start/end/submit/photos into one card per task with activity that day.
+     *
+     * @param list<array<string, mixed>> $started
+     * @param list<array<string, mixed>> $ended
+     * @param list<array<string, mixed>> $submitted
+     * @param array<int, array<string, list<array<string, mixed>>>> $photos
+     * @return list<array<string, mixed>>
+     */
+    private function buildTaskActivities(
+        int $projectId,
+        string $date,
+        array $started,
+        array $ended,
+        array $submitted,
+        array $photos
+    ): array {
+        $startedByTask = $this->indexByTaskId($started);
+        $endedByTask = $this->indexByTaskId($ended);
+        $submittedByTask = $this->indexByTaskId($submitted);
+
+        $taskIds = array_values(array_unique(array_filter(
+            array_merge(
+                array_keys($startedByTask),
+                array_keys($endedByTask),
+                array_keys($submittedByTask),
+                array_map('intval', array_keys($photos))
+            ),
+            static fn (int $id): bool => $id > 0
+        )));
+        if ($taskIds === []) {
+            return [];
+        }
+
+        $meta = $this->loadTaskMeta($projectId, $taskIds);
+
+        $activities = [];
+        foreach ($taskIds as $taskId) {
+            $m = $meta[$taskId] ?? [];
+            $startedAt = (string) ($m['field_work_started_at'] ?? $startedByTask[$taskId]['at'] ?? '');
+            $endedAt = (string) ($m['field_work_ended_at'] ?? $endedByTask[$taskId]['at'] ?? '');
+            $name = (string) (
+                $m['name']
+                ?? $startedByTask[$taskId]['task_name']
+                ?? $endedByTask[$taskId]['task_name']
+                ?? $submittedByTask[$taskId]['task_name']
+                ?? ('Task #' . $taskId)
+            );
+
+            $activities[] = [
+                'task_id' => $taskId,
+                'task_name' => $name,
+                'status' => (string) ($m['status'] ?? ''),
+                'progress_pct' => isset($m['progress_pct']) ? (int) $m['progress_pct'] : null,
+                'started_at' => $startedAt,
+                'ended_at' => $endedAt,
+                'worked_minutes' => $this->workedMinutes($startedAt, $endedAt),
+                'start_reason' => (string) ($m['field_work_start_reason'] ?? $startedByTask[$taskId]['reason'] ?? ''),
+                'end_reason' => (string) ($m['field_work_end_reason'] ?? $endedByTask[$taskId]['reason'] ?? ''),
+                'notes' => (string) ($m['field_notes'] ?? ''),
+                'submitted' => isset($submittedByTask[$taskId]) || !empty($m['field_submitted_at']),
+                'photos_before' => $photos[$taskId]['before'] ?? [],
+                'photos_after' => $photos[$taskId]['after'] ?? [],
+            ];
+        }
+
+        usort($activities, static function (array $a, array $b): int {
+            $sa = (string) ($a['started_at'] ?? '');
+            $sb = (string) ($b['started_at'] ?? '');
+            if ($sa !== '' && $sb !== '' && $sa !== $sb) {
+                return $sa <=> $sb;
+            }
+            if ($sa === '' && $sb !== '') {
+                return 1;
+            }
+            if ($sa !== '' && $sb === '') {
+                return -1;
+            }
+            return (int) $a['task_id'] <=> (int) $b['task_id'];
+        });
+
+        return $activities;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows
+     * @return array<int, array<string, mixed>>
+     */
+    private function indexByTaskId(array $rows): array
+    {
+        $indexed = [];
+        foreach ($rows as $row) {
+            $taskId = (int) ($row['task_id'] ?? 0);
+            if ($taskId > 0 && !isset($indexed[$taskId])) {
+                $indexed[$taskId] = $row;
+            }
+        }
+        return $indexed;
+    }
+
+    /**
+     * @param list<int> $taskIds
+     * @return array<int, array<string, mixed>>
+     */
+    private function loadTaskMeta(int $projectId, array $taskIds): array
+    {
+        if ($taskIds === []) {
+            return [];
+        }
+        try {
+            $placeholders = implode(',', array_fill(0, count($taskIds), '?'));
+            $rows = $this->connection->fetchAllAssociative(
+                "SELECT id, name, status, progress_pct, field_notes,
+                        field_work_started_at, field_work_ended_at,
+                        field_work_start_reason, field_work_end_reason, field_submitted_at
+                 FROM fw_prj_tasks
+                 WHERE project_id = ? AND id IN ({$placeholders})",
+                array_merge([$projectId], $taskIds)
+            );
+        } catch (Throwable) {
+            return [];
+        }
+
+        $meta = [];
+        foreach ($rows as $row) {
+            $meta[(int) $row['id']] = $row;
+        }
+        return $meta;
+    }
+
+    private function workedMinutes(string $startedAt, string $endedAt): ?int
+    {
+        if ($startedAt === '' || $endedAt === '') {
+            return null;
+        }
+        try {
+            $start = new \DateTimeImmutable($startedAt);
+            $end = new \DateTimeImmutable($endedAt);
+        } catch (Throwable) {
+            return null;
+        }
+        $minutes = (int) round(($end->getTimestamp() - $start->getTimestamp()) / 60);
+        return $minutes >= 0 ? $minutes : null;
+    }
+
+    /**
+     * Capture small immutable image previews directly in the report payload.
+     *
+     * @return array<int, array<string, list<array<string, mixed>>>>
+     */
+    private function collectFieldPhotoSnapshots(int $projectId, string $date): array
+    {
+        try {
+            $rows = $this->connection->fetchAllAssociative(
+                "SELECT id, task_id, slot, original_name, mime_type, file_name, uploaded_at
+                 FROM fw_task_field_photos
+                 WHERE project_id = ? AND work_date = ? AND deleted_at IS NULL
+                   AND slot IN ('before', 'after')
+                 ORDER BY task_id ASC, slot ASC, uploaded_at ASC, id ASC",
+                [$projectId, $date]
+            );
+        } catch (Throwable $e) {
+            $this->logger->warning('Failed to collect field photos for daily report', [
+                'project_id' => $projectId,
+                'date' => $date,
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+
+        $photos = [];
+        foreach ($rows as $row) {
+            $taskId = (int) ($row['task_id'] ?? 0);
+            $slot = (string) ($row['slot'] ?? '');
+            if ($taskId <= 0 || !in_array($slot, ['before', 'after'], true)) {
+                continue;
+            }
+
+            $dataUri = $this->createPhotoSnapshotDataUri(
+                (string) ($row['file_name'] ?? ''),
+                (string) ($row['mime_type'] ?? 'image/jpeg')
+            );
+            if ($dataUri === null) {
+                continue;
+            }
+
+            $photos[$taskId][$slot][] = [
+                'id' => (int) ($row['id'] ?? 0),
+                'slot' => $slot,
+                'original_name' => (string) ($row['original_name'] ?? 'Photo'),
+                'mime_type' => 'image/jpeg',
+                'uploaded_at' => (string) ($row['uploaded_at'] ?? ''),
+                'data_uri' => $dataUri,
+            ];
+        }
+
+        return $photos;
+    }
+
+    private function createPhotoSnapshotDataUri(string $relativePath, string $mimeType): ?string
+    {
+        if ($relativePath === '') {
+            return null;
+        }
+
+        $filePath = __DIR__ . '/../../public/' . ltrim($relativePath, '/');
+        if (!is_file($filePath) || !is_readable($filePath)) {
+            return null;
+        }
+
+        $source = @file_get_contents($filePath);
+        if ($source === false || $source === '') {
+            return null;
+        }
+
+        // Prefer a compact JPEG preview to keep JSON and MEDIUMTEXT snapshots bounded.
+        if (function_exists('imagecreatefromstring') && function_exists('imagejpeg')) {
+            $image = @imagecreatefromstring($source);
+            if ($image !== false) {
+                $width = imagesx($image);
+                $height = imagesy($image);
+                $maxWidth = 480;
+                if ($width > 0 && $height > 0) {
+                    $targetWidth = min($width, $maxWidth);
+                    $targetHeight = max(1, (int) round($height * ($targetWidth / $width)));
+                    $preview = imagecreatetruecolor($targetWidth, $targetHeight);
+                    if ($preview !== false) {
+                        $white = imagecolorallocate($preview, 255, 255, 255);
+                        imagefill($preview, 0, 0, $white);
+                        imagecopyresampled(
+                            $preview,
+                            $image,
+                            0,
+                            0,
+                            0,
+                            0,
+                            $targetWidth,
+                            $targetHeight,
+                            $width,
+                            $height
+                        );
+                        ob_start();
+                        $encoded = imagejpeg($preview, null, 72);
+                        $jpeg = ob_get_clean();
+                        imagedestroy($preview);
+                        imagedestroy($image);
+                        if ($encoded && is_string($jpeg) && $jpeg !== '') {
+                            return 'data:image/jpeg;base64,' . base64_encode($jpeg);
+                        }
+                    } else {
+                        imagedestroy($image);
+                    }
+                } else {
+                    imagedestroy($image);
+                }
+            }
+        }
+
+        // Fallback for hosts without GD. Uploaded images are already client-compressed.
+        if (strlen($source) <= 1048576 && str_starts_with(strtolower($mimeType), 'image/')) {
+            return 'data:' . strtolower($mimeType) . ';base64,' . base64_encode($source);
+        }
+
+        return null;
     }
 
     /**
