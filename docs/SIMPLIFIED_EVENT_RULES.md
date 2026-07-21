@@ -1,327 +1,110 @@
-# Упрощенная система правил событий
+# Simplified Event Rules (recipients on actions)
 
-## Обзор
+## Model
 
-Система правил событий была упрощена для устранения конфликтов и дублирования между различными полями.
-
-## Основные изменения
-
-### 1. Упрощенные действия (Actions)
-
-**Старая система:**
-```json
-{
-  "actions": ["notify_admin", "notify_manager", "notify_assignees"]
-}
+```
+Event Type + Enabled + Severity + Priority + Execution Location + Comment
+Actions (required, ≥1):
+  - notify: channels + templates + recipients[]
+  - create_report: period + recipients[]
+  - log_only: audit only (no outbox)
+Schedule filter (optional, crontab-like):
+  - time_conditions: frequency (daily|weekly|monthly) + days_of_week / day_of_month + at_time / until_time + timezone
 ```
 
-**Новая система:**
+**Recipients live on each action**, not in conditions.  
+**Schedule** answers “when may this rule run?” — leave empty to process immediately.
+
+## Notify action
+
 ```json
 {
-  "actions": ["notify"]
-}
-```
-
-**Доступные действия:**
-- `notify` - уведомление (требует `notify_roles`)
-- `log_only` - только логирование
-- `create_daily_report` - создание ежедневного отчета
-
-### 2. Убрано дублирование severity
-
-**Убрано:** `event_conditions.min_severity`
-**Оставлено:** только поле `severity` в правиле
-
-### 3. Новое условие `notify_roles`
-
-Специальное условие для указания, кого уведомлять при использовании действия `notify`.
-
-## Структура упрощенного правила
-
-### Базовое правило
-```json
-{
-  "event_type": "PROJECT_CREATED",
-  "enabled": true,
-  "actions": ["notify"],
-  "severity": "important",
-  "conditions": {
-    "notify_roles": ["admin", "project_manager"]
-  },
-  "comment": "Notify admins and managers about new projects"
-}
-```
-
-### Правило с дополнительными условиями
-```json
-{
-  "event_type": "TASK_CREATED",
-  "enabled": true,
-  "actions": ["notify"],
-  "severity": "critical",
-  "conditions": {
-    "notify_roles": ["project_manager"],
-    "user_roles": ["admin", "project_manager"],
-    "time_conditions": {
-      "business_hours_only": true,
-      "timezone": "America/New_York"
-    },
-    "task_conditions": {
-      "min_priority": 3
-    }
-  },
-  "comment": "Notify manager about high priority tasks during business hours"
-}
-```
-
-## Доступные условия
-
-### 1. `user_roles`
-**Описание:** Разрешенные роли пользователей для срабатывания правила
-**Тип:** `array`
-**Значения:** `["admin", "project_manager", "contractor", "architect"]`
-
-### 2. `exclude_roles`
-**Описание:** Исключенные роли пользователей
-**Тип:** `array`
-**Значения:** `["admin", "project_manager", "contractor", "architect"]`
-
-### 3. `notify_roles` ⭐ НОВОЕ
-**Описание:** Роли для уведомления (обязательно для действия `notify`)
-**Тип:** `array`
-**Значения:** `["admin", "project_manager", "contractor", "architect"]`
-
-### 4. `time_conditions`
-**Описание:** Временные условия
-**Тип:** `object`
-**Свойства:**
-- `business_hours_only`: `boolean` - только в рабочее время
-- `weekdays_only`: `boolean` - только в будние дни
-- `timezone`: `string` - часовой пояс
-- `time_range`: `object` - временной диапазон
-  - `start`: `string` (например, "09:00")
-  - `end`: `string` (например, "17:00")
-
-### 5. `project_conditions`
-**Описание:** Условия проекта
-**Тип:** `object`
-**Свойства:**
-- `min_budget`: `number` - минимальный бюджет
-- `status`: `array` - разрешенные статусы
-- `project_type`: `string` - тип проекта
-
-### 6. `task_conditions`
-**Описание:** Условия задачи
-**Тип:** `object`
-**Свойства:**
-- `status`: `array` - разрешенные статусы
-- `min_priority`: `number` - минимальный приоритет
-- `is_milestone`: `boolean` - только вехи
-
-## Валидация
-
-### Обязательные условия для действия `notify`
-```json
-{
-  "actions": ["notify"],
-  "conditions": {
-    "notify_roles": ["admin", "project_manager"]  // ОБЯЗАТЕЛЬНО!
+  "type": "notify",
+  "channels": ["email", "sms"],
+  "recipients": ["project_manager", "task_lead", "admin"],
+  "channel_content": {
+    "email": { "mode": "local", "template_id": 12 },
+    "sms": { "mode": "system" }
   }
 }
 ```
 
-**Ошибка при отсутствии `notify_roles`:**
+Content modes (SendGrid / Twilio are **transport only**):
+- `system` — auto title/body from event payload
+- `local` — Message Template from Settings (`fw_message_templates`), rendered with Twig/`{{VAR}}`
+- `manual` — subject/body stored on the rule, rendered with the same variables
+
+Legacy `channel_templates: { "email": 12 }` is still accepted and mapped to `local`.
+
+Resolved roles: `admin`, `project_manager`, `task_lead`, `team_members`, `foreman`, `worker`, `contractor`, `inspector`.
+
+## Create report action (event-driven reports)
+
 ```json
 {
-  "error_code": 400,
-  "status": "error",
-  "message": "Validation failed",
-  "data": {
-    "errors": [
-      "Action 'notify' requires 'notify_roles' condition to specify who to notify"
-    ]
+  "type": "create_report",
+  "period": "daily",
+  "recipients": ["admin", "project_manager"]
+}
+```
+
+Handled by `EventOutboxProcessor` → `DailyOperationalReportService::runForPeriod()`.
+
+Any enabled rule with `create_report` + schedule is evaluated by tick CRON  
+`php scripts/run-report-schedule-tick.php` (every 5–15 minutes).  
+Periodicity comes from `time_conditions.frequency`, not from a special `REPORT_*` event-type name.
+
+## Schedule (crontab-like)
+
+```json
+{
+  "time_conditions": {
+    "frequency": "monthly",
+    "monthly_mode": "nth_weekday",
+    "weekday_occurrence": 2,
+    "days_of_week": [1],
+    "months": [],
+    "at_time": "07:00",
+    "until_time": "08:00",
+    "timezone": "America/New_York"
   }
 }
 ```
 
-### Конфликт между `notify_roles` и `exclude_roles`
-```json
-{
-  "conditions": {
-    "notify_roles": ["admin"],
-    "exclude_roles": ["admin"]  // КОНФЛИКТ!
-  }
-}
-```
+Examples:
+- 1st of each month → `monthly_mode: day_of_month`, `day_of_month: 1`
+- Last day of month → `day_of_month_last: true`
+- 2nd Monday → `monthly_mode: nth_weekday`, `weekday_occurrence: 2`, `days_of_week: [1]`
+- Only Jan/Jul → `months: [1, 7]`
 
-**Ошибка:**
-```json
-{
-  "error_code": 400,
-  "status": "error",
-  "message": "Validation failed",
-  "data": {
-    "errors": [
-      "Cannot notify roles that are excluded: admin"
-    ]
-  }
-}
-```
+- **No schedule** → outbox processes immediately.
+- **With schedule** → outbox uses it: in window = process; before window (same day) = defer; wrong day / after window = skip.
+- Domain events are always logged; the schedule gate runs in `EventOutboxProcessor`.
+- Schedule tick creates the event when the window matches (for `create_report` rules).
 
-### Недопустимые действия
-```json
-{
-  "actions": ["notify_manager"]  // НЕДОПУСТИМО!
-}
-```
+Legacy payloads (`business_hours_only`, `weekdays_only`, `time_range`) are still accepted and normalized.
 
-**Ошибка:**
-```json
-{
-  "error_code": 400,
-  "status": "error",
-  "message": "Validation failed",
-  "data": {
-    "errors": [
-      "Action 'notify_manager' is not allowed. Allowed actions: notify, log_only, create_daily_report"
-    ]
-  }
-}
-```
+## Removed / deprecated
 
-## Примеры использования
+- `conditions.notify_roles` → use `action.recipients`
+- `store_for_dashboard`
+- webhook channel in UI
+- Project / Task conditions / Strict mode / Required|Preferred|Optional in UI
 
-### 1. Уведомление админов о критических событиях
-```json
-{
-  "event_type": "PROJECT_DELETED",
-  "enabled": true,
-  "actions": ["notify"],
-  "severity": "critical",
-  "conditions": {
-    "notify_roles": ["admin"],
-    "user_roles": ["admin", "project_manager"]
-  },
-  "comment": "Notify admins about project deletions"
-}
-```
+## Migration
 
-### 2. Уведомление менеджеров в рабочее время
-```json
-{
-  "event_type": "TASK_OVERDUE",
-  "enabled": true,
-  "actions": ["notify"],
-  "severity": "important",
-  "conditions": {
-    "notify_roles": ["project_manager"],
-    "time_conditions": {
-      "business_hours_only": true,
-      "timezone": "America/New_York"
-    }
-  },
-  "comment": "Notify managers about overdue tasks during business hours"
-}
-```
-
-### 3. Только логирование без уведомлений
-```json
-{
-  "event_type": "USER_LOGIN",
-  "enabled": true,
-  "actions": ["log_only"],
-  "severity": "important",
-  "conditions": {
-    "user_roles": ["admin", "project_manager", "contractor", "architect"]
-  },
-  "comment": "Log all user logins"
-}
-```
-
-### 4. Ежедневный отчет
-```json
-{
-  "event_type": "USER_REGISTRATION_COMPLETED",
-  "enabled": true,
-  "actions": ["create_daily_report"],
-  "severity": "important",
-  "conditions": {},
-  "comment": "Generate daily report for new user registrations"
-}
-```
-
-## Миграция со старой системы
-
-### Старое правило:
-```json
-{
-  "event_type": "PROJECT_CREATED",
-  "enabled": true,
-  "actions": ["notify_admin", "notify_manager"],
-  "severity": "important",
-  "conditions": {
-    "user_roles": ["admin", "project_manager"],
-    "event_conditions": {
-      "min_severity": "important"
-    }
-  }
-}
-```
-
-### Новое правило:
-```json
-{
-  "event_type": "PROJECT_CREATED",
-  "enabled": true,
-  "actions": ["notify"],
-  "severity": "important",
-  "conditions": {
-    "notify_roles": ["admin", "project_manager"],
-    "user_roles": ["admin", "project_manager"]
-  }
-}
-```
-
-## Преимущества упрощенной системы
-
-1. **Устранены конфликты** между `severity` и `event_conditions.min_severity`
-2. **Упрощены действия** - один `notify` вместо множества специфичных
-3. **Четкое разделение** - действия определяют ЧТО делать, условия - КОГДА и КОГО
-4. **Меньше дублирования** - нет повторяющихся полей
-5. **Проще понимание** - логичная структура правил
-
-## API Endpoints
-
-### Получить доступные условия
 ```bash
-GET /api/v1/admin/event-rules/conditions
+php scripts/run-migrate-event-rule-recipients.php --dry-run
+php scripts/run-migrate-event-rule-recipients.php
+php scripts/run-migrate-report-type-unique.php
+# seed REPORT_* rules
+mysql ... < scripts/seed-report-schedule-event-rules.sql
 ```
 
-### Создать правило
-```bash
-POST /api/v1/admin/event-rules
-```
+## Manual test checklist
 
-### Обновить правило
-```bash
-PUT /api/v1/admin/event-rules/{event_type}
-```
-
-### Получить все правила
-```bash
-GET /api/v1/admin/event-rules
-```
-
-### Получить конкретное правило
-```bash
-GET /api/v1/admin/event-rules/{event_type}
-```
-
-### Удалить правило
-```bash
-DELETE /api/v1/admin/event-rules/{event_type}
-```
-
-## Заключение
-
-Упрощенная система правил событий устраняет конфликты и дублирование, делая создание и управление правилами более интуитивным и надежным.
+1. Create Notify rule with recipients PM + task_lead → outbox delivers to correct users.
+2. Add schedule (e.g. weekly Mon 09:00–09:30) → daytime event outside window is deferred/skipped by outbox; in-window processes.
+3. Enable any create_report rule + schedule → schedule tick in window → report archive + email to recipients.
+4. Edit old rule that had notify_roles → recipients appear on Notify action after load.
+5. Legacy time_range / weekdays_only schedules still match after normalize.

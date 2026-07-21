@@ -107,10 +107,17 @@ class TwilioService
                     'body' => $body,
                 ]);
                 $this->safeLog('MOCK SMS: Message would be sent to ' . $formattedPhone);
+                if (!NotificationMonitorService::isSuppressed()) {
+                    NotificationMonitorService::afterSmsSent($this, $formattedPhone, $body);
+                }
                 return true;
             }
 
-            return $this->sendSmsViaRestApi($accountSid, $authToken, $formattedPhone, $this->fromNumber, $body);
+            $sent = $this->sendSmsViaRestApi($accountSid, $authToken, $formattedPhone, $this->fromNumber, $body);
+            if ($sent && !NotificationMonitorService::isSuppressed()) {
+                NotificationMonitorService::afterSmsSent($this, $formattedPhone, $body);
+            }
+            return $sent;
         } catch (TwilioException $e) {
             $this->logger->error('Failed to send SMS', [
                 'to' => $phoneNumber,
@@ -188,33 +195,8 @@ class TwilioService
      */
     public function sendWelcomeSMS(string $phoneNumber, string $userName): bool
     {
-        try {
-            $formattedPhone = $this->formatPhoneNumber($phoneNumber);
-            
-            $message = $this->client->messages->create(
-                $formattedPhone,
-                [
-                    'from' => $this->fromNumber,
-                    'body' => "Welcome to FieldWire, {$userName}! Your account has been successfully created."
-                ]
-            );
-
-            $this->logger->info('Welcome SMS sent successfully', [
-                'to' => $formattedPhone,
-                'user_name' => $userName,
-                'message_sid' => $message->sid
-            ]);
-
-            return true;
-
-        } catch (TwilioException $e) {
-            $this->logger->error('Failed to send welcome SMS', [
-                'to' => $phoneNumber,
-                'error' => $e->getMessage()
-            ]);
-
-            return false;
-        }
+        $body = "Welcome to FieldWire, {$userName}! Your account has been successfully created.";
+        return $this->sendSms($phoneNumber, $body);
     }
 
     /**
@@ -222,32 +204,8 @@ class TwilioService
      */
     public function sendPasswordResetSMS(string $phoneNumber, string $resetCode): bool
     {
-        try {
-            $formattedPhone = $this->formatPhoneNumber($phoneNumber);
-            
-            $message = $this->client->messages->create(
-                $formattedPhone,
-                [
-                    'from' => $this->fromNumber,
-                    'body' => "Your FieldWire password reset code is: {$resetCode}. Valid for 15 minutes."
-                ]
-            );
-
-            $this->logger->info('Password reset SMS sent successfully', [
-                'to' => $formattedPhone,
-                'message_sid' => $message->sid
-            ]);
-
-            return true;
-
-        } catch (TwilioException $e) {
-            $this->logger->error('Failed to send password reset SMS', [
-                'to' => $phoneNumber,
-                'error' => $e->getMessage()
-            ]);
-
-            return false;
-        }
+        $body = "Your FieldWire password reset code is: {$resetCode}. Valid for 15 minutes.";
+        return $this->sendSms($phoneNumber, $body);
     }
 
     /**

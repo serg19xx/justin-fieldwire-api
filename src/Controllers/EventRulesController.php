@@ -303,7 +303,18 @@ class EventRulesController
         try {
             $request = Flight::request();
             $data = json_decode($request->getBody(), true);
-            
+            if (!is_array($data)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Invalid JSON body',
+                    'data' => null
+                ], 400);
+                return;
+            }
+
+            $data = $this->normalizeRulePayload($data);
+
             // Валидация
             $errors = $this->validateRuleDataWithConflicts($data);
             if (!empty($errors)) {
@@ -320,6 +331,11 @@ class EventRulesController
             
             // Получаем ID текущего пользователя из токена
             $userId = $this->getCurrentUserId();
+
+            $conditionsJson = null;
+            if (isset($data['conditions']) && is_array($data['conditions']) && $data['conditions'] !== []) {
+                $conditionsJson = json_encode($data['conditions'], JSON_UNESCAPED_UNICODE);
+            }
             
             $connection->executeStatement(
                 "INSERT INTO fw_event_rules (event_type, enabled, actions, severity, conditions, comment, execution_location, updated_by) 
@@ -329,8 +345,8 @@ class EventRulesController
                     $data['enabled'] ? 1 : 0,
                     json_encode($data['actions'], JSON_UNESCAPED_UNICODE),
                     $data['severity'],
-                    isset($data['conditions']) && $data['conditions'] ? json_encode($data['conditions'], JSON_UNESCAPED_UNICODE) : null,
-                    $data['comment'],
+                    $conditionsJson,
+                    $data['comment'] ?? null,
                     $data['execution_location'] ?? null,
                     $userId
                 ]
@@ -429,6 +445,8 @@ class EventRulesController
                 'comment' => array_key_exists('comment', $data) ? ($data['comment'] ?? '') : ($existing['comment'] ?? ''),
                 'execution_location' => array_key_exists('execution_location', $data) ? ($data['execution_location'] ?? null) : ($existing['execution_location'] ?? null)
             ];
+
+            $merged = $this->normalizeRulePayload($merged);
 
             // Валидация (event_type не обязателен в теле); валидируем merged
             $errors = $this->validateRuleDataWithConflicts($merged, false);
@@ -628,6 +646,59 @@ class EventRulesController
     }
 
     /**
+     * Normalize rule payload: migrate notify_roles → action.recipients, strip dead fields.
+     *
+     * @param array<string, mixed> $data
+     * @return array<string, mixed>
+     */
+    private function normalizeRulePayload(array $data): array
+    {
+        $legacyRoles = [];
+        $conditions = $data['conditions'] ?? null;
+        if (is_array($conditions)) {
+            $raw = $conditions['notify_roles']['value'] ?? ($conditions['notify_roles'] ?? null);
+            if (is_array($raw)) {
+                foreach ($raw as $role) {
+                    if (is_string($role) && $role !== '') {
+                        $legacyRoles[] = $role;
+                    }
+                }
+            }
+
+            $normalizedConditions = [];
+            if (isset($conditions['time_conditions']) && is_array($conditions['time_conditions'])) {
+                $tc = $conditions['time_conditions'];
+                $normalizedConditions['time_conditions'] =
+                    isset($tc['value']) && is_array($tc['value']) ? $tc['value'] : $tc;
+            }
+            $data['conditions'] = $normalizedConditions;
+        }
+
+        if (isset($data['actions']) && is_array($data['actions'])) {
+            foreach ($data['actions'] as $i => $action) {
+                if (!is_array($action)) {
+                    continue;
+                }
+                unset($data['actions'][$i]['store_for_dashboard']);
+                $type = $action['type'] ?? null;
+                if ($type === 'notify' || $type === 'create_report') {
+                    $recipients = $action['recipients'] ?? [];
+                    if (!is_array($recipients) || $recipients === []) {
+                        $data['actions'][$i]['recipients'] = array_values(array_unique($legacyRoles));
+                    } else {
+                        $data['actions'][$i]['recipients'] = array_values(array_filter(
+                            $recipients,
+                            static fn ($r): bool => is_string($r) && $r !== ''
+                        ));
+                    }
+                }
+            }
+        }
+
+        return $data;
+    }
+
+    /**
      * Валидирует данные правила события с проверкой конфликтов
      */
     private function validateRuleDataWithConflicts(array $data, bool $includeEventType = true): array
@@ -636,43 +707,36 @@ class EventRulesController
         
         // Базовая валидация
         $errors = array_merge($errors, $this->validateRuleData($data, $includeEventType));
-        
-        // Проверка конфликтов между полями
-        if (isset($data['conditions']) && is_array($data['conditions'])) {
-            $conflictErrors = $this->checkFieldConflicts($data);
-            $errors = array_merge($errors, $conflictErrors);
-        }
+        $errors = array_merge($errors, $this->checkFieldConflicts($data));
         
         return $errors;
     }
 
     /**
-     * Проверяет конфликты между полями правила
+     * Ensures notify / create_report actions have non-empty recipients.
      */
     private function checkFieldConflicts(array $data): array
     {
         $errors = [];
-        $conditions = $data['conditions'];
-        
-        // Проверка обязательных условий для действия notify (поддержка новой структуры actions как объектов)
-        if (isset($data['actions']) && is_array($data['actions'])) {
-            $hasNotifyAction = false;
-            foreach ($data['actions'] as $action) {
-                if ((is_string($action) && $action === 'notify') || (is_array($action) && ($action['type'] ?? null) === 'notify')) {
-                    $hasNotifyAction = true;
-                    break;
-                }
-            }
 
-            if ($hasNotifyAction) {
-                $notifyRoles = $conditions['notify_roles']['value'] ?? ($conditions['notify_roles'] ?? null);
-                if (!is_array($notifyRoles) || count($notifyRoles) === 0) {
-                    $errors[] = "Action 'notify' requires 'notify_roles' condition to specify who to notify";
-                }
+        if (!isset($data['actions']) || !is_array($data['actions'])) {
+            return $errors;
+        }
+
+        foreach ($data['actions'] as $index => $action) {
+            if (!is_array($action)) {
+                continue;
+            }
+            $type = $action['type'] ?? null;
+            if ($type !== 'notify' && $type !== 'create_report') {
+                continue;
+            }
+            $recipients = $action['recipients'] ?? null;
+            if (!is_array($recipients) || count($recipients) === 0) {
+                $errors[] = "Action '{$type}' (index {$index}) requires a non-empty 'recipients' array";
             }
         }
-        
-        
+
         return $errors;
     }
 
@@ -734,15 +798,44 @@ class EventRulesController
                     if (empty($action['channels']) || !is_array($action['channels'])) {
                         $errors[] = "Action 'notify' requires 'channels' as a non-empty array";
                     } else {
-                        // Валидация channel_templates соответствия email/sms
                         $channelTemplates = $action['channel_templates'] ?? [];
-                        if (!is_array($channelTemplates)) {
+                        if ($channelTemplates !== [] && !is_array($channelTemplates)) {
                             $errors[] = "Action 'notify' field 'channel_templates' must be an object";
-                        } else {
-                            if (in_array('email', $action['channels'] ?? [], true) && isset($channelTemplates['email']) && !is_numeric($channelTemplates['email'])) {
+                        }
+
+                        $channelContent = $action['channel_content'] ?? [];
+                        if ($channelContent !== [] && !is_array($channelContent)) {
+                            $errors[] = "Action 'notify' field 'channel_content' must be an object";
+                        } elseif (is_array($channelContent)) {
+                            foreach ($channelContent as $channel => $spec) {
+                                if (!is_array($spec)) {
+                                    $errors[] = "Action 'notify' channel_content.{$channel} must be an object";
+                                    continue;
+                                }
+                                $mode = strtolower((string) ($spec['mode'] ?? 'system'));
+                                if (!in_array($mode, ['system', 'local', 'manual'], true)) {
+                                    $errors[] = "Action 'notify' channel_content.{$channel}.mode must be system|local|manual";
+                                }
+                                if ($mode === 'local') {
+                                    $tid = $spec['template_id'] ?? null;
+                                    if ($tid === null || $tid === '' || !is_numeric($tid)) {
+                                        $errors[] = "Action 'notify' channel_content.{$channel} local mode requires template_id";
+                                    }
+                                }
+                                if ($mode === 'manual') {
+                                    $body = $spec['body'] ?? ($spec['body_html'] ?? null);
+                                    if (!is_string($body) || trim($body) === '') {
+                                        $errors[] = "Action 'notify' channel_content.{$channel} manual mode requires body";
+                                    }
+                                }
+                            }
+                        }
+
+                        if (is_array($channelTemplates)) {
+                            if (in_array('email', $action['channels'] ?? [], true) && isset($channelTemplates['email']) && $channelTemplates['email'] !== null && !is_numeric($channelTemplates['email'])) {
                                 $errors[] = "Action 'notify' channel_templates.email must be a numeric template id";
                             }
-                            if (in_array('sms', $action['channels'] ?? [], true) && isset($channelTemplates['sms']) && !is_numeric($channelTemplates['sms'])) {
+                            if (in_array('sms', $action['channels'] ?? [], true) && isset($channelTemplates['sms']) && $channelTemplates['sms'] !== null && !is_numeric($channelTemplates['sms'])) {
                                 $errors[] = "Action 'notify' channel_templates.sms must be a numeric template id";
                             }
                         }

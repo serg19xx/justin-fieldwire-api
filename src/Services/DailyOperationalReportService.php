@@ -88,6 +88,250 @@ class DailyOperationalReportService
         ];
     }
 
+    /**
+     * Event-rules / schedule-tick entry: generate period report and optionally email global summary.
+     *
+     * @param list<int> $recipientUserIds empty → default Admin/PM for global
+     * @return array{date: string, period: string, generated: int, sent: int, failed: int, reports: list<array<string, mixed>>}
+     */
+    public function runForPeriod(
+        string $period,
+        string $asOfDate,
+        bool $send = true,
+        array $recipientUserIds = []
+    ): array {
+        $period = strtolower($period);
+        if (!in_array($period, ['daily', 'weekly', 'monthly'], true)) {
+            $period = 'daily';
+        }
+        $asOfDate = $this->normalizeDate($asOfDate);
+
+        if ($period === 'daily') {
+            $generated = $this->generateForDate($asOfDate);
+            $rows = $this->loadReportsForDate($asOfDate, 'daily');
+        } elseif ($period === 'weekly') {
+            $generated = $this->generateWeekly($asOfDate);
+            $rows = $this->loadReportsForDate($asOfDate, 'weekly');
+        } else {
+            $generated = $this->generateMonthly($asOfDate);
+            $rows = $this->loadReportsForDate($asOfDate, 'monthly');
+        }
+
+        $sent = 0;
+        $failed = 0;
+        $previews = [];
+
+        foreach ($rows as $row) {
+            $payload = $this->decodePayload($row['payload_json'] ?? null);
+            $scope = (string) ($row['scope'] ?? ($payload['scope'] ?? 'project'));
+            $previews[] = [
+                'id' => (int) $row['id'],
+                'project_id' => (int) $row['project_id'],
+                'project_name' => (string) ($payload['project_name'] ?? ($scope === 'global' ? 'All projects' : '')),
+                'scope' => $scope,
+                'status' => (string) $row['status'],
+                'text' => $this->renderText($payload),
+            ];
+
+            if (!$send || $scope !== 'global') {
+                continue;
+            }
+
+            try {
+                $this->sendReport((int) $row['id'], $recipientUserIds);
+                $sent++;
+            } catch (Throwable $e) {
+                $failed++;
+                $this->logger->error('Failed to send operational report', [
+                    'report_id' => $row['id'],
+                    'period' => $period,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return [
+            'date' => $asOfDate,
+            'period' => $period,
+            'generated' => $generated,
+            'sent' => $sent,
+            'failed' => $failed,
+            'reports' => $previews,
+        ];
+    }
+
+    /**
+     * Aggregate daily global summaries for the ISO week ending on $weekEndDate (or containing it).
+     * Stores one global weekly row (report_type=weekly, report_date=Sunday of that week).
+     */
+    public function generateWeekly(string $asOfDate): int
+    {
+        $asOf = new \DateTimeImmutable($this->normalizeDate($asOfDate));
+        // ISO week: Monday–Sunday
+        $weekStart = $asOf->modify('monday this week');
+        $weekEnd = $weekStart->modify('+6 days');
+        $endKey = $weekEnd->format('Y-m-d');
+
+        $dailyGlobals = $this->loadGlobalPayloadsInRange(
+            $weekStart->format('Y-m-d'),
+            $endKey
+        );
+
+        $payload = $this->aggregatePeriodPayload(
+            $endKey,
+            'weekly',
+            $weekStart->format('Y-m-d'),
+            $endKey,
+            $dailyGlobals
+        );
+        $title = sprintf(
+            'Weekly summary %s – %s — all projects',
+            $weekStart->format('Y-m-d'),
+            $endKey
+        );
+        $html = $this->renderHtml($payload);
+        $this->upsertReport($endKey, self::GLOBAL_PROJECT_ID, $payload, $title, $html, 'global', 'weekly');
+
+        $this->logger->info('Weekly operational report generated', [
+            'from' => $weekStart->format('Y-m-d'),
+            'to' => $endKey,
+            'days_aggregated' => count($dailyGlobals),
+        ]);
+
+        return 1;
+    }
+
+    /**
+     * Aggregate daily global summaries for the calendar month of $asOfDate.
+     * Stores one global monthly row (report_type=monthly, report_date=last day of month).
+     */
+    public function generateMonthly(string $asOfDate): int
+    {
+        $asOf = new \DateTimeImmutable($this->normalizeDate($asOfDate));
+        $monthStart = $asOf->modify('first day of this month');
+        $monthEnd = $asOf->modify('last day of this month');
+        $endKey = $monthEnd->format('Y-m-d');
+
+        $dailyGlobals = $this->loadGlobalPayloadsInRange(
+            $monthStart->format('Y-m-d'),
+            $endKey
+        );
+
+        $payload = $this->aggregatePeriodPayload(
+            $endKey,
+            'monthly',
+            $monthStart->format('Y-m-d'),
+            $endKey,
+            $dailyGlobals
+        );
+        $title = sprintf(
+            'Monthly summary %s — all projects',
+            $monthStart->format('Y-m')
+        );
+        $html = $this->renderHtml($payload);
+        $this->upsertReport($endKey, self::GLOBAL_PROJECT_ID, $payload, $title, $html, 'global', 'monthly');
+
+        $this->logger->info('Monthly operational report generated', [
+            'from' => $monthStart->format('Y-m-d'),
+            'to' => $endKey,
+            'days_aggregated' => count($dailyGlobals),
+        ]);
+
+        return 1;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $dailyGlobals
+     * @return array<string, mixed>
+     */
+    private function aggregatePeriodPayload(
+        string $reportDate,
+        string $period,
+        string $from,
+        string $to,
+        array $dailyGlobals
+    ): array {
+        $totals = [
+            'field_work_starts' => 0,
+            'field_work_ends' => 0,
+            'urgent' => 0,
+            'foreman_submitted' => 0,
+            'lifecycle_changes' => 0,
+            'events_logged' => 0,
+        ];
+        $projectMap = [];
+
+        foreach ($dailyGlobals as $dayPayload) {
+            $counts = is_array($dayPayload['counts'] ?? null) ? $dayPayload['counts'] : [];
+            foreach ($totals as $key => $_) {
+                $totals[$key] += (int) ($counts[$key] ?? 0);
+            }
+            $projects = is_array($dayPayload['projects'] ?? null) ? $dayPayload['projects'] : [];
+            foreach ($projects as $p) {
+                if (!is_array($p)) {
+                    continue;
+                }
+                $pid = (int) ($p['project_id'] ?? 0);
+                if ($pid <= 0) {
+                    continue;
+                }
+                if (!isset($projectMap[$pid])) {
+                    $projectMap[$pid] = [
+                        'project_id' => $pid,
+                        'project_name' => (string) ($p['project_name'] ?? ''),
+                        'counts' => [
+                            'field_work_starts' => 0,
+                            'field_work_ends' => 0,
+                            'urgent' => 0,
+                            'foreman_submitted' => 0,
+                            'lifecycle_changes' => 0,
+                            'events_logged' => 0,
+                        ],
+                    ];
+                }
+                $pc = is_array($p['counts'] ?? null) ? $p['counts'] : [];
+                foreach ($projectMap[$pid]['counts'] as $key => $_) {
+                    $projectMap[$pid]['counts'][$key] += (int) ($pc[$key] ?? 0);
+                }
+            }
+        }
+
+        return [
+            'report_date' => $reportDate,
+            'period' => $period,
+            'period_from' => $from,
+            'period_to' => $to,
+            'scope' => 'global',
+            'project_id' => self::GLOBAL_PROJECT_ID,
+            'project_name' => 'All projects',
+            'project_count' => count($projectMap),
+            'days_aggregated' => count($dailyGlobals),
+            'counts' => $totals,
+            'projects' => array_values($projectMap),
+        ];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function loadGlobalPayloadsInRange(string $from, string $to): array
+    {
+        $sql = "SELECT payload_json FROM fw_operational_daily_reports
+                WHERE report_date BETWEEN ? AND ?
+                  AND project_id = ?
+                  AND (scope = 'global' OR scope IS NULL OR scope = '')";
+        $params = [$from, $to, self::GLOBAL_PROJECT_ID];
+        if ($this->snapshotColumnsPresent()) {
+            $sql .= " AND (report_type = 'daily' OR report_type IS NULL OR report_type = '')";
+        }
+        $sql .= ' ORDER BY report_date ASC';
+
+        $rows = $this->connection->fetchAllAssociative($sql, $params);
+        $out = [];
+        foreach ($rows as $row) {
+            $out[] = $this->decodePayload($row['payload_json'] ?? null);
+        }
+        return $out;
+    }
+
     /** @return int number of reports upserted (projects + global) */
     public function generateForDate(string $date): int
     {
@@ -105,7 +349,7 @@ class DailyOperationalReportService
                 (string) ($payload['project_name'] ?? ('Project #' . $projectId))
             );
             $html = $this->renderHtml($payload);
-            $this->upsertReport($date, $projectId, $payload, $title, $html, 'project');
+            $this->upsertReport($date, $projectId, $payload, $title, $html, 'project', 'daily');
             $projectPayloads[] = $payload;
             $count++;
         }
@@ -146,7 +390,7 @@ class DailyOperationalReportService
         $payload = $this->buildGlobalPayload($date, $projectPayloads);
         $title = sprintf('Daily summary %s — all projects', $date);
         $html = $this->renderHtml($payload);
-        $this->upsertReport($date, self::GLOBAL_PROJECT_ID, $payload, $title, $html, 'global');
+        $this->upsertReport($date, self::GLOBAL_PROJECT_ID, $payload, $title, $html, 'global', 'daily');
     }
 
     /**
@@ -695,7 +939,10 @@ class DailyOperationalReportService
         return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
-    public function sendReport(int $reportId): void
+    /**
+     * @param list<int> $recipientUserIds empty → default Admin/PM (global) or project manager/foreman/admin
+     */
+    public function sendReport(int $reportId, array $recipientUserIds = []): void
     {
         $row = $this->connection->fetchAssociative(
             'SELECT * FROM fw_operational_daily_reports WHERE id = ? LIMIT 1',
@@ -709,6 +956,7 @@ class DailyOperationalReportService
         $scope = (string) ($row['scope'] ?? ($payload['scope'] ?? 'project'));
         $projectId = (int) $row['project_id'];
         $date = (string) $row['report_date'];
+        $reportType = (string) ($row['report_type'] ?? ($payload['period'] ?? 'daily'));
         $text = $this->renderText($payload);
         $html = isset($row['rendered_html']) && is_string($row['rendered_html']) && $row['rendered_html'] !== ''
             ? $row['rendered_html']
@@ -723,9 +971,18 @@ class DailyOperationalReportService
                     (string) ($payload['project_name'] ?? ('Project #' . $projectId))
                 ));
 
-        $recipients = $scope === 'global'
-            ? $this->resolveAdminPmRecipients()
-            : $this->resolveRecipients($projectId);
+        $recipients = [];
+        foreach ($recipientUserIds as $id) {
+            $uid = (int) $id;
+            if ($uid > 0 && $this->isActiveUser($uid)) {
+                $recipients[] = $uid;
+            }
+        }
+        if ($recipients === []) {
+            $recipients = $scope === 'global'
+                ? $this->resolveAdminPmRecipients()
+                : $this->resolveRecipients($projectId);
+        }
         if ($recipients === []) {
             $this->markReport($reportId, 'failed', 'No recipients');
             throw new \RuntimeException('No recipients for report ' . $reportId);
@@ -733,13 +990,18 @@ class DailyOperationalReportService
 
         $anySent = false;
         $lastError = null;
+        $notifType = match ($reportType) {
+            'weekly' => 'WEEKLY_OPERATIONAL_REPORT',
+            'monthly' => 'MONTHLY_OPERATIONAL_REPORT',
+            default => 'DAILY_OPERATIONAL_REPORT',
+        };
         foreach ($recipients as $userId) {
             $correlation = $scope === 'global'
-                ? substr(sprintf('daily-op-global:%s:u%d', $date, $userId), 0, 64)
-                : substr(sprintf('daily-op:%s:p%d:u%d', $date, $projectId, $userId), 0, 64);
+                ? substr(sprintf('op-%s-global:%s:u%d', $reportType, $date, $userId), 0, 64)
+                : substr(sprintf('op-%s:%s:p%d:u%d', $reportType, $date, $projectId, $userId), 0, 64);
             $result = $this->dispatcher->dispatch(new NotificationRequest(
                 recipientUserId: $userId,
-                type: 'DAILY_OPERATIONAL_REPORT',
+                type: $notifType,
                 title: $title,
                 message: $text,
                 channels: ['email'],
@@ -752,6 +1014,7 @@ class DailyOperationalReportService
                     'report_id' => $reportId,
                     'project_id' => $projectId,
                     'report_date' => $date,
+                    'report_type' => $reportType,
                     'scope' => $scope,
                 ],
                 emailSubject: $title,
@@ -1389,7 +1652,8 @@ class DailyOperationalReportService
         array $payload,
         ?string $title = null,
         ?string $html = null,
-        string $scope = 'project'
+        string $scope = 'project',
+        string $reportType = 'daily'
     ): void {
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE);
         if ($json === false) {
@@ -1397,15 +1661,16 @@ class DailyOperationalReportService
         }
 
         $scope = $scope === 'global' ? 'global' : 'project';
+        $reportType = in_array($reportType, ['daily', 'weekly', 'monthly'], true) ? $reportType : 'daily';
 
         if ($this->snapshotColumnsPresent()) {
             $this->connection->executeStatement(
                 'INSERT INTO fw_operational_daily_reports
                     (report_date, project_id, report_type, scope, title, payload_json, rendered_html,
                      status, generated_at, sent_at, last_error)
-                 VALUES (?, ?, \'daily\', ?, ?, ?, ?, \'generated\', NOW(), NULL, NULL)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, \'generated\', NOW(), NULL, NULL)
                  ON DUPLICATE KEY UPDATE
-                    report_type = \'daily\',
+                    report_type = VALUES(report_type),
                     scope = VALUES(scope),
                     title = VALUES(title),
                     payload_json = VALUES(payload_json),
@@ -1414,7 +1679,7 @@ class DailyOperationalReportService
                     generated_at = NOW(),
                     sent_at = NULL,
                     last_error = NULL',
-                [$date, $projectId, $scope, $title, $json, $html]
+                [$date, $projectId, $reportType, $scope, $title, $json, $html]
             );
             return;
         }
@@ -1449,8 +1714,17 @@ class DailyOperationalReportService
     }
 
     /** @return list<array<string, mixed>> */
-    private function loadReportsForDate(string $date): array
+    private function loadReportsForDate(string $date, ?string $reportType = null): array
     {
+        if ($reportType !== null && $this->snapshotColumnsPresent()) {
+            return $this->connection->fetchAllAssociative(
+                'SELECT * FROM fw_operational_daily_reports
+                 WHERE report_date = ? AND report_type = ?
+                 ORDER BY project_id ASC',
+                [$date, $reportType]
+            );
+        }
+
         return $this->connection->fetchAllAssociative(
             'SELECT * FROM fw_operational_daily_reports WHERE report_date = ? ORDER BY project_id ASC',
             [$date]

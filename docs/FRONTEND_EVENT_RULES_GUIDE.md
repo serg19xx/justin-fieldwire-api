@@ -1,5 +1,8 @@
 # Документация для фронтенда: Система правил событий
 
+> **Updated 2026-07:** Recipients belong on each action (`recipients[]`), not in `conditions.notify_roles`.  
+> Conditions are a **schedule filter** only (`time_conditions`). See [SIMPLIFIED_EVENT_RULES.md](./SIMPLIFIED_EVENT_RULES.md).
+
 ## Резюме анализа
 
 ### Проблемы, которые были решены:
@@ -26,7 +29,47 @@
 
 ## Структура правила события
 
-### Полная структура JSON:
+### Полная структура JSON (current):
+
+```json
+{
+  "event_type": "PROJECT_CREATED",
+  "enabled": true,
+  "severity": "critical",
+  "priority": "high",
+  "actions": [
+    {
+      "type": "notify",
+      "channels": ["email", "sms"],
+      "channel_templates": {
+        "email": 123,
+        "sms": 124
+      },
+      "recipients": ["admin", "project_manager"]
+    },
+    {
+      "type": "create_report",
+      "period": "daily",
+      "recipients": ["admin", "project_manager"]
+    },
+    {
+      "type": "log_only"
+    }
+  ],
+  "conditions": {
+    "time_conditions": {
+      "business_hours_only": true,
+      "weekdays_only": true,
+      "timezone": "America/New_York",
+      "time_range": { "start": "09:00", "end": "17:00" }
+    }
+  },
+  "execution_location": "server",
+  "comment": "Notify PM/admin during business hours"
+}
+```
+
+### Legacy structure (deprecated — migrated on save):
 
 ```json
 {

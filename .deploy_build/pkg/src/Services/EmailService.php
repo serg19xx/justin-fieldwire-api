@@ -65,31 +65,43 @@ class EmailService
     {
         $provider = $this->resolveEmailProvider($provider);
 
-        switch ($provider) {
-            case 'sendgrid':
-                if ($this->sendGridAvailable) {
-                    return $this->sendViaSendGrid($to, $subject, $message, $toName);
-                } else {
-                    $this->logger->warning('SendGrid requested but not available, falling back to PHPMailer');
-                    return $this->sendViaPHPMailer($to, $subject, $message, $toName);
-                }
-                
-            case 'phpmailer':
-                return $this->sendViaPHPMailer($to, $subject, $message, $toName);
-                
-            case 'auto':
-            default:
-                if ($this->sendGridAvailable && $this->sendViaSendGrid($to, $subject, $message, $toName)) {
-                    return true;
-                }
+        $result = match ($provider) {
+            'sendgrid' => $this->sendGridAvailable
+                ? $this->sendViaSendGrid($to, $subject, $message, $toName)
+                : $this->sendViaPHPMailerAfterSendGridWarning($to, $subject, $message, $toName),
+            'phpmailer' => $this->sendViaPHPMailer($to, $subject, $message, $toName),
+            default => $this->sendViaAutoProvider($to, $subject, $message, $toName),
+        };
 
-                if ($this->isPHPMailerConfigured()) {
-                    return $this->sendViaPHPMailer($to, $subject, $message, $toName);
-                }
-
-                $this->logger->info('No email provider configured');
-                return false;
+        if ($result && !NotificationMonitorService::isSuppressed()) {
+            NotificationMonitorService::afterEmailSent($this, $to, $subject, $message, $toName);
         }
+
+        return $result;
+    }
+
+    private function sendViaPHPMailerAfterSendGridWarning(
+        string $to,
+        string $subject,
+        string $message,
+        string $toName,
+    ): bool {
+        $this->logger->warning('SendGrid requested but not available, falling back to PHPMailer');
+        return $this->sendViaPHPMailer($to, $subject, $message, $toName);
+    }
+
+    private function sendViaAutoProvider(string $to, string $subject, string $message, string $toName): bool
+    {
+        if ($this->sendGridAvailable && $this->sendViaSendGrid($to, $subject, $message, $toName)) {
+            return true;
+        }
+
+        if ($this->isPHPMailerConfigured()) {
+            return $this->sendViaPHPMailer($to, $subject, $message, $toName);
+        }
+
+        $this->logger->info('No email provider configured');
+        return false;
     }
 
     private function resolveEmailProvider(string $provider): string
@@ -693,48 +705,39 @@ class EmailService
     {
         try {
             $provider = $this->resolveEmailProvider($provider);
+            $result = false;
 
             if ($provider === 'phpmailer') {
                 if ($this->isPHPMailerConfigured() && $this->sendWithPHPMailerTemplates($email, $subject, $htmlContent, $textContent, $recipientName)) {
-                    return true;
+                    $result = true;
+                } elseif ($this->sendGridAvailable && $this->sendWithSendGridTemplates($email, $subject, $htmlContent, $textContent, $recipientName)) {
+                    $result = true;
                 }
-
-                $this->logger->warning('PHPMailer failed, trying SendGrid fallback', ['email' => $email]);
+            } elseif ($provider === 'sendgrid') {
                 if ($this->sendGridAvailable && $this->sendWithSendGridTemplates($email, $subject, $htmlContent, $textContent, $recipientName)) {
-                    return true;
+                    $result = true;
+                } elseif ($this->isPHPMailerConfigured()) {
+                    $result = $this->sendWithPHPMailerTemplates($email, $subject, $htmlContent, $textContent, $recipientName);
                 }
-
-                return false;
-            }
-
-            if ($provider === 'sendgrid') {
+            } else {
                 if ($this->sendGridAvailable && $this->sendWithSendGridTemplates($email, $subject, $htmlContent, $textContent, $recipientName)) {
-                    return true;
+                    $result = true;
+                } elseif ($this->isPHPMailerConfigured()) {
+                    $result = $this->sendWithPHPMailerTemplates($email, $subject, $htmlContent, $textContent, $recipientName);
                 }
-
-                if ($this->isPHPMailerConfigured()) {
-                    return $this->sendWithPHPMailerTemplates($email, $subject, $htmlContent, $textContent, $recipientName);
-                }
-
-                return false;
             }
 
-            // auto: SendGrid first (reliable delivery), then hosting SMTP
-            if ($this->sendGridAvailable && $this->sendWithSendGridTemplates($email, $subject, $htmlContent, $textContent, $recipientName)) {
-                return true;
+            if ($result && !NotificationMonitorService::isSuppressed()) {
+                NotificationMonitorService::afterEmailSent(
+                    $this,
+                    $email,
+                    $subject,
+                    $htmlContent !== '' ? $htmlContent : nl2br(htmlspecialchars($textContent, ENT_QUOTES, 'UTF-8')),
+                    $recipientName
+                );
             }
 
-            if ($this->isPHPMailerConfigured()) {
-                if ($this->sendWithPHPMailerTemplates($email, $subject, $htmlContent, $textContent, $recipientName)) {
-                    return true;
-                }
-
-                $this->logger->warning('PHPMailer template email failed after SendGrid fallback attempt', [
-                    'email' => $email,
-                ]);
-            }
-
-            return false;
+            return $result;
         } catch (\Exception $e) {
             $this->logger->error('Failed to send email with templates', [
                 'email' => $email,

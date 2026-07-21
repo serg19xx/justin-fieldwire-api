@@ -124,6 +124,16 @@ class EventLogController
     public function getEventLogs(): void
     {
         try {
+            $user = Flight::get('current_user');
+            if (!$this->canAccessAudit($user)) {
+                Flight::json([
+                    'error_code' => 403,
+                    'status' => 'error',
+                    'message' => 'Forbidden',
+                ], 403);
+                return;
+            }
+
             $filters = [
                 'entity_type' => Flight::request()->query['entity_type'] ?? null,
                 'entity_id' => Flight::request()->query['entity_id'] ?? null,
@@ -132,31 +142,37 @@ class EventLogController
                 'actor_type' => Flight::request()->query['actor_type'] ?? null,
                 'date_from' => Flight::request()->query['date_from'] ?? null,
                 'date_to' => Flight::request()->query['date_to'] ?? null,
+                'project_id' => Flight::request()->query['project_id'] ?? null,
+                'q' => Flight::request()->query['q'] ?? null,
             ];
 
             // Remove empty filters
-            $filters = array_filter($filters, function($value) {
+            $filters = array_filter($filters, function ($value) {
                 return $value !== null && $value !== '';
             });
 
-            $limit = min((int)(Flight::request()->query['limit'] ?? 50), 100);
-            $offset = max((int)(Flight::request()->query['offset'] ?? 0), 0);
+            $limit = min((int) (Flight::request()->query['limit'] ?? 50), 100);
+            $offset = max((int) (Flight::request()->query['offset'] ?? 0), 0);
 
-            $result = $this->eventLoggingService->getEventLogs($filters, $limit, $offset);
+            $result = $this->eventLoggingService->getEventLogs(
+                $filters,
+                $limit,
+                $offset,
+                $this->allowedProjectIdsForAudit($user)
+            );
 
             Flight::json([
                 'error_code' => 0,
                 'status' => 'success',
                 'message' => 'Event logs retrieved successfully',
-                'data' => $result
+                'data' => $result,
             ]);
-
         } catch (\Exception $e) {
             $this->logger->error('Failed to get event logs', ['error' => $e->getMessage()]);
             Flight::json([
                 'error_code' => 500,
                 'status' => 'error',
-                'message' => 'Failed to retrieve event logs'
+                'message' => 'Failed to retrieve event logs',
             ], 500);
         }
     }
@@ -198,41 +214,42 @@ class EventLogController
     public function getEventLog(string $id): void
     {
         try {
-            $connection = \App\Database\Database::getConnection();
-            $result = $connection->executeQuery(
-                'SELECT * FROM fw_event_log WHERE id = ?',
-                [$id]
+            $user = Flight::get('current_user');
+            if (!$this->canAccessAudit($user)) {
+                Flight::json([
+                    'error_code' => 403,
+                    'status' => 'error',
+                    'message' => 'Forbidden',
+                ], 403);
+                return;
+            }
+
+            $log = $this->eventLoggingService->getEventLogById(
+                (int) $id,
+                $this->allowedProjectIdsForAudit($user)
             );
-            
-            $log = $result->fetchAssociative();
-            
+
             if (!$log) {
                 Flight::json([
                     'error_code' => 404,
                     'status' => 'error',
-                    'message' => 'Event log not found'
+                    'message' => 'Event log not found',
                 ], 404);
                 return;
             }
-
-            // Decode JSON fields
-            $log['changed_fields'] = json_decode($log['changed_fields'], true);
-            $log['before_data'] = $log['before_data'] ? json_decode($log['before_data'], true) : null;
-            $log['after_data'] = $log['after_data'] ? json_decode($log['after_data'], true) : null;
 
             Flight::json([
                 'error_code' => 0,
                 'status' => 'success',
                 'message' => 'Event log retrieved successfully',
-                'data' => $log
+                'data' => $log,
             ]);
-
         } catch (\Exception $e) {
             $this->logger->error('Failed to get event log', ['error' => $e->getMessage(), 'id' => $id]);
             Flight::json([
                 'error_code' => 500,
                 'status' => 'error',
-                'message' => 'Failed to retrieve event log'
+                'message' => 'Failed to retrieve event log',
             ], 500);
         }
     }
@@ -543,6 +560,56 @@ class EventLogController
                 'status' => 'error',
                 'message' => 'Failed to fetch event rules'
             ], 500);
+        }
+    }
+
+    /**
+     * @param array<string, mixed>|null $user
+     */
+    private function canAccessAudit(?array $user): bool
+    {
+        if ($user === null) {
+            return false;
+        }
+        $role = $user['role_code'] ?? null;
+        return $role === 'admin' || $role === 'project_manager';
+    }
+
+    /**
+     * null = all projects (admin); list = PM scoped projects.
+     *
+     * @param array<string, mixed>|null $user
+     * @return list<int>|null
+     */
+    private function allowedProjectIdsForAudit(?array $user): ?array
+    {
+        if (($user['role_code'] ?? null) === 'admin') {
+            return null;
+        }
+
+        $userId = (int) ($user['id'] ?? 0);
+        if ($userId <= 0) {
+            return [];
+        }
+
+        try {
+            $connection = \App\Database\Database::getConnection();
+            $hasForeman = (bool) $connection->fetchOne(
+                "SHOW COLUMNS FROM fw_projects LIKE 'project_foreman_id'"
+            );
+            $sql = 'SELECT id FROM fw_projects WHERE prj_manager = ?';
+            $params = [$userId];
+            if ($hasForeman) {
+                $sql .= ' OR project_foreman_id = ?';
+                $params[] = $userId;
+            }
+            $ids = $connection->fetchFirstColumn($sql, $params);
+            return array_map(static fn ($v): int => (int) $v, $ids);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed to resolve allowed projects for event log audit', [
+                'error' => $e->getMessage(),
+            ]);
+            return [];
         }
     }
 }

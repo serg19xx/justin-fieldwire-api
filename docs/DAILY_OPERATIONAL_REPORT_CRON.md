@@ -2,6 +2,30 @@
 
 Nightly job that builds one report per Active project (archive) plus one global summary, then emails **only the global summary** to Admin / Project Manager.
 
+## Preferred: event-driven schedule (Event Rules)
+
+Instead of a hard-coded daily CRON, use Event Rules + schedule tick:
+
+1. Migrate unique key / fires table: `php scripts/run-migrate-report-type-unique.php`
+2. Seed rules: `mysql … < scripts/seed-report-schedule-event-rules.sql`
+3. Crontab (every 10 minutes):
+
+```cron
+*/10 * * * * cd /path/to/justin-fieldwire-api && /usr/local/bin/php scripts/run-report-schedule-tick.php >> storage/logs/report-schedule-tick.log 2>&1
+```
+
+4. Outbox worker must also run (processes `create_report` actions).
+5. After `REPORT_DAILY` is verified, disable the legacy `--send` CRON below.
+
+Rules with `create_report` + crontab-like `time_conditions` (frequency + at_time window).  
+Tick CRON: `php scripts/run-report-schedule-tick.php` every 5–15 minutes.  
+Periodicity is in the schedule filter, not tied to a special `REPORT_*` event-type name.  
+See [SIMPLIFIED_EVENT_RULES.md](./SIMPLIFIED_EVENT_RULES.md).
+
+---
+
+## Legacy direct CRON (still supported)
+
 ## One-time setup
 
 ```bash

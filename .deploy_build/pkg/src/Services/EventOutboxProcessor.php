@@ -28,18 +28,21 @@ class EventOutboxProcessor
     private EventLoggingService $eventLoggingService;
     private NotificationDispatcher $dispatcher;
     private ProjectNotificationService $projectNotificationService;
+    private NotificationContentResolver $contentResolver;
 
     public function __construct(
         private readonly Logger $logger,
         ?EventLoggingService $eventLoggingService = null,
         ?NotificationDispatcher $dispatcher = null,
         ?ProjectNotificationService $projectNotificationService = null,
+        ?NotificationContentResolver $contentResolver = null,
     ) {
         $this->connection = Database::getConnection();
         $this->eventLoggingService = $eventLoggingService ?? new EventLoggingService($logger);
         $this->dispatcher = $dispatcher ?? new NotificationDispatcher($logger);
         $this->projectNotificationService = $projectNotificationService
             ?? new ProjectNotificationService(new Database(), $logger);
+        $this->contentResolver = $contentResolver ?? new NotificationContentResolver($logger);
     }
 
     /**
@@ -91,6 +94,23 @@ class EventOutboxProcessor
                 return 'errors';
             }
 
+            $scheduleGate = $this->applyScheduleGate((string) ($event['event_type'] ?? $payload['event_type'] ?? ''));
+            if ($scheduleGate === 'defer') {
+                $this->logger->info('Outbox deferred until schedule window', [
+                    'outbox_id' => $outboxId,
+                    'event_type' => $event['event_type'] ?? null,
+                ]);
+                return 'skipped';
+            }
+            if ($scheduleGate === 'skip') {
+                $this->eventLoggingService->updateOutboxEventStatus(
+                    $outboxId,
+                    'sent',
+                    'skipped_outside_schedule'
+                );
+                return 'skipped';
+            }
+
             $outcome = match ($normalized['type']) {
                 'notify' => $this->handleNotify($payload, $normalized),
                 'create_report' => $this->handleCreateReport($payload, $normalized),
@@ -123,6 +143,63 @@ class EventOutboxProcessor
             $this->eventLoggingService->updateOutboxEventStatus($outboxId, 'error', $e->getMessage());
             return 'errors';
         }
+    }
+
+    /**
+     * Crontab schedule gate for outbox:
+     * - no schedule → process immediately
+     * - in window → process
+     * - before window (same day) → leave pending (defer)
+     * - wrong day / after window → skip permanently
+     *
+     * @return 'ok'|'defer'|'skip'
+     */
+    private function applyScheduleGate(string $eventType): string
+    {
+        if ($eventType === '') {
+            return 'ok';
+        }
+
+        try {
+            $row = $this->connection->fetchAssociative(
+                'SELECT conditions FROM fw_event_rules WHERE event_type = ? AND enabled = 1 LIMIT 1',
+                [$eventType]
+            );
+        } catch (Throwable $e) {
+            $this->logger->warning('Failed to load rule schedule for outbox gate', [
+                'event_type' => $eventType,
+                'error' => $e->getMessage(),
+            ]);
+            return 'ok';
+        }
+
+        if (!$row) {
+            return 'ok';
+        }
+
+        $conditions = !empty($row['conditions'])
+            ? json_decode((string) $row['conditions'], true)
+            : null;
+        if (!is_array($conditions)) {
+            return 'ok';
+        }
+
+        $timeConditions = $conditions['time_conditions'] ?? null;
+        if (is_array($timeConditions) && isset($timeConditions['value']) && is_array($timeConditions['value'])) {
+            $timeConditions = $timeConditions['value'];
+        }
+        if (!is_array($timeConditions) || $timeConditions === []) {
+            return 'ok';
+        }
+
+        $conditionsService = new EventConditionsService(new Database(), $this->logger);
+        $result = $conditionsService->evaluateSchedule($timeConditions);
+
+        return match ($result) {
+            'none', 'match' => 'ok',
+            'before' => 'defer',
+            default => 'skip', // after | wrong_day
+        };
     }
 
     /**
@@ -192,11 +269,21 @@ class EventOutboxProcessor
                 }
             }
 
-            return [
+            $normalized = [
                 'type' => 'notify',
                 'channels' => array_values(array_unique($channels)),
                 'recipients' => array_values(array_unique($recipients)),
             ];
+
+            // Preserve content config for NotificationContentResolver
+            if (isset($action['channel_content']) && is_array($action['channel_content'])) {
+                $normalized['channel_content'] = $action['channel_content'];
+            }
+            if (isset($action['channel_templates']) && is_array($action['channel_templates'])) {
+                $normalized['channel_templates'] = $action['channel_templates'];
+            }
+
+            return $this->contentResolver->normalizeActionContent($normalized);
         }
 
         if ($type === 'create_report') {
@@ -259,8 +346,9 @@ class EventOutboxProcessor
             return 'skipped';
         }
 
-        $title = $this->buildTitle($payload);
-        $message = $this->buildMessage($payload);
+        $content = $this->contentResolver->resolve($payload, $action);
+        $title = $content['title'];
+        $message = $content['message'];
         $actorId = isset($payload['actor_id']) ? (int) $payload['actor_id'] : null;
         $correlationBase = (string) ($payload['correlation_id'] ?? ('outbox:' . $eventLogId));
         $url = $this->buildUrl($payload);
@@ -286,11 +374,11 @@ class EventOutboxProcessor
                     'entity_id' => $payload['entity_id'] ?? null,
                     'event_log_id' => $eventLogId > 0 ? $eventLogId : null,
                 ],
-                emailSubject: $title,
-                emailHtml: $message,
-                smsBody: $title,
-                pushTitle: $title,
-                pushBody: mb_substr($message, 0, 180),
+                emailSubject: $content['email_subject'],
+                emailHtml: $content['email_html'],
+                smsBody: $content['sms_body'],
+                pushTitle: $content['push_title'],
+                pushBody: $content['push_body'],
             ));
 
             if ($result->hasSent()) {
@@ -313,18 +401,44 @@ class EventOutboxProcessor
 
     /**
      * @param array<string, mixed> $payload
-     * @param array{type: string, period?: string} $action
+     * @param array{type: string, period?: string, recipients?: list<string>} $action
      * @return 'sent'|'skipped'|'error'
      */
     private function handleCreateReport(array $payload, array $action): string
     {
         try {
-            // Reuse existing daily report pipeline for now.
-            $this->projectNotificationService->processLegacyOutboxAction(
-                'generate_daily_report',
-                $payload
-            );
-            return 'sent';
+            $period = strtolower((string) ($action['period'] ?? 'daily'));
+            if (!in_array($period, ['daily', 'weekly', 'monthly'], true)) {
+                $period = 'daily';
+            }
+
+            $after = is_array($payload['after_data'] ?? null) ? $payload['after_data'] : [];
+            $reportDate = (string) ($after['report_date'] ?? '');
+            if ($reportDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $reportDate)) {
+                $reportDate = (new \DateTimeImmutable('yesterday'))->format('Y-m-d');
+            }
+
+            $recipientIds = $this->resolveRecipientUserIds($payload, $action['recipients'] ?? []);
+
+            $service = new DailyOperationalReportService($this->logger);
+            $result = $service->runForPeriod($period, $reportDate, true, $recipientIds);
+
+            $this->logger->info('Outbox create_report completed', [
+                'period' => $period,
+                'report_date' => $reportDate,
+                'generated' => $result['generated'],
+                'sent' => $result['sent'],
+                'failed' => $result['failed'],
+            ]);
+
+            if (($result['failed'] ?? 0) > 0 && ($result['sent'] ?? 0) === 0) {
+                return 'error';
+            }
+            if (($result['sent'] ?? 0) > 0 || ($result['generated'] ?? 0) > 0) {
+                return 'sent';
+            }
+
+            return 'skipped';
         } catch (Throwable $e) {
             $this->logger->error('Outbox create_report failed', ['error' => $e->getMessage()]);
             return 'error';

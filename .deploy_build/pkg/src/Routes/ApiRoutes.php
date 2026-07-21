@@ -1486,8 +1486,16 @@ class ApiRoutes
         // Event rules routes
         Flight::route('GET /api/v1/event-rules', [$eventLogController, 'getEventRules']);
         
-        Flight::route('GET /api/v1/event-logs', [$eventLogController, 'getEventLogs']);
-        Flight::route('GET /api/v1/event-logs/@id', [$eventLogController, 'getEventLog']);
+        Flight::route('GET /api/v1/event-logs', function () use ($eventLogController, $authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $eventLogController->getEventLogs();
+            }
+        });
+        Flight::route('GET /api/v1/event-logs/@id', function ($id) use ($eventLogController, $authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $eventLogController->getEventLog((string) $id);
+            }
+        });
         Flight::route('POST /api/v1/event-logs', [$eventLogController, 'createEventLog']);
         Flight::route('GET /api/v1/event-logs/outbox/pending', [$eventLogController, 'getPendingOutboxEvents']);
         Flight::route('PUT /api/v1/event-logs/outbox/@id/status', [$eventLogController, 'updateOutboxEventStatus']);
@@ -1583,6 +1591,28 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $reportsController = new \App\Controllers\ReportsController($this->logger);
                 $reportsController->listForProject((int) $project_id);
+            }
+        });
+
+        // Live operational dashboard (no snapshot storage)
+        Flight::route('GET /api/v1/dashboard/global', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $dashboardController = new \App\Controllers\DashboardController($this->logger);
+                $dashboardController->global();
+            }
+        });
+
+        Flight::route('GET /api/v1/dashboard/field', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $dashboardController = new \App\Controllers\DashboardController($this->logger);
+                $dashboardController->field();
+            }
+        });
+
+        Flight::route('GET /api/v1/dashboard/project/@project_id:[0-9]+', function($project_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $dashboardController = new \App\Controllers\DashboardController($this->logger);
+                $dashboardController->forProject((int) $project_id);
             }
         });
 

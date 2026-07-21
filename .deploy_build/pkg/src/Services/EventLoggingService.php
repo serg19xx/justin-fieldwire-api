@@ -129,6 +129,9 @@ class EventLoggingService
                 return null;
             }
 
+            // Schedule filter is applied by EventOutboxProcessor (crontab gate).
+            // No schedule → actions process immediately; with schedule → defer/skip there.
+
             // Prepare log data
             $logData = [
                 'tenant_id' => $options['tenant_id'] ?? null,
@@ -259,6 +262,16 @@ class EventLoggingService
     {
         try {
             foreach ($actions as $action) {
+                // log_only: audit row already written — skip outbox
+                if (is_array($action)) {
+                    $type = strtolower((string) ($action['type'] ?? ''));
+                    if ($type === 'log_only' || $type === 'log') {
+                        continue;
+                    }
+                } elseif (is_string($action) && in_array(strtolower($action), ['log_only', 'log'], true)) {
+                    continue;
+                }
+
                 $payload = [
                     'event_log_id' => $eventLogId,
                     'event_type' => $eventType,
@@ -357,83 +370,252 @@ class EventLoggingService
     /**
      * Get event logs with filtering
      */
-    public function getEventLogs(array $filters = [], int $limit = 50, int $offset = 0): array
+    /**
+     * @param array<string, mixed> $filters
+     * @param list<int>|null $allowedProjectIds null = all projects; [] = none
+     * @return array{logs: list<array<string, mixed>>, total: int|string, limit: int, offset: int}
+     */
+    public function getEventLogs(array $filters = [], int $limit = 50, int $offset = 0, ?array $allowedProjectIds = null): array
     {
         try {
-            $whereConditions = [];
-            $params = [];
+            [$whereClause, $params] = $this->buildEventLogFilters($filters, $allowedProjectIds);
 
-            // Build WHERE conditions
-            if (!empty($filters['entity_type'])) {
-                $whereConditions[] = 'entity_type = ?';
-                $params[] = $filters['entity_type'];
-            }
+            $fromSql = $this->eventLogFromSql();
 
-            if (!empty($filters['entity_id'])) {
-                $whereConditions[] = 'entity_id = ?';
-                $params[] = $filters['entity_id'];
-            }
-
-            if (!empty($filters['event_type'])) {
-                $whereConditions[] = 'event_type = ?';
-                $params[] = $filters['event_type'];
-            }
-
-            if (!empty($filters['severity'])) {
-                $whereConditions[] = 'severity = ?';
-                $params[] = $filters['severity'];
-            }
-
-            if (!empty($filters['actor_type'])) {
-                $whereConditions[] = 'actor_type = ?';
-                $params[] = $filters['actor_type'];
-            }
-
-            if (!empty($filters['date_from'])) {
-                $whereConditions[] = 'occurred_at >= ?';
-                $params[] = $filters['date_from'];
-            }
-
-            if (!empty($filters['date_to'])) {
-                $whereConditions[] = 'occurred_at <= ?';
-                $params[] = $filters['date_to'];
-            }
-
-            $whereClause = !empty($whereConditions) ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
-
-            // Get total count
             $countResult = $this->connection->executeQuery(
-                "SELECT COUNT(*) as total FROM fw_event_log $whereClause",
+                "SELECT COUNT(*) as total {$fromSql} {$whereClause}",
                 $params
             );
             $total = $countResult->fetchOne();
 
-            // Get logs
-            $sql = "SELECT * FROM fw_event_log $whereClause ORDER BY occurred_at DESC LIMIT $limit OFFSET $offset";
+            $sql = "SELECT el.*,
+                        p.id AS resolved_project_id,
+                        p.prj_name AS project_name,
+                        t.id AS resolved_task_id,
+                        t.name AS task_name,
+                        CASE
+                          WHEN el.actor_type = 'user' AND u.id IS NOT NULL
+                            THEN TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')))
+                          WHEN el.actor_type = 'system' THEN 'System'
+                          WHEN el.actor_type = 'api' THEN 'API'
+                          ELSE NULL
+                        END AS actor_name
+                    {$fromSql}
+                    {$whereClause}
+                    ORDER BY el.occurred_at DESC
+                    LIMIT {$limit} OFFSET {$offset}";
 
             $result = $this->connection->executeQuery($sql, $params);
             $logs = [];
 
             while ($row = $result->fetchAssociative()) {
-                $row['changed_fields'] = json_decode($row['changed_fields'], true);
-                $row['before_data'] = $row['before_data'] ? json_decode($row['before_data'], true) : null;
-                $row['after_data'] = $row['after_data'] ? json_decode($row['after_data'], true) : null;
-                $logs[] = $row;
+                $logs[] = $this->hydrateEventLogRow($row);
             }
 
             return [
                 'logs' => $logs,
                 'total' => $total,
                 'limit' => $limit,
-                'offset' => $offset
+                'offset' => $offset,
             ];
         } catch (Exception $e) {
             $this->logger->error('Failed to get event logs', [
                 'error' => $e->getMessage(),
-                'filters' => $filters
+                'filters' => $filters,
             ]);
             return ['logs' => [], 'total' => 0, 'limit' => $limit, 'offset' => $offset];
         }
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    public function getEventLogById(int $id, ?array $allowedProjectIds = null): ?array
+    {
+        try {
+            $fromSql = $this->eventLogFromSql();
+            [$extraWhere, $params] = $this->buildEventLogFilters([], $allowedProjectIds);
+            $params = array_merge([$id], $params);
+            $scopeSql = $extraWhere !== '' ? ' AND ' . substr($extraWhere, 6) : '';
+
+            $sql = "SELECT el.*,
+                        p.id AS resolved_project_id,
+                        p.prj_name AS project_name,
+                        t.id AS resolved_task_id,
+                        t.name AS task_name,
+                        CASE
+                          WHEN el.actor_type = 'user' AND u.id IS NOT NULL
+                            THEN TRIM(CONCAT(COALESCE(u.first_name, ''), ' ', COALESCE(u.last_name, '')))
+                          WHEN el.actor_type = 'system' THEN 'System'
+                          WHEN el.actor_type = 'api' THEN 'API'
+                          ELSE NULL
+                        END AS actor_name
+                    {$fromSql}
+                    WHERE el.id = ?{$scopeSql}
+                    LIMIT 1";
+
+            $row = $this->connection->fetchAssociative($sql, $params);
+            if (!$row) {
+                return null;
+            }
+
+            return $this->hydrateEventLogRow($row);
+        } catch (Exception $e) {
+            $this->logger->error('Failed to get event log by id', [
+                'id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    private function eventLogFromSql(): string
+    {
+        return "FROM fw_event_log el
+                LEFT JOIN fw_prj_tasks t ON el.entity_type = 'task' AND el.entity_id = t.id
+                LEFT JOIN fw_projects p ON (
+                    (el.entity_type = 'project' AND el.entity_id = p.id)
+                    OR (t.project_id IS NOT NULL AND t.project_id = p.id)
+                )
+                LEFT JOIN fw_v_users u ON el.actor_type = 'user' AND el.actor_id = u.id";
+    }
+
+    /**
+     * @param array<string, mixed> $filters
+     * @param list<int>|null $allowedProjectIds
+     * @return array{0: string, 1: list<mixed>}
+     */
+    private function buildEventLogFilters(array $filters, ?array $allowedProjectIds): array
+    {
+        $whereConditions = [];
+        $params = [];
+
+        if (!empty($filters['entity_type'])) {
+            $whereConditions[] = 'el.entity_type = ?';
+            $params[] = $filters['entity_type'];
+        }
+
+        if (!empty($filters['entity_id'])) {
+            $whereConditions[] = 'el.entity_id = ?';
+            $params[] = (int) $filters['entity_id'];
+        }
+
+        if (!empty($filters['event_type'])) {
+            $whereConditions[] = 'el.event_type = ?';
+            $params[] = $filters['event_type'];
+        }
+
+        if (!empty($filters['severity'])) {
+            $whereConditions[] = 'el.severity = ?';
+            $params[] = $filters['severity'];
+        }
+
+        if (!empty($filters['actor_type'])) {
+            $whereConditions[] = 'el.actor_type = ?';
+            $params[] = $filters['actor_type'];
+        }
+
+        if (!empty($filters['date_from'])) {
+            $dateFrom = (string) $filters['date_from'];
+            if (strlen($dateFrom) === 10) {
+                $dateFrom .= ' 00:00:00';
+            }
+            $whereConditions[] = 'el.occurred_at >= ?';
+            $params[] = $dateFrom;
+        }
+
+        if (!empty($filters['date_to'])) {
+            $dateTo = (string) $filters['date_to'];
+            // Inclusive end date when only YYYY-MM-DD is provided
+            if (strlen($dateTo) === 10) {
+                $whereConditions[] = 'el.occurred_at < DATE_ADD(?, INTERVAL 1 DAY)';
+                $params[] = $dateTo;
+            } else {
+                $whereConditions[] = 'el.occurred_at <= ?';
+                $params[] = $dateTo;
+            }
+        }
+
+        if (!empty($filters['project_id']) && is_numeric($filters['project_id'])) {
+            $projectId = (int) $filters['project_id'];
+            $whereConditions[] = '(
+                p.id = ?
+                OR (el.entity_type = \'project\' AND el.entity_id = ?)
+                OR CAST(JSON_UNQUOTE(JSON_EXTRACT(el.after_data, \'$.project_id\')) AS UNSIGNED) = ?
+            )';
+            $params[] = $projectId;
+            $params[] = $projectId;
+            $params[] = $projectId;
+        }
+
+        if (!empty($filters['q']) && is_string($filters['q'])) {
+            $term = '%' . trim($filters['q']) . '%';
+            $whereConditions[] = '(
+                el.comment LIKE ?
+                OR el.event_type LIKE ?
+                OR el.entity_type LIKE ?
+                OR p.prj_name LIKE ?
+                OR t.name LIKE ?
+            )';
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+            $params[] = $term;
+        }
+
+        if ($allowedProjectIds !== null) {
+            if ($allowedProjectIds === []) {
+                $whereConditions[] = '1 = 0';
+            } else {
+                $placeholders = implode(',', array_fill(0, count($allowedProjectIds), '?'));
+                $whereConditions[] = "(
+                    p.id IN ({$placeholders})
+                    OR (el.entity_type = 'project' AND el.entity_id IN ({$placeholders}))
+                    OR CAST(JSON_UNQUOTE(JSON_EXTRACT(el.after_data, '$.project_id')) AS UNSIGNED) IN ({$placeholders})
+                )";
+                $ids = array_map(static fn (int $id): int => $id, $allowedProjectIds);
+                $params = array_merge($params, $ids, $ids, $ids);
+            }
+        }
+
+        $whereClause = $whereConditions !== [] ? 'WHERE ' . implode(' AND ', $whereConditions) : '';
+
+        return [$whereClause, $params];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function hydrateEventLogRow(array $row): array
+    {
+        $row['changed_fields'] = $row['changed_fields']
+            ? json_decode((string) $row['changed_fields'], true)
+            : [];
+        $row['before_data'] = !empty($row['before_data'])
+            ? json_decode((string) $row['before_data'], true)
+            : null;
+        $row['after_data'] = !empty($row['after_data'])
+            ? json_decode((string) $row['after_data'], true)
+            : null;
+
+        $after = is_array($row['after_data']) ? $row['after_data'] : [];
+        $projectId = (int) ($row['resolved_project_id'] ?? $after['project_id'] ?? 0);
+        $taskId = (int) ($row['resolved_task_id'] ?? (
+            ($row['entity_type'] ?? '') === 'task' ? ($row['entity_id'] ?? 0) : 0
+        ));
+
+        $row['project_id'] = $projectId > 0 ? $projectId : null;
+        $row['project_name'] = (string) ($row['project_name'] ?? $after['project_name'] ?? '') ?: null;
+        $row['task_id'] = $taskId > 0 ? $taskId : null;
+        $row['task_name'] = (string) ($row['task_name'] ?? $after['task_name'] ?? $after['name'] ?? '') ?: null;
+        $actorName = trim((string) ($row['actor_name'] ?? ''));
+        $row['actor_name'] = $actorName !== '' ? $actorName : null;
+
+        unset($row['resolved_project_id'], $row['resolved_task_id']);
+
+        return $row;
     }
 
     /**

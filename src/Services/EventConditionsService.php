@@ -33,9 +33,14 @@ class EventConditionsService
         }
 
         try {
-            // Проверяем каждое условие
             foreach ($conditions as $conditionType => $conditionValue) {
-                if (!$this->checkCondition($conditionType, $conditionValue, $eventData)) {
+                // Legacy / non-filter keys — ignore
+                if (in_array($conditionType, ['strict_mode', 'notify_roles'], true)) {
+                    continue;
+                }
+
+                $unwrapped = $this->unwrapConditionValue($conditionValue);
+                if (!$this->checkCondition($conditionType, $unwrapped, $eventData)) {
                     return false;
                 }
             }
@@ -52,10 +57,36 @@ class EventConditionsService
     }
 
     /**
+     * Unwrap { value, priority } envelope used by older UI payloads.
+     *
+     * @param mixed $conditionValue
+     * @return mixed
+     */
+    private function unwrapConditionValue($conditionValue)
+    {
+        if (
+            is_array($conditionValue)
+            && array_key_exists('value', $conditionValue)
+            && (array_key_exists('priority', $conditionValue) || count($conditionValue) === 1)
+        ) {
+            return $conditionValue['value'];
+        }
+
+        return $conditionValue;
+    }
+
+    /**
      * Проверяет конкретное условие
      */
     private function checkCondition(string $conditionType, $conditionValue, array $eventData): bool
     {
+        if (!is_array($conditionValue) && in_array($conditionType, [
+            'user_roles', 'exclude_roles', 'time_conditions',
+            'project_conditions', 'task_conditions', 'event_conditions',
+        ], true)) {
+            return true;
+        }
+
         switch ($conditionType) {
             case 'user_roles':
                 return $this->checkUserRoles($conditionValue, $eventData);
@@ -119,38 +150,269 @@ class EventConditionsService
     }
 
     /**
-     * Проверяет временные условия
-     * 
+     * Normalize schedule to crontab-like shape (frequency + time window).
+     * Accepts legacy business_hours / weekdays / time_range payloads.
+     *
+     * @param array<string, mixed> $timeConditions
+     * @return array{
+     *   frequency: string,
+     *   days_of_week: list<int>,
+     *   monthly_mode: string,
+     *   day_of_month: int,
+     *   day_of_month_last: bool,
+     *   weekday_occurrence: int,
+     *   months: list<int>,
+     *   at_time: string,
+     *   until_time: string,
+     *   timezone: string
+     * }
+     */
+    public function normalizeTimeConditions(array $timeConditions): array
+    {
+        $timezone = trim((string) ($timeConditions['timezone'] ?? 'UTC'));
+        if ($timezone === '') {
+            $timezone = 'UTC';
+        }
+
+        $frequency = strtolower(trim((string) ($timeConditions['frequency'] ?? '')));
+        if (!in_array($frequency, ['daily', 'weekly', 'monthly'], true)) {
+            $frequency = !empty($timeConditions['weekdays_only']) ? 'weekly' : 'daily';
+        }
+
+        $days = [];
+        if (isset($timeConditions['days_of_week']) && is_array($timeConditions['days_of_week'])) {
+            foreach ($timeConditions['days_of_week'] as $d) {
+                $n = (int) $d;
+                if ($n >= 1 && $n <= 7) {
+                    $days[] = $n;
+                }
+            }
+        } elseif (isset($timeConditions['specific_days']) && is_array($timeConditions['specific_days'])) {
+            foreach ($timeConditions['specific_days'] as $d) {
+                $n = (int) $d;
+                if ($n >= 1 && $n <= 7) {
+                    $days[] = $n;
+                }
+            }
+        } elseif (!empty($timeConditions['weekdays_only'])) {
+            $days = [1, 2, 3, 4, 5];
+        } elseif (!empty($timeConditions['weekends_only'])) {
+            $days = [6, 7];
+        } elseif ($frequency === 'weekly') {
+            $days = [1]; // default Monday
+        } else {
+            $days = [1, 2, 3, 4, 5, 6, 7];
+        }
+        $days = array_values(array_unique($days));
+        sort($days);
+
+        $monthlyMode = strtolower(trim((string) ($timeConditions['monthly_mode'] ?? 'day_of_month')));
+        if (!in_array($monthlyMode, ['day_of_month', 'nth_weekday'], true)) {
+            $monthlyMode = 'day_of_month';
+        }
+
+        $dayOfMonthLast = !empty($timeConditions['day_of_month_last']);
+        $dayOfMonth = (int) ($timeConditions['day_of_month'] ?? 1);
+        if ($dayOfMonth < 1 || $dayOfMonth > 31) {
+            $dayOfMonth = 1;
+        }
+
+        $weekdayOccurrence = (int) ($timeConditions['weekday_occurrence'] ?? 1);
+        if (!in_array($weekdayOccurrence, [1, 2, 3, 4, -1], true)) {
+            $weekdayOccurrence = 1;
+        }
+        if ($monthlyMode === 'nth_weekday' && $days === []) {
+            $days = [1];
+        }
+
+        $months = [];
+        if (isset($timeConditions['months']) && is_array($timeConditions['months'])) {
+            foreach ($timeConditions['months'] as $m) {
+                $n = (int) $m;
+                if ($n >= 1 && $n <= 12) {
+                    $months[] = $n;
+                }
+            }
+            $months = array_values(array_unique($months));
+            sort($months);
+        }
+
+        $atTime = trim((string) ($timeConditions['at_time'] ?? ''));
+        $untilTime = trim((string) ($timeConditions['until_time'] ?? ''));
+        if ($atTime === '' && isset($timeConditions['time_range']) && is_array($timeConditions['time_range'])) {
+            $atTime = trim((string) ($timeConditions['time_range']['start'] ?? ''));
+            if ($untilTime === '') {
+                $untilTime = trim((string) ($timeConditions['time_range']['end'] ?? ''));
+            }
+        }
+        if ($atTime === '' && !empty($timeConditions['business_hours_only'])) {
+            $atTime = '09:00';
+            if ($untilTime === '') {
+                $untilTime = '17:00';
+            }
+        }
+        if ($atTime === '') {
+            $atTime = '09:00';
+        }
+        if ($untilTime === '') {
+            $untilTime = $this->addMinutesToHhmm($atTime, 30);
+        }
+
+        return [
+            'frequency' => $frequency,
+            'days_of_week' => $days,
+            'monthly_mode' => $monthlyMode,
+            'day_of_month' => $dayOfMonth,
+            'day_of_month_last' => $dayOfMonthLast,
+            'weekday_occurrence' => $weekdayOccurrence,
+            'months' => $months,
+            'at_time' => $atTime,
+            'until_time' => $untilTime,
+            'timezone' => $timezone,
+        ];
+    }
+
+    /**
+     * Evaluate crontab-like schedule against "now".
+     *
+     * @param array<string, mixed>|null $timeConditions
+     * @return 'none'|'match'|'before'|'after'|'wrong_day'
+     */
+    public function evaluateSchedule(?array $timeConditions, ?\DateTimeImmutable $now = null): string
+    {
+        if ($timeConditions === null || $timeConditions === []) {
+            return 'none';
+        }
+
+        $schedule = $this->normalizeTimeConditions($timeConditions);
+        try {
+            $tz = new \DateTimeZone($schedule['timezone']);
+        } catch (\Exception) {
+            $tz = new \DateTimeZone('UTC');
+        }
+
+        $now = ($now ?? new \DateTimeImmutable('now'))->setTimezone($tz);
+        $dow = (int) $now->format('N'); // 1=Mon … 7=Sun
+        $month = (int) $now->format('n');
+
+        if ($schedule['months'] !== [] && !in_array($month, $schedule['months'], true)) {
+            return 'wrong_day';
+        }
+
+        $frequency = $schedule['frequency'];
+        if ($frequency === 'weekly' || $frequency === 'daily') {
+            if (!in_array($dow, $schedule['days_of_week'], true)) {
+                return 'wrong_day';
+            }
+        }
+        if ($frequency === 'monthly') {
+            if (!$this->matchesMonthlyDay($now, $schedule)) {
+                return 'wrong_day';
+            }
+        }
+
+        $start = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $schedule['at_time'], $tz);
+        $end = \DateTimeImmutable::createFromFormat('Y-m-d H:i', $now->format('Y-m-d') . ' ' . $schedule['until_time'], $tz);
+        if (!$start || !$end) {
+            return 'wrong_day';
+        }
+        // Support overnight windows (e.g. 23:00 → 01:00)
+        if ($end < $start) {
+            if ($now >= $start || $now <= $end) {
+                return 'match';
+            }
+            return $now < $start ? 'before' : 'after';
+        }
+
+        if ($now < $start) {
+            return 'before';
+        }
+        if ($now > $end) {
+            return 'after';
+        }
+
+        return 'match';
+    }
+
+    /**
+     * @param array{
+     *   monthly_mode: string,
+     *   day_of_month: int,
+     *   day_of_month_last: bool,
+     *   weekday_occurrence: int,
+     *   days_of_week: list<int>
+     * } $schedule
+     */
+    private function matchesMonthlyDay(\DateTimeImmutable $now, array $schedule): bool
+    {
+        $dom = (int) $now->format('j');
+        $lastDom = (int) $now->format('t');
+        $dow = (int) $now->format('N');
+
+        if ($schedule['monthly_mode'] === 'nth_weekday') {
+            $weekday = $schedule['days_of_week'][0] ?? 1;
+            return $this->isNthWeekdayOfMonth($now, (int) $schedule['weekday_occurrence'], (int) $weekday);
+        }
+
+        // Calendar day of month (optionally last day)
+        if (!empty($schedule['day_of_month_last'])) {
+            return $dom === $lastDom;
+        }
+
+        $target = min((int) $schedule['day_of_month'], $lastDom);
+        return $dom === $target;
+    }
+
+    /**
+     * Cron-style: Nth weekday of month (1=first … 4=fourth, -1=last).
+     * Example: 2nd Monday → occurrence=2, weekday=1.
+     */
+    private function isNthWeekdayOfMonth(\DateTimeImmutable $now, int $occurrence, int $weekday): bool
+    {
+        if ($weekday < 1 || $weekday > 7) {
+            return false;
+        }
+        if ((int) $now->format('N') !== $weekday) {
+            return false;
+        }
+
+        if ($occurrence === -1) {
+            // Last: same weekday next week is in a different month
+            $next = $now->modify('+7 days');
+            return (int) $next->format('n') !== (int) $now->format('n');
+        }
+
+        if ($occurrence < 1 || $occurrence > 4) {
+            return false;
+        }
+
+        $nth = intdiv((int) $now->format('j') - 1, 7) + 1;
+        return $nth === $occurrence;
+    }
+
+    /**
+     * Проверяет временные условия (crontab-like). Нет расписания → true.
+     *
      * @param array $timeConditions Условия времени
      * @param array $eventData Данные события
      * @return bool
      */
     private function checkTimeConditions(array $timeConditions, array $eventData): bool
     {
-        // Проверка рабочего времени
-        if (isset($timeConditions['business_hours_only']) && $timeConditions['business_hours_only']) {
-            if (!$this->isBusinessHours($timeConditions['timezone'] ?? 'UTC')) {
-                return false;
-            }
-        }
+        $result = $this->evaluateSchedule($timeConditions);
+        return $result === 'none' || $result === 'match';
+    }
 
-        // Проверка дня недели
-        if (isset($timeConditions['weekdays_only']) && $timeConditions['weekdays_only']) {
-            if (!$this->isWeekday()) {
-                return false;
-            }
+    private function addMinutesToHhmm(string $hhmm, int $minutes): string
+    {
+        $parts = explode(':', $hhmm);
+        $h = (int) ($parts[0] ?? 9);
+        $m = (int) ($parts[1] ?? 0);
+        $total = ($h * 60 + $m + $minutes) % (24 * 60);
+        if ($total < 0) {
+            $total += 24 * 60;
         }
-
-        // Проверка временного диапазона
-        if (isset($timeConditions['time_range'])) {
-            $startTime = $timeConditions['time_range']['start'] ?? '09:00';
-            $endTime = $timeConditions['time_range']['end'] ?? '17:00';
-            if (!$this->isInTimeRange($startTime, $endTime)) {
-                return false;
-            }
-        }
-
-        return true;
+        return sprintf('%02d:%02d', intdiv($total, 60), $total % 60);
     }
 
     /**
@@ -325,20 +587,22 @@ class EventConditionsService
     /**
      * Проверяет, будний ли день
      */
-    private function isWeekday(): bool
+    private function isWeekday(string $timezone = 'UTC'): bool
     {
-        $dayOfWeek = (int)date('N'); // 1 = понедельник, 7 = воскресенье
+        $now = new \DateTime('now', new \DateTimeZone($timezone));
+        $dayOfWeek = (int) $now->format('N'); // 1 = Monday, 7 = Sunday
         return $dayOfWeek >= 1 && $dayOfWeek <= 5;
     }
 
     /**
      * Проверяет, входит ли время в диапазон
      */
-    private function isInTimeRange(string $startTime, string $endTime): bool
+    private function isInTimeRange(string $startTime, string $endTime, string $timezone = 'UTC'): bool
     {
-        $now = new \DateTime('now');
-        $start = new \DateTime($now->format('Y-m-d') . ' ' . $startTime);
-        $end = new \DateTime($now->format('Y-m-d') . ' ' . $endTime);
+        $tz = new \DateTimeZone($timezone);
+        $now = new \DateTime('now', $tz);
+        $start = new \DateTime($now->format('Y-m-d') . ' ' . $startTime, $tz);
+        $end = new \DateTime($now->format('Y-m-d') . ' ' . $endTime, $tz);
         
         return $now >= $start && $now <= $end;
     }
@@ -541,62 +805,18 @@ class EventConditionsService
         return [
             // === ОСНОВНЫЕ ДЕЙСТВИЯ ===
             'notify' => [
-                'description' => 'Отправить уведомление',
-                'requires' => ['notify_roles'],
-                'channels' => ['email', 'sms', 'push', 'webhook', 'slack']
+                'description' => 'Send notification to action.recipients via selected channels',
+                'requires' => ['recipients'],
+                'channels' => ['email', 'sms', 'push']
             ],
             'log_only' => [
-                'description' => 'Только логирование без уведомлений',
+                'description' => 'Audit log only — no outbox / notifications',
                 'requires' => [],
-                'channels' => ['database', 'file']
+                'channels' => ['database']
             ],
-            'create_daily_report' => [
-                'description' => 'Создать ежедневный отчет',
-                'requires' => [],
-                'channels' => ['email', 'dashboard']
-            ],
-
-            // === УВЕДОМЛЕНИЯ ===
-            'email' => [
-                'description' => 'Отправить email уведомление',
-                'requires' => ['notify_roles'],
-                'channels' => ['email']
-            ],
-            'sms' => [
-                'description' => 'Отправить SMS уведомление',
-                'requires' => ['notify_roles'],
-                'channels' => ['sms']
-            ],
-            'push' => [
-                'description' => 'Отправить push уведомление',
-                'requires' => ['notify_roles'],
-                'channels' => ['push']
-            ],
-            'webhook' => [
-                'description' => 'Отправить webhook',
-                'requires' => [],
-                'channels' => ['webhook']
-            ],
-            'slack' => [
-                'description' => 'Отправить сообщение в Slack',
-                'requires' => [],
-                'channels' => ['slack']
-            ],
-
-            // === ОТЧЕТЫ ===
             'create_report' => [
-                'description' => 'Создать отчет',
-                'requires' => [],
-                'channels' => ['email', 'dashboard', 'file']
-            ],
-            'create_weekly_report' => [
-                'description' => 'Создать еженедельный отчет',
-                'requires' => [],
-                'channels' => ['email', 'dashboard']
-            ],
-            'create_monthly_report' => [
-                'description' => 'Создать ежемесячный отчет',
-                'requires' => [],
+                'description' => 'Generate operational report (daily/weekly/monthly) and email recipients',
+                'requires' => ['recipients'],
                 'channels' => ['email', 'dashboard']
             ],
 
