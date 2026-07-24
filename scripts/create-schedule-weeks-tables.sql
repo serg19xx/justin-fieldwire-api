@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS `fw_worker_task_schedules` (
   `schedule_week_id` BIGINT(20) UNSIGNED NOT NULL,
   `project_id` BIGINT(20) UNSIGNED NOT NULL,
   `user_id` BIGINT(20) UNSIGNED NOT NULL,
-  `task_id` BIGINT(20) UNSIGNED NOT NULL,
+  `task_id` BIGINT(20) UNSIGNED DEFAULT NULL COMMENT 'Optional legacy; schedule is project presence, not task assignment',
   `work_date` DATE NOT NULL,
   `day_part` ENUM('am','pm','full') NOT NULL,
   `assignment_note` VARCHAR(2000) DEFAULT NULL COMMENT 'Optional note for this slot (PM / planner)',
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS `fw_worker_task_schedules` (
   CONSTRAINT `fk_fw_wts_user`
     FOREIGN KEY (`user_id`) REFERENCES `fw_users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_fw_wts_task`
-    FOREIGN KEY (`task_id`) REFERENCES `fw_prj_tasks` (`id`) ON DELETE CASCADE
+    FOREIGN KEY (`task_id`) REFERENCES `fw_prj_tasks` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Last successful publish per week (refreshed on each publish). Used for GET /me/schedule while week is draft-after-reopen.
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS `fw_worker_task_schedule_snapshots` (
   `schedule_week_id` BIGINT(20) UNSIGNED NOT NULL,
   `project_id` BIGINT(20) UNSIGNED NOT NULL,
   `user_id` BIGINT(20) UNSIGNED NOT NULL,
-  `task_id` BIGINT(20) UNSIGNED NOT NULL,
+  `task_id` BIGINT(20) UNSIGNED DEFAULT NULL COMMENT 'Optional legacy; schedule is project presence, not task assignment',
   `work_date` DATE NOT NULL,
   `day_part` ENUM('am','pm','full') NOT NULL,
   `assignment_note` VARCHAR(2000) DEFAULT NULL,
@@ -70,5 +70,5 @@ CREATE TABLE IF NOT EXISTS `fw_worker_task_schedule_snapshots` (
   CONSTRAINT `fk_fw_wtss_user`
     FOREIGN KEY (`user_id`) REFERENCES `fw_users` (`id`) ON DELETE CASCADE,
   CONSTRAINT `fk_fw_wtss_task`
-    FOREIGN KEY (`task_id`) REFERENCES `fw_prj_tasks` (`id`) ON DELETE CASCADE
+    FOREIGN KEY (`task_id`) REFERENCES `fw_prj_tasks` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

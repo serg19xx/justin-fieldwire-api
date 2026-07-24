@@ -204,8 +204,8 @@ class ScheduleWeekController
 
     /**
      * PUT /api/v1/projects/{projectId}/schedule-weeks/{weekId}/entries
-     * Body: { "entries": [ { "user_id", "task_id", "work_date", "day_part", "assignment_note?" }, ... ] }
-     * Ensures each (user_id, task_id) is on the task roster in fw_prj_team_members (may INSERT member) before saving slots; see docs/SCHEDULE_WEEKS_API.md.
+     * Body: { "entries": [ { "user_id", "work_date", "day_part", "assignment_note?", "task_id?" }, ... ] }
+     * Schedule = presence on this project (person + day part). Tasks are independent — task_id is optional/legacy.
      *
      * @OA\Put(
      *     path="/api/v1/projects/{project_id}/schedule-weeks/{week_id}/entries",
@@ -223,16 +223,16 @@ class ScheduleWeekController
      *                 type="array",
      *                 @OA\Items(
      *                     @OA\Property(property="user_id", type="integer"),
-     *                     @OA\Property(property="task_id", type="integer"),
      *                     @OA\Property(property="work_date", type="string", format="date"),
      *                     @OA\Property(property="day_part", type="string", enum={"am","pm","full"}),
-     *                     @OA\Property(property="assignment_note", type="string", nullable=true, maxLength=2000, description="Optional slot note")
+     *                     @OA\Property(property="assignment_note", type="string", nullable=true, maxLength=2000),
+     *                     @OA\Property(property="task_id", type="integer", nullable=true, description="Optional legacy; not required")
      *                 )
      *             )
      *         )
      *     ),
      *     @OA\Response(response=200, description="OK"),
-     *     @OA\Response(response=400, description="Validation or cannot add user to task roster"),
+     *     @OA\Response(response=400, description="Validation"),
      *     @OA\Response(response=409, description="Not draft or duplicate slot")
      * )
      */
@@ -279,15 +279,28 @@ class ScheduleWeekController
                 return;
             }
             $wid = isset($row['user_id']) ? (int) $row['user_id'] : 0;
-            $tid = isset($row['task_id']) ? (int) $row['task_id'] : 0;
+            $tidRaw = $row['task_id'] ?? null;
+            $tid = ($tidRaw === null || $tidRaw === '' || $tidRaw === 0 || $tidRaw === '0')
+                ? null
+                : (int) $tidRaw;
+            if ($tid !== null && $tid <= 0) {
+                $tid = null;
+            }
             $wdate = $row['work_date'] ?? null;
             $dp = $row['day_part'] ?? null;
-            if ($wid <= 0 || $tid <= 0 || !$wdate || !is_string($wdate) || !$dp || !is_string($dp)) {
-                $this->error($this->entryValidationMessage($i, $row, 'user_id, task_id, work_date, day_part required'), 400);
+            if ($wid <= 0 || !$wdate || !is_string($wdate) || !$dp || !is_string($dp)) {
+                $this->error($this->entryValidationMessage($i, $row, 'user_id, work_date, day_part required'), 400);
                 return;
             }
             if (!$roster->userExistsActive($conn, $wid)) {
                 $this->error($this->entryValidationMessage($i, $row, 'user not found or archived'), 400);
+                return;
+            }
+            if (!$roster->isUserProjectParticipant($conn, $projectId, $wid)) {
+                $this->error(
+                    $this->entryValidationMessage($i, $row, 'user is not a member of this project'),
+                    400
+                );
                 return;
             }
             if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $wdate)) {
@@ -310,7 +323,7 @@ class ScheduleWeekController
                 );
                 return;
             }
-            if (!$this->taskBelongsToProject($conn, $tid, $projectId)) {
+            if ($tid !== null && !$this->taskBelongsToProject($conn, $tid, $projectId)) {
                 $this->error($this->entryValidationMessage($i, $row, 'task not found in this project'), 400);
                 return;
             }
@@ -355,25 +368,10 @@ class ScheduleWeekController
             ];
         }
 
-        $pairKeys = [];
-        foreach ($normalized as $e) {
-            $pk = $e['user_id'] . '|' . $e['task_id'];
-            $pairKeys[$pk] = [$e['user_id'], $e['task_id']];
-        }
-
         try {
             $conn->beginTransaction();
-            foreach ($pairKeys as [$pairUserId, $pairTaskId]) {
-                $rosterErr = $roster->ensureUserOnTaskForScheduleSlot($conn, $projectId, $pairTaskId, $pairUserId);
-                if ($rosterErr !== null) {
-                    $conn->rollBack();
-                    $this->error($rosterErr, 400);
-                    return;
-                }
-            }
 
             // Merge by slot key (user_id + work_date + day_part) so primary keys stay stable across saves.
-            // A full DELETE + re-INSERT would CASCADE-remove documents/messages attached to those slots.
             $existingRows = $conn->executeQuery(
                 'SELECT id, user_id, task_id, work_date, day_part, assignment_note
                  FROM fw_worker_task_schedules
@@ -516,32 +514,33 @@ class ScheduleWeekController
         $roster = new TaskRosterForScheduleService();
         foreach ($rows as $row) {
             $ws = (string) $week['week_start'];
-            if (!$this->workDateInScheduleWeek($ws, (string) $row['work_date'])) {
-                $uid = (int) $row['user_id'];
-                $tid = (int) $row['task_id'];
-                $wd = (string) $row['work_date'];
+            $uid = (int) $row['user_id'];
+            $wd = (string) $row['work_date'];
+            if (!$this->workDateInScheduleWeek($ws, $wd)) {
                 $this->error(
-                    "Invalid entry (user_id={$uid}, task_id={$tid}, work_date={$wd}): work_date outside week",
+                    "Invalid entry (user_id={$uid}, work_date={$wd}): work_date outside week",
                     400
                 );
                 return;
             }
-            if (!$this->taskBelongsToProject($conn, (int) $row['task_id'], $projectId)) {
-                $uid = (int) $row['user_id'];
-                $tid = (int) $row['task_id'];
-                $wd = (string) $row['work_date'];
+            if (!$roster->userExistsActive($conn, $uid)) {
+                $this->error(
+                    "Invalid entry (user_id={$uid}, work_date={$wd}): user not found or archived",
+                    400
+                );
+                return;
+            }
+            if (!$roster->isUserProjectParticipant($conn, $projectId, $uid)) {
+                $this->error(
+                    "Invalid entry (user_id={$uid}, work_date={$wd}): user is not a member of this project",
+                    400
+                );
+                return;
+            }
+            $tid = $row['task_id'] !== null ? (int) $row['task_id'] : 0;
+            if ($tid > 0 && !$this->taskBelongsToProject($conn, $tid, $projectId)) {
                 $this->error(
                     "Invalid entry (user_id={$uid}, task_id={$tid}, work_date={$wd}): task not in project",
-                    400
-                );
-                return;
-            }
-            if (!$roster->isUserOnTask($conn, $projectId, (int) $row['task_id'], (int) $row['user_id'])) {
-                $uid = (int) $row['user_id'];
-                $tid = (int) $row['task_id'];
-                $wd = (string) $row['work_date'];
-                $this->error(
-                    "Invalid entry (user_id={$uid}, task_id={$tid}, work_date={$wd}): user is not on the task roster",
                     400
                 );
                 return;
@@ -810,11 +809,12 @@ class ScheduleWeekController
                    s.assignment_note,
                    t.name AS task_name, t.status AS task_status, t.project_id AS task_project_id,
                    t.address AS task_address,
-                   p.prj_name AS project_name
+                   p.prj_name AS project_name,
+                   p.address AS project_address
             FROM fw_worker_task_schedule_snapshots s
             INNER JOIN fw_schedule_weeks w ON w.id = s.schedule_week_id
-            INNER JOIN fw_prj_tasks t ON t.id = s.task_id
             INNER JOIN fw_projects p ON p.id = s.project_id
+            LEFT JOIN fw_prj_tasks t ON t.id = s.task_id
             WHERE s.user_id = ?
               AND s.work_date >= ?
               AND s.work_date <= ?
@@ -829,12 +829,16 @@ class ScheduleWeekController
                 ? (int) $r['worker_task_schedule_id']
                 : null;
             $unifiedId = $liveSlotId ?? $snapshotRowId;
-            $out[] = [
+            $taskId = $r['task_id'] !== null ? (int) $r['task_id'] : null;
+            $projectAddress = isset($r['project_address']) && $r['project_address'] !== null && trim((string) $r['project_address']) !== ''
+                ? trim((string) $r['project_address'])
+                : null;
+            $entry = [
                 'id' => $unifiedId,
                 'worker_task_schedule_id' => $liveSlotId,
                 'project_id' => (int) $r['project_id'],
                 'user_id' => (int) $r['user_id'],
-                'task_id' => (int) $r['task_id'],
+                'task_id' => $taskId,
                 'work_date' => $r['work_date'],
                 'day_part' => $r['day_part'],
                 'schedule_week_id' => (int) $r['schedule_week_id'],
@@ -842,18 +846,24 @@ class ScheduleWeekController
                     ? (string) $r['assignment_note']
                     : null,
                 'project_name' => $r['project_name'] !== null && $r['project_name'] !== '' ? (string) $r['project_name'] : null,
-                'task' => [
-                    'id' => (int) $r['task_id'],
+                'project_address' => $projectAddress,
+            ];
+            if ($taskId !== null && $taskId > 0 && $r['task_name'] !== null) {
+                $entry['task'] = [
+                    'id' => $taskId,
                     'name' => $r['task_name'],
-                    'project_id' => (int) $r['task_project_id'],
-                    'status' => $r['task_status'],
+                    'project_id' => (int) ($r['task_project_id'] ?? $r['project_id']),
+                    'status' => $r['task_status'] ?? '',
                     'address' => $this->formatTaskAddressForSchedule(
                         isset($r['task_address']) && $r['task_address'] !== '' && $r['task_address'] !== null
                             ? (string) $r['task_address']
                             : null
                     ),
-                ],
-            ];
+                ];
+            } else {
+                $entry['task'] = null;
+            }
+            $out[] = $entry;
         }
 
         return $out;
@@ -1024,12 +1034,15 @@ class ScheduleWeekController
     private function formatEntryRow(array $r): array
     {
         $slotPk = (int) $r['id'];
+        $taskId = isset($r['task_id']) && $r['task_id'] !== null && (int) $r['task_id'] > 0
+            ? (int) $r['task_id']
+            : null;
 
         return [
             'id' => $slotPk,
             'worker_task_schedule_id' => $slotPk,
             'user_id' => (int) $r['user_id'],
-            'task_id' => (int) $r['task_id'],
+            'task_id' => $taskId,
             'work_date' => $r['work_date'],
             'day_part' => $r['day_part'],
             'schedule_week_id' => (int) $r['schedule_week_id'],
