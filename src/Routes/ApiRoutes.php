@@ -926,6 +926,51 @@ class ApiRoutes
             $controller->inboundSms();
         });
 
+        // BoldSign e-signature (status works without API key; webhook has no JWT)
+        Flight::route('GET /api/v1/esign/status', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\BoldSignController(
+                    $this->logger,
+                    new \App\Services\BoldSignService($this->logger),
+                );
+                $controller->status();
+            }
+        });
+        Flight::route('POST /api/v1/esign/send', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\BoldSignController(
+                    $this->logger,
+                    new \App\Services\BoldSignService($this->logger),
+                );
+                $controller->send();
+            }
+        });
+        Flight::route('GET /api/v1/esign/envelopes', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\BoldSignController(
+                    $this->logger,
+                    new \App\Services\BoldSignService($this->logger),
+                );
+                $controller->listEnvelopes();
+            }
+        });
+        Flight::route('GET /api/v1/esign/envelopes/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\BoldSignController(
+                    $this->logger,
+                    new \App\Services\BoldSignService($this->logger),
+                );
+                $controller->getEnvelope((string) $id);
+            }
+        });
+        Flight::route('POST /api/v1/esign/webhook', function() {
+            $controller = new \App\Controllers\BoldSignController(
+                $this->logger,
+                new \App\Services\BoldSignService($this->logger),
+            );
+            $controller->webhook();
+        });
+
         // Role routes v1 (protected)
         Flight::route('GET /api/v1/roles', function() use ($authMiddleware) {
             if ($authMiddleware->handle()) {
