@@ -28,6 +28,8 @@ class ScheduleWeekController
 
     private const ASSIGNMENT_NOTE_MAX_LEN = 2000;
 
+    private const DISTANCE_KM_MAX_LEN = 32;
+
     public function __construct(
         private readonly Logger $logger
     ) {
@@ -349,6 +351,18 @@ class ScheduleWeekController
                     return;
                 }
             }
+            $distanceKm = $this->normalizeDistanceKmInput($row['distance_km'] ?? null);
+            if ($distanceKm === false) {
+                $this->error(
+                    $this->entryValidationMessage(
+                        $i,
+                        $row,
+                        'distance_km must be a string ≤ ' . self::DISTANCE_KM_MAX_LEN . ' characters or null'
+                    ),
+                    400
+                );
+                return;
+            }
             $k = $wid . '|' . $wdate . '|' . $dp;
             if (isset($slotKeys[$k])) {
                 $this->error(
@@ -365,6 +379,7 @@ class ScheduleWeekController
                 'work_date' => $wdate,
                 'day_part' => $dp,
                 'assignment_note' => $assignmentNote,
+                'distance_km' => $distanceKm,
             ];
         }
 
@@ -399,9 +414,9 @@ class ScheduleWeekController
                     $idsStillPresent[$existingId] = true;
                     $conn->executeStatement(
                         'UPDATE fw_worker_task_schedules
-                         SET task_id = ?, assignment_note = ?, updated_at = NOW(3)
+                         SET task_id = ?, assignment_note = ?, distance_km = ?, updated_at = NOW(3)
                          WHERE id = ? AND schedule_week_id = ? AND project_id = ?',
-                        [$e['task_id'], $e['assignment_note'], $existingId, $weekId, $projectId]
+                        [$e['task_id'], $e['assignment_note'], $e['distance_km'], $existingId, $weekId, $projectId]
                     );
                 } else {
                     $conn->insert('fw_worker_task_schedules', [
@@ -412,6 +427,7 @@ class ScheduleWeekController
                         'work_date' => $e['work_date'],
                         'day_part' => $e['day_part'],
                         'assignment_note' => $e['assignment_note'],
+                        'distance_km' => $e['distance_km'],
                     ]);
                 }
             }
@@ -747,6 +763,130 @@ class ScheduleWeekController
         ]);
     }
 
+    /**
+     * POST /api/v1/me/schedule-entries/{entryId}/check-in
+     * Body: { "phase": "start"|"end", "lat": number, "lng": number }
+     *
+     * @OA\Post(
+     *     path="/api/v1/me/schedule-entries/{entry_id}/check-in",
+     *     tags={"Schedule"},
+     *     summary="Worker geo check-in at start or end of scheduled day",
+     *     security={{"bearerAuth": {}}},
+     *     @OA\Parameter(name="entry_id", in="path", required=true, @OA\Schema(type="integer")),
+     *     @OA\RequestBody(
+     *         required=true,
+     *         @OA\JsonContent(
+     *             required={"phase","lat","lng"},
+     *             @OA\Property(property="phase", type="string", enum={"start","end"}),
+     *             @OA\Property(property="lat", type="number"),
+     *             @OA\Property(property="lng", type="number")
+     *         )
+     *     ),
+     *     @OA\Response(response=200, description="OK"),
+     *     @OA\Response(response=400, description="Validation error"),
+     *     @OA\Response(response=403, description="Forbidden"),
+     *     @OA\Response(response=404, description="Entry not found"),
+     *     @OA\Response(response=409, description="Conflict")
+     * )
+     */
+    public function checkInMyScheduleEntry(int $entryId): void
+    {
+        if ($entryId <= 0) {
+            $this->error('Invalid entry id', 400);
+            return;
+        }
+        $payload = json_decode(Flight::request()->getBody(), true) ?? [];
+        $phase = isset($payload['phase']) && is_string($payload['phase'])
+            ? strtolower(trim($payload['phase']))
+            : '';
+        if ($phase !== 'start' && $phase !== 'end') {
+            $this->error('phase must be start or end', 400);
+            return;
+        }
+        if (!isset($payload['lat'], $payload['lng']) || !is_numeric($payload['lat']) || !is_numeric($payload['lng'])) {
+            $this->error('lat and lng are required numbers', 400);
+            return;
+        }
+        $lat = (float) $payload['lat'];
+        $lng = (float) $payload['lng'];
+        if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180) {
+            $this->error('lat/lng out of range', 400);
+            return;
+        }
+
+        $userId = (int) Flight::get('current_user')['id'];
+        $conn = Database::getConnection();
+        $row = $conn->executeQuery(
+            'SELECT e.id, e.user_id, e.project_id, e.schedule_week_id, e.work_date, e.day_part,
+                    e.assignment_note, e.distance_km,
+                    e.work_start_lat, e.work_start_lng, e.work_start_at,
+                    e.work_end_lat, e.work_end_lng, e.work_end_at,
+                    e.task_id,
+                    p.latitude AS project_latitude, p.longitude AS project_longitude
+             FROM fw_worker_task_schedules e
+             INNER JOIN fw_projects p ON p.id = e.project_id
+             WHERE e.id = ?',
+            [$entryId]
+        )->fetchAssociative();
+        if (!$row) {
+            $this->error('Schedule entry not found', 404);
+            return;
+        }
+        if ((int) $row['user_id'] !== $userId) {
+            $this->error('Forbidden', 403);
+            return;
+        }
+
+        if ($phase === 'start') {
+            if ($row['work_start_at'] !== null) {
+                $this->error('Start already recorded for this day', 409);
+                return;
+            }
+            $conn->executeStatement(
+                'UPDATE fw_worker_task_schedules
+                 SET work_start_lat = ?, work_start_lng = ?, work_start_at = NOW(3), updated_at = NOW(3)
+                 WHERE id = ? AND user_id = ?',
+                [$lat, $lng, $entryId, $userId]
+            );
+        } else {
+            if ($row['work_start_at'] === null) {
+                $this->error('Start work before ending', 409);
+                return;
+            }
+            if ($row['work_end_at'] !== null) {
+                $this->error('End already recorded for this day', 409);
+                return;
+            }
+            $conn->executeStatement(
+                'UPDATE fw_worker_task_schedules
+                 SET work_end_lat = ?, work_end_lng = ?, work_end_at = NOW(3), updated_at = NOW(3)
+                 WHERE id = ? AND user_id = ?',
+                [$lat, $lng, $entryId, $userId]
+            );
+        }
+
+        $saved = $conn->executeQuery(
+            'SELECT e.id, e.user_id, e.task_id, e.work_date, e.day_part, e.schedule_week_id, e.project_id,
+                    e.assignment_note, e.distance_km,
+                    e.work_start_lat, e.work_start_lng, e.work_start_at,
+                    e.work_end_lat, e.work_end_lng, e.work_end_at,
+                    p.latitude AS project_latitude, p.longitude AS project_longitude
+             FROM fw_worker_task_schedules e
+             INNER JOIN fw_projects p ON p.id = e.project_id
+             WHERE e.id = ?',
+            [$entryId]
+        )->fetchAssociative();
+
+        Flight::json([
+            'error_code' => 0,
+            'status' => 'success',
+            'message' => $phase === 'start' ? 'Work start recorded' : 'Work end recorded',
+            'data' => [
+                'entry' => $saved ? $this->formatEntryRow($saved) : null,
+            ],
+        ]);
+    }
+
     /** @return string|null Error message for 400, or null if OK */
     private function validateScheduleQueryRange(mixed $from, mixed $to): ?string
     {
@@ -807,13 +947,19 @@ class ScheduleWeekController
         $sql = '
             SELECT s.id AS snapshot_row_id, s.worker_task_schedule_id, s.project_id, s.user_id, s.task_id, s.work_date, s.day_part, s.schedule_week_id,
                    s.assignment_note,
+                   live.distance_km AS live_distance_km,
+                   live.work_start_lat, live.work_start_lng, live.work_start_at,
+                   live.work_end_lat, live.work_end_lng, live.work_end_at,
                    t.name AS task_name, t.status AS task_status, t.project_id AS task_project_id,
                    t.address AS task_address,
                    p.prj_name AS project_name,
-                   p.address AS project_address
+                   p.address AS project_address,
+                   p.latitude AS project_latitude,
+                   p.longitude AS project_longitude
             FROM fw_worker_task_schedule_snapshots s
             INNER JOIN fw_schedule_weeks w ON w.id = s.schedule_week_id
             INNER JOIN fw_projects p ON p.id = s.project_id
+            LEFT JOIN fw_worker_task_schedules live ON live.id = s.worker_task_schedule_id
             LEFT JOIN fw_prj_tasks t ON t.id = s.task_id
             WHERE s.user_id = ?
               AND s.work_date >= ?
@@ -833,6 +979,7 @@ class ScheduleWeekController
             $projectAddress = isset($r['project_address']) && $r['project_address'] !== null && trim((string) $r['project_address']) !== ''
                 ? trim((string) $r['project_address'])
                 : null;
+            $trip = $this->formatTripFieldsFromRow($r);
             $entry = [
                 'id' => $unifiedId,
                 'worker_task_schedule_id' => $liveSlotId,
@@ -847,7 +994,12 @@ class ScheduleWeekController
                     : null,
                 'project_name' => $r['project_name'] !== null && $r['project_name'] !== '' ? (string) $r['project_name'] : null,
                 'project_address' => $projectAddress,
+                ...$trip,
             ];
+            // Prefer live distance_km when present
+            if (isset($r['live_distance_km']) && $r['live_distance_km'] !== null && (string) $r['live_distance_km'] !== '') {
+                $entry['distance_km'] = (string) $r['live_distance_km'];
+            }
             if ($taskId !== null && $taskId > 0 && $r['task_name'] !== null) {
                 $entry['task'] = [
                     'id' => $taskId,
@@ -1050,7 +1202,88 @@ class ScheduleWeekController
             'assignment_note' => isset($r['assignment_note']) && $r['assignment_note'] !== null && $r['assignment_note'] !== ''
                 ? (string) $r['assignment_note']
                 : null,
+            ...$this->formatTripFieldsFromRow($r),
         ];
+    }
+
+    /**
+     * @param array<string, mixed> $r
+     * @return array<string, mixed>
+     */
+    private function formatTripFieldsFromRow(array $r): array
+    {
+        $distanceKm = null;
+        if (isset($r['distance_km']) && $r['distance_km'] !== null && (string) $r['distance_km'] !== '') {
+            $distanceKm = (string) $r['distance_km'];
+        } elseif (isset($r['live_distance_km']) && $r['live_distance_km'] !== null && (string) $r['live_distance_km'] !== '') {
+            $distanceKm = (string) $r['live_distance_km'];
+        }
+
+        $siteLat = $this->nullableFloat($r['project_latitude'] ?? null);
+        $siteLng = $this->nullableFloat($r['project_longitude'] ?? null);
+        $startLat = $this->nullableFloat($r['work_start_lat'] ?? null);
+        $startLng = $this->nullableFloat($r['work_start_lng'] ?? null);
+        $endLat = $this->nullableFloat($r['work_end_lat'] ?? null);
+        $endLng = $this->nullableFloat($r['work_end_lng'] ?? null);
+
+        return [
+            'distance_km' => $distanceKm,
+            'work_start_lat' => $startLat,
+            'work_start_lng' => $startLng,
+            'work_start_at' => $r['work_start_at'] ?? null,
+            'work_end_lat' => $endLat,
+            'work_end_lng' => $endLng,
+            'work_end_at' => $r['work_end_at'] ?? null,
+            'work_start_distance_km' => $this->haversineKm($startLat, $startLng, $siteLat, $siteLng),
+            'work_end_distance_km' => $this->haversineKm($endLat, $endLng, $siteLat, $siteLng),
+        ];
+    }
+
+    private function nullableFloat(mixed $v): ?float
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        if (!is_numeric($v)) {
+            return null;
+        }
+        $f = (float) $v;
+        return is_finite($f) ? $f : null;
+    }
+
+    private function haversineKm(?float $lat1, ?float $lng1, ?float $lat2, ?float $lng2): ?float
+    {
+        if ($lat1 === null || $lng1 === null || $lat2 === null || $lng2 === null) {
+            return null;
+        }
+        $earthKm = 6371.0;
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+        $a = sin($dLat / 2) ** 2
+            + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+        return round($earthKm * $c, 2);
+    }
+
+    /**
+     * @return string|null|false null = clear; string = value; false = invalid
+     */
+    private function normalizeDistanceKmInput(mixed $raw): string|null|false
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (!is_string($raw) && !is_numeric($raw)) {
+            return false;
+        }
+        $s = trim((string) $raw);
+        if ($s === '') {
+            return null;
+        }
+        if ($this->stringCharLength($s) > self::DISTANCE_KM_MAX_LEN) {
+            return false;
+        }
+        return $s;
     }
 
     /**
@@ -1061,10 +1294,15 @@ class ScheduleWeekController
     private function fetchEntryRowsForWeek(Connection $conn, int $weekId): array
     {
         return $conn->executeQuery(
-            'SELECT id, user_id, task_id, work_date, day_part, schedule_week_id, project_id, assignment_note
-             FROM fw_worker_task_schedules
-             WHERE schedule_week_id = ?
-             ORDER BY work_date, CASE day_part WHEN \'am\' THEN 1 WHEN \'pm\' THEN 2 WHEN \'full\' THEN 3 ELSE 4 END, id',
+            'SELECT e.id, e.user_id, e.task_id, e.work_date, e.day_part, e.schedule_week_id, e.project_id,
+                    e.assignment_note, e.distance_km,
+                    e.work_start_lat, e.work_start_lng, e.work_start_at,
+                    e.work_end_lat, e.work_end_lng, e.work_end_at,
+                    p.latitude AS project_latitude, p.longitude AS project_longitude
+             FROM fw_worker_task_schedules e
+             LEFT JOIN fw_projects p ON p.id = e.project_id
+             WHERE e.schedule_week_id = ?
+             ORDER BY e.work_date, CASE e.day_part WHEN \'am\' THEN 1 WHEN \'pm\' THEN 2 WHEN \'full\' THEN 3 ELSE 4 END, e.id',
             [$weekId]
         )->fetchAllAssociative();
     }

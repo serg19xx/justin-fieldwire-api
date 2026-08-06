@@ -235,6 +235,11 @@ class ApiRoutes
                     $scheduleWeekController->getMySchedule();
                 }
             });
+            Flight::route('POST /api/v1/me/schedule-entries/@entry_id/check-in', function($entry_id) use ($scheduleWeekController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $scheduleWeekController->checkInMyScheduleEntry((int) $entry_id);
+                }
+            });
             Flight::route('GET /api/v1/users/@user_id/schedule', function($user_id) use ($scheduleWeekController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
                     $scheduleWeekController->getUserSchedule((int) $user_id);
