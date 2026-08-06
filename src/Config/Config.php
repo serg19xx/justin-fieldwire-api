@@ -56,13 +56,28 @@ class Config
     public function getDatabase(): array
     {
         return [
-            'host' => $_ENV['DB_HOST'] ?? 'localhost',
-            'port' => (int)($_ENV['DB_PORT'] ?? 3306),
-            'name' => $_ENV['DB_NAME'] ?? 'fieldwire_api',
-            'username' => $_ENV['DB_USERNAME'] ?? 'root',
-            'password' => $_ENV['DB_PASSWORD'] ?? '',
-            'charset' => $_ENV['DB_CHARSET'] ?? 'utf8mb4',
-            'collation' => $_ENV['DB_COLLATION'] ?? 'utf8mb4_unicode_ci',
+            'host' => $this->env('DB_HOST', 'localhost'),
+            'port' => (int) $this->env('DB_PORT', '3306'),
+            'name' => $this->env('DB_NAME', 'fieldwire_api'),
+            'username' => $this->env('DB_USERNAME', 'root'),
+            'password' => $this->env('DB_PASSWORD', ''),
+            'charset' => $this->env('DB_CHARSET', 'utf8mb4'),
+            'collation' => $this->env('DB_COLLATION', 'utf8mb4_unicode_ci'),
         ];
+    }
+
+    private function env(string $key, string $default = ''): string
+    {
+        if (array_key_exists($key, $_ENV) && $_ENV[$key] !== null && (string) $_ENV[$key] !== '') {
+            return (string) $_ENV[$key];
+        }
+        if (array_key_exists($key, $_SERVER) && $_SERVER[$key] !== null && (string) $_SERVER[$key] !== '') {
+            return (string) $_SERVER[$key];
+        }
+        $fromGetenv = getenv($key);
+        if ($fromGetenv !== false && $fromGetenv !== '') {
+            return (string) $fromGetenv;
+        }
+        return $default;
     }
 }
