@@ -206,8 +206,10 @@ class ScheduleWeekController
 
     /**
      * PUT /api/v1/projects/{projectId}/schedule-weeks/{weekId}/entries
-     * Body: { "entries": [ { "user_id", "work_date", "day_part", "assignment_note?", "task_id?" }, ... ] }
-     * Schedule = presence on this project (person + day part). Tasks are independent — task_id is optional/legacy.
+     * Body: { "entries": [ { "user_id", "work_date", "day_part", "assignment_note?", "distance_km?",
+     *   "expected_start_time?", "expected_end_time?" }, ... ] }
+     * Schedule = presence on this project (person + day). Tasks are independent — task_id is ignored.
+     * expected_* = PM planned day times; work_start_at / work_end_at = actual clock-in from phone.
      *
      * @OA\Put(
      *     path="/api/v1/projects/{project_id}/schedule-weeks/{week_id}/entries",
@@ -228,7 +230,10 @@ class ScheduleWeekController
      *                     @OA\Property(property="work_date", type="string", format="date"),
      *                     @OA\Property(property="day_part", type="string", enum={"am","pm","full"}),
      *                     @OA\Property(property="assignment_note", type="string", nullable=true, maxLength=2000),
-     *                     @OA\Property(property="task_id", type="integer", nullable=true, description="Optional legacy; not required")
+     *                     @OA\Property(property="distance_km", type="string", nullable=true),
+     *                     @OA\Property(property="expected_start_time", type="string", nullable=true, description="HH:MM or HH:MM:SS"),
+     *                     @OA\Property(property="expected_end_time", type="string", nullable=true, description="HH:MM or HH:MM:SS"),
+     *                     @OA\Property(property="task_id", type="integer", nullable=true, description="Ignored; schedule is project-scoped")
      *                 )
      *             )
      *         )
@@ -281,13 +286,8 @@ class ScheduleWeekController
                 return;
             }
             $wid = isset($row['user_id']) ? (int) $row['user_id'] : 0;
-            $tidRaw = $row['task_id'] ?? null;
-            $tid = ($tidRaw === null || $tidRaw === '' || $tidRaw === 0 || $tidRaw === '0')
-                ? null
-                : (int) $tidRaw;
-            if ($tid !== null && $tid <= 0) {
-                $tid = null;
-            }
+            // Timesheet rows are project + place + day only; task_id is ignored (legacy column).
+            $tid = null;
             $wdate = $row['work_date'] ?? null;
             $dp = $row['day_part'] ?? null;
             if ($wid <= 0 || !$wdate || !is_string($wdate) || !$dp || !is_string($dp)) {
@@ -325,10 +325,6 @@ class ScheduleWeekController
                 );
                 return;
             }
-            if ($tid !== null && !$this->taskBelongsToProject($conn, $tid, $projectId)) {
-                $this->error($this->entryValidationMessage($i, $row, 'task not found in this project'), 400);
-                return;
-            }
             $noteRaw = $row['assignment_note'] ?? null;
             if ($noteRaw !== null && $noteRaw !== '' && !is_string($noteRaw)) {
                 $this->error($this->entryValidationMessage($i, $row, 'assignment_note must be a string or null'), 400);
@@ -363,6 +359,22 @@ class ScheduleWeekController
                 );
                 return;
             }
+            $expectedStart = $this->normalizeExpectedTimeInput($row['expected_start_time'] ?? null);
+            if ($expectedStart === false) {
+                $this->error(
+                    $this->entryValidationMessage($i, $row, 'expected_start_time must be HH:MM or HH:MM:SS or null'),
+                    400
+                );
+                return;
+            }
+            $expectedEnd = $this->normalizeExpectedTimeInput($row['expected_end_time'] ?? null);
+            if ($expectedEnd === false) {
+                $this->error(
+                    $this->entryValidationMessage($i, $row, 'expected_end_time must be HH:MM or HH:MM:SS or null'),
+                    400
+                );
+                return;
+            }
             $k = $wid . '|' . $wdate . '|' . $dp;
             if (isset($slotKeys[$k])) {
                 $this->error(
@@ -380,6 +392,8 @@ class ScheduleWeekController
                 'day_part' => $dp,
                 'assignment_note' => $assignmentNote,
                 'distance_km' => $distanceKm,
+                'expected_start_time' => $expectedStart,
+                'expected_end_time' => $expectedEnd,
             ];
         }
 
@@ -414,9 +428,19 @@ class ScheduleWeekController
                     $idsStillPresent[$existingId] = true;
                     $conn->executeStatement(
                         'UPDATE fw_worker_task_schedules
-                         SET task_id = ?, assignment_note = ?, distance_km = ?, updated_at = NOW(3)
+                         SET task_id = ?, assignment_note = ?, distance_km = ?,
+                             expected_start_time = ?, expected_end_time = ?, updated_at = NOW(3)
                          WHERE id = ? AND schedule_week_id = ? AND project_id = ?',
-                        [$e['task_id'], $e['assignment_note'], $e['distance_km'], $existingId, $weekId, $projectId]
+                        [
+                            $e['task_id'],
+                            $e['assignment_note'],
+                            $e['distance_km'],
+                            $e['expected_start_time'],
+                            $e['expected_end_time'],
+                            $existingId,
+                            $weekId,
+                            $projectId,
+                        ]
                     );
                 } else {
                     $conn->insert('fw_worker_task_schedules', [
@@ -428,6 +452,8 @@ class ScheduleWeekController
                         'day_part' => $e['day_part'],
                         'assignment_note' => $e['assignment_note'],
                         'distance_km' => $e['distance_km'],
+                        'expected_start_time' => $e['expected_start_time'],
+                        'expected_end_time' => $e['expected_end_time'],
                     ]);
                 }
             }
@@ -819,6 +845,7 @@ class ScheduleWeekController
         $row = $conn->executeQuery(
             'SELECT e.id, e.user_id, e.project_id, e.schedule_week_id, e.work_date, e.day_part,
                     e.assignment_note, e.distance_km,
+                    e.expected_start_time, e.expected_end_time,
                     e.work_start_lat, e.work_start_lng, e.work_start_at,
                     e.work_end_lat, e.work_end_lng, e.work_end_at,
                     e.task_id,
@@ -868,6 +895,7 @@ class ScheduleWeekController
         $saved = $conn->executeQuery(
             'SELECT e.id, e.user_id, e.task_id, e.work_date, e.day_part, e.schedule_week_id, e.project_id,
                     e.assignment_note, e.distance_km,
+                    e.expected_start_time, e.expected_end_time,
                     e.work_start_lat, e.work_start_lng, e.work_start_at,
                     e.work_end_lat, e.work_end_lng, e.work_end_at,
                     p.latitude AS project_latitude, p.longitude AS project_longitude
@@ -948,6 +976,7 @@ class ScheduleWeekController
             SELECT s.id AS snapshot_row_id, s.worker_task_schedule_id, s.project_id, s.user_id, s.task_id, s.work_date, s.day_part, s.schedule_week_id,
                    s.assignment_note,
                    live.distance_km AS live_distance_km,
+                   live.expected_start_time, live.expected_end_time,
                    live.work_start_lat, live.work_start_lng, live.work_start_at,
                    live.work_end_lat, live.work_end_lng, live.work_end_at,
                    t.name AS task_name, t.status AS task_status, t.project_id AS task_project_id,
@@ -1228,6 +1257,8 @@ class ScheduleWeekController
 
         return [
             'distance_km' => $distanceKm,
+            'expected_start_time' => $this->formatExpectedTimeForResponse($r['expected_start_time'] ?? null),
+            'expected_end_time' => $this->formatExpectedTimeForResponse($r['expected_end_time'] ?? null),
             'work_start_lat' => $startLat,
             'work_start_lng' => $startLng,
             'work_start_at' => $r['work_start_at'] ?? null,
@@ -1237,6 +1268,53 @@ class ScheduleWeekController
             'work_start_distance_km' => $this->haversineKm($startLat, $startLng, $siteLat, $siteLng),
             'work_end_distance_km' => $this->haversineKm($endLat, $endLng, $siteLat, $siteLng),
         ];
+    }
+
+    /**
+     * @return string|null|false null = clear; string HH:MM:SS = value; false = invalid
+     */
+    private function normalizeExpectedTimeInput(mixed $raw): string|null|false
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if (!is_string($raw) && !is_numeric($raw)) {
+            return false;
+        }
+        $s = trim((string) $raw);
+        if ($s === '') {
+            return null;
+        }
+        if (preg_match('/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/', $s, $m) !== 1) {
+            return false;
+        }
+        $hh = (int) $m[1];
+        $mm = (int) $m[2];
+        $ss = isset($m[3]) ? (int) $m[3] : 0;
+        if ($hh > 23 || $mm > 59 || $ss > 59) {
+            return false;
+        }
+
+        return sprintf('%02d:%02d:%02d', $hh, $mm, $ss);
+    }
+
+    private function formatExpectedTimeForResponse(mixed $raw): ?string
+    {
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+        if ($raw instanceof \DateTimeInterface) {
+            return $raw->format('H:i');
+        }
+        $s = trim((string) $raw);
+        if ($s === '') {
+            return null;
+        }
+        if (preg_match('/^(\d{1,2}):(\d{2})/', $s, $m) === 1) {
+            return sprintf('%02d:%02d', (int) $m[1], (int) $m[2]);
+        }
+
+        return null;
     }
 
     private function nullableFloat(mixed $v): ?float
@@ -1296,6 +1374,7 @@ class ScheduleWeekController
         return $conn->executeQuery(
             'SELECT e.id, e.user_id, e.task_id, e.work_date, e.day_part, e.schedule_week_id, e.project_id,
                     e.assignment_note, e.distance_km,
+                    e.expected_start_time, e.expected_end_time,
                     e.work_start_lat, e.work_start_lng, e.work_start_at,
                     e.work_end_lat, e.work_end_lng, e.work_end_at,
                     p.latitude AS project_latitude, p.longitude AS project_longitude

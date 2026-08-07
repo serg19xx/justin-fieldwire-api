@@ -36,8 +36,12 @@ class TaskController
         'field_submitted_by',
         'field_work_started_at',
         'field_work_started_by',
+        'field_work_start_lat',
+        'field_work_start_lng',
         'field_work_ended_at',
         'field_work_ended_by',
+        'field_work_end_lat',
+        'field_work_end_lng',
         'field_notes',
         'field_work_start_reason',
         'field_work_end_reason',
@@ -117,8 +121,13 @@ class TaskController
      * @param array<string, mixed> $task
      * @return array<string, mixed>
      */
-    private function fieldSubmissionPayloadFromRow(array $task): array
+    private function fieldSubmissionPayloadFromRow(array $task, ?float $projectLat = null, ?float $projectLng = null): array
     {
+        $startLat = $this->nullableFloat($task['field_work_start_lat'] ?? null);
+        $startLng = $this->nullableFloat($task['field_work_start_lng'] ?? null);
+        $endLat = $this->nullableFloat($task['field_work_end_lat'] ?? null);
+        $endLng = $this->nullableFloat($task['field_work_end_lng'] ?? null);
+
         return [
             'field_submitted_at' => $task['field_submitted_at'] ?? null,
             'field_submitted_by' => isset($task['field_submitted_by']) && $task['field_submitted_by'] !== null
@@ -128,13 +137,71 @@ class TaskController
             'field_work_started_by' => isset($task['field_work_started_by']) && $task['field_work_started_by'] !== null
                 ? (int) $task['field_work_started_by']
                 : null,
+            'field_work_start_lat' => $startLat,
+            'field_work_start_lng' => $startLng,
+            'field_work_start_distance_km' => $this->haversineKm($startLat, $startLng, $projectLat, $projectLng),
             'field_work_ended_at' => $task['field_work_ended_at'] ?? null,
             'field_work_ended_by' => isset($task['field_work_ended_by']) && $task['field_work_ended_by'] !== null
                 ? (int) $task['field_work_ended_by']
                 : null,
+            'field_work_end_lat' => $endLat,
+            'field_work_end_lng' => $endLng,
+            'field_work_end_distance_km' => $this->haversineKm($endLat, $endLng, $projectLat, $projectLng),
             'field_work_start_reason' => $task['field_work_start_reason'] ?? null,
             'field_work_end_reason' => $task['field_work_end_reason'] ?? null,
             'field_notes' => $task['field_notes'] ?? null,
+        ];
+    }
+
+    private function nullableFloat(mixed $v): ?float
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        if (!is_numeric($v)) {
+            return null;
+        }
+        $f = (float) $v;
+
+        return is_finite($f) ? $f : null;
+    }
+
+    private function haversineKm(?float $lat1, ?float $lng1, ?float $lat2, ?float $lng2): ?float
+    {
+        if ($lat1 === null || $lng1 === null || $lat2 === null || $lng2 === null) {
+            return null;
+        }
+        $earthKm = 6371.0;
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+        $a = sin($dLat / 2) ** 2
+            + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+        $c = 2 * atan2(sqrt($a), sqrt(1 - $a));
+
+        return round($earthKm * $c, 2);
+    }
+
+    /**
+     * @return array{0: ?float, 1: ?float}
+     */
+    private function resolveProjectCoordinates(Connection $connection, int $projectId): array
+    {
+        if (!$this->columnExistsOnTable($connection, 'fw_projects', 'latitude')
+            || !$this->columnExistsOnTable($connection, 'fw_projects', 'longitude')
+        ) {
+            return [null, null];
+        }
+        $row = $connection->executeQuery(
+            'SELECT latitude, longitude FROM fw_projects WHERE id = ? LIMIT 1',
+            [$projectId]
+        )->fetchAssociative();
+        if (!$row) {
+            return [null, null];
+        }
+
+        return [
+            $this->nullableFloat($row['latitude'] ?? null),
+            $this->nullableFloat($row['longitude'] ?? null),
         ];
     }
 
@@ -819,6 +886,8 @@ class TaskController
                 'invited_people_count' => is_array($invitedPeople) ? count($invitedPeople) : 'not array'
             ]);
             
+            [$projectLat, $projectLng] = $this->resolveProjectCoordinates($connection, $projectId);
+
             $formattedTask = [
                 'id' => (int)$task['id'],
                 'task_order' => (int)$task['task_order'],
@@ -844,7 +913,7 @@ class TaskController
                 'slack_days' => $task['slack_days'] ? (int)$task['slack_days'] : null,
                 'created_at' => $task['created_at'],
                 'updated_at' => $task['updated_at'],
-                ...$this->fieldSubmissionPayloadFromRow($task),
+                ...$this->fieldSubmissionPayloadFromRow($task, $projectLat, $projectLng),
             ];
 
             Flight::json([
@@ -1289,12 +1358,14 @@ class TaskController
             // Пересчёт date_start/date_end проекта по задачам
             $this->recalculateProjectDates($projectId);
 
+            [$projectLat, $projectLng] = $this->resolveProjectCoordinates($connection, $projectId);
+
             Flight::json([
                 'error_code' => 0,
                 'status' => 'success',
                 'message' => 'Task created successfully',
                 'data' => [
-                    'task' => $this->formatTask($task)
+                    'task' => $this->formatTask($task, $projectLat, $projectLng)
                 ]
             ], 201);
 
@@ -2213,12 +2284,14 @@ class TaskController
             // Пересчёт date_start/date_end проекта по задачам
             $this->recalculateProjectDates($projectId);
 
+            [$projectLat, $projectLng] = $this->resolveProjectCoordinates($connection, $projectId);
+
             Flight::json([
                 'error_code' => 0,
                 'status' => 'success',
                 'message' => 'Task updated successfully',
                 'data' => [
-                    'task' => $this->formatTask($task)
+                    'task' => $this->formatTask($task, $projectLat, $projectLng)
                 ]
             ]);
 
@@ -2881,7 +2954,7 @@ class TaskController
     /**
      * Форматирование задачи
      */
-    private function formatTask(array $task): array
+    private function formatTask(array $task, ?float $projectLat = null, ?float $projectLng = null): array
     {
         return [
             'id' => (int)$task['id'],
@@ -2907,7 +2980,7 @@ class TaskController
             'slack_days' => isset($task['slack_days']) && $task['slack_days'] ? (int)$task['slack_days'] : null,
             'created_at' => $task['created_at'],
             'updated_at' => $task['updated_at'],
-            ...$this->fieldSubmissionPayloadFromRow($task),
+            ...$this->fieldSubmissionPayloadFromRow($task, $projectLat, $projectLng),
         ];
     }
 
@@ -4494,6 +4567,213 @@ class TaskController
             }
             
             Flight::json($response, 500);
+        }
+    }
+
+    /**
+     * Worker / foreman phone geo check-in for task field work start or end.
+     * Stored on fw_prj_tasks (separate from schedule slot trip columns).
+     * POST /api/v1/projects/{projectId}/tasks/{taskId}/field-work/check-in
+     * Body: { phase: "start"|"end", lat: number, lng: number }
+     */
+    public function checkInFieldWork(int $projectId, int $taskId): void
+    {
+        try {
+            $payload = json_decode(Flight::request()->getBody(), true) ?? [];
+            $phase = isset($payload['phase']) && is_string($payload['phase'])
+                ? strtolower(trim($payload['phase']))
+                : '';
+            if ($phase !== 'start' && $phase !== 'end') {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'phase must be start or end',
+                    'data' => null,
+                ], 400);
+                return;
+            }
+            if (!isset($payload['lat'], $payload['lng']) || !is_numeric($payload['lat']) || !is_numeric($payload['lng'])) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'lat and lng are required numbers',
+                    'data' => null,
+                ], 400);
+                return;
+            }
+            $lat = (float) $payload['lat'];
+            $lng = (float) $payload['lng'];
+            if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'lat/lng out of range',
+                    'data' => null,
+                ], 400);
+                return;
+            }
+
+            $connection = $this->database->getConnection();
+            $user = Flight::get('current_user');
+            $actorId = isset($user['id']) ? (int) $user['id'] : 0;
+            if ($actorId <= 0) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Unauthorized',
+                    'data' => null,
+                ], 401);
+                return;
+            }
+
+            if (!$this->taskAuth->canSubmitFieldWork($connection, $projectId, $taskId, $actorId)) {
+                Flight::json([
+                    'error_code' => 403,
+                    'status' => 'error',
+                    'message' => 'You are not allowed to record field work for this task',
+                    'data' => null,
+                ], 403);
+                return;
+            }
+
+            $requiredCols = $phase === 'start'
+                ? ['field_work_started_at', 'field_work_started_by', 'field_work_start_lat', 'field_work_start_lng']
+                : ['field_work_ended_at', 'field_work_ended_by', 'field_work_end_lat', 'field_work_end_lng'];
+            foreach ($requiredCols as $col) {
+                if (!$this->taskOptionalColumnPresent($connection, $col)) {
+                    Flight::json([
+                        'error_code' => 503,
+                        'status' => 'error',
+                        'message' => 'Field work geo check-in is not available until database migration is applied',
+                        'data' => null,
+                    ], 503);
+                    return;
+                }
+            }
+
+            $beforeData = $connection->executeQuery(
+                'SELECT ' . $this->resolveTaskDetailSelect($connection) . ' FROM fw_prj_tasks WHERE id = ? AND project_id = ?',
+                [$taskId, $projectId]
+            )->fetchAssociative();
+            if (!$beforeData) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => 'Task not found',
+                    'data' => null,
+                ], 404);
+                return;
+            }
+
+            if (!empty($beforeData['field_submitted_at'])) {
+                Flight::json([
+                    'error_code' => 409,
+                    'status' => 'error',
+                    'message' => 'Work already submitted for PM review',
+                    'data' => null,
+                ], 409);
+                return;
+            }
+
+            if ($phase === 'start') {
+                if (!empty($beforeData['field_work_started_at'])) {
+                    Flight::json([
+                        'error_code' => 409,
+                        'status' => 'error',
+                        'message' => 'Start already recorded for this task',
+                        'data' => null,
+                    ], 409);
+                    return;
+                }
+                $connection->executeStatement(
+                    'UPDATE fw_prj_tasks
+                     SET field_work_started_at = NOW(3),
+                         field_work_started_by = ?,
+                         field_work_start_lat = ?,
+                         field_work_start_lng = ?,
+                         updated_at = NOW(3)
+                     WHERE id = ? AND project_id = ?',
+                    [$actorId, $lat, $lng, $taskId, $projectId]
+                );
+            } else {
+                if (empty($beforeData['field_work_started_at'])) {
+                    Flight::json([
+                        'error_code' => 409,
+                        'status' => 'error',
+                        'message' => 'Start work before ending',
+                        'data' => null,
+                    ], 409);
+                    return;
+                }
+                if (!empty($beforeData['field_work_ended_at'])) {
+                    Flight::json([
+                        'error_code' => 409,
+                        'status' => 'error',
+                        'message' => 'End already recorded for this task',
+                        'data' => null,
+                    ], 409);
+                    return;
+                }
+                $connection->executeStatement(
+                    'UPDATE fw_prj_tasks
+                     SET field_work_ended_at = NOW(3),
+                         field_work_ended_by = ?,
+                         field_work_end_lat = ?,
+                         field_work_end_lng = ?,
+                         updated_at = NOW(3)
+                     WHERE id = ? AND project_id = ?',
+                    [$actorId, $lat, $lng, $taskId, $projectId]
+                );
+            }
+
+            $task = $connection->executeQuery(
+                'SELECT ' . $this->resolveTaskDetailSelect($connection) . ' FROM fw_prj_tasks WHERE id = ? AND project_id = ?',
+                [$taskId, $projectId]
+            )->fetchAssociative();
+            if (!$task) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => 'Task not found after check-in',
+                    'data' => null,
+                ], 404);
+                return;
+            }
+
+            $eventType = $phase === 'start' ? 'TASK_FIELD_WORK_STARTED' : 'TASK_FIELD_WORK_ENDED';
+            $eventPhase = $phase === 'start' ? 'started' : 'ended';
+            $this->logFieldWorkInitiatorEvent(
+                $connection,
+                $projectId,
+                $taskId,
+                $task,
+                $beforeData,
+                $actorId,
+                $eventType,
+                $eventPhase,
+            );
+            $this->fieldWorkNotifications->notifyManagers(
+                $projectId,
+                $taskId,
+                $task,
+                $actorId,
+                $eventPhase,
+                false,
+            );
+
+            $this->getTask($projectId, $taskId);
+        } catch (\Exception $e) {
+            $this->logger->error('Failed field work check-in', [
+                'project_id' => $projectId,
+                'task_id' => $taskId,
+                'error' => $e->getMessage(),
+            ]);
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Failed to record field work check-in',
+                'data' => null,
+            ], 500);
         }
     }
 

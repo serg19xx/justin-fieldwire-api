@@ -58,6 +58,6 @@ echo -e "   • http://localhost:$PORT/api${NC}"
 echo -e "   • http://localhost:$PORT/api/docs${NC}"
 echo -e "${YELLOW}🛑 Press Ctrl+C to stop the server${NC}"
 
-# Start PHP development server (listen on both IPv4 and IPv6)
+# Start PHP development server on IPv4 localhost (Firefox/Vite use 127.0.0.1 reliably).
 # Use public/php.ini so fax/document uploads respect 52M upload_max_filesize.
-php -c public/php.ini -S [::]:$PORT -t public
+php -c public/php.ini -S 127.0.0.1:$PORT -t public

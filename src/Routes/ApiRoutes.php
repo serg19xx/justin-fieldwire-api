@@ -1185,6 +1185,13 @@ class ApiRoutes
             }
         });
 
+        Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/field-work/check-in', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->checkInFieldWork((int)$project_id, (int)$task_id);
+            }
+        });
+
         Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/submit', function($project_id, $task_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
                 $taskController = new \App\Controllers\TaskController($this->logger);
