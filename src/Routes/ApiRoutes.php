@@ -12,6 +12,7 @@ use App\Controllers\ProjectController;
 use App\Controllers\TaskController;
 use App\Controllers\ProjectTeamController;
 use App\Controllers\ScheduleWeekController;
+use App\Controllers\WorkerTimesheetController;
 use App\Controllers\ScheduleEntryMessageController;
 use App\Controllers\ScheduleEntryDocumentController;
 use App\Controllers\TaskFieldPhotoController;
@@ -238,6 +239,12 @@ class ApiRoutes
             Flight::route('POST /api/v1/me/schedule-entries/@entry_id/check-in', function($entry_id) use ($scheduleWeekController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
                     $scheduleWeekController->checkInMyScheduleEntry((int) $entry_id);
+                }
+            });
+            $workerTimesheetController = new WorkerTimesheetController($this->logger);
+            Flight::route('GET /api/v1/me/work-timesheet', function() use ($workerTimesheetController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $workerTimesheetController->myMonthlyTimesheet();
                 }
             });
             Flight::route('GET /api/v1/users/@user_id/schedule', function($user_id) use ($scheduleWeekController, $authMiddleware) {
@@ -1189,6 +1196,20 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $taskController = new \App\Controllers\TaskController($this->logger);
                 $taskController->checkInFieldWork((int)$project_id, (int)$task_id);
+            }
+        });
+
+        Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/day-work', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getTaskDayWork((int)$project_id, (int)$task_id);
+            }
+        });
+
+        Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/day-work/check-in', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->checkInTaskDayWork((int)$project_id, (int)$task_id);
             }
         });
 

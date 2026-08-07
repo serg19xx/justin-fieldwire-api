@@ -864,6 +864,31 @@ class ScheduleWeekController
             return;
         }
 
+        $workDate = $row['work_date'] instanceof \DateTimeInterface
+            ? $row['work_date']->format('Y-m-d')
+            : substr((string) $row['work_date'], 0, 10);
+        $clock = new \App\Services\WorkClockService();
+        $dayCheck = $clock->assertWorkDateIsToday($workDate);
+        if (!$dayCheck['ok']) {
+            $this->error($dayCheck['message'], 403);
+            return;
+        }
+
+        $siteService = new \App\Services\ProjectSiteLocationService($this->logger);
+        $site = $siteService->resolve($conn, (int) $row['project_id']);
+        $fence = new \App\Services\SiteGeoFenceService();
+        $geo = $fence->assertWithinSite(
+            $site['lat'] ?? null,
+            $site['lng'] ?? null,
+            $lat,
+            $lng,
+        );
+        if (!$geo['ok']) {
+            $this->error($geo['message'], 403);
+            return;
+        }
+
+        $nowSql = $clock->nowSql();
         if ($phase === 'start') {
             if ($row['work_start_at'] !== null) {
                 $this->error('Start already recorded for this day', 409);
@@ -871,9 +896,9 @@ class ScheduleWeekController
             }
             $conn->executeStatement(
                 'UPDATE fw_worker_task_schedules
-                 SET work_start_lat = ?, work_start_lng = ?, work_start_at = NOW(3), updated_at = NOW(3)
+                 SET work_start_lat = ?, work_start_lng = ?, work_start_at = ?, updated_at = ?
                  WHERE id = ? AND user_id = ?',
-                [$lat, $lng, $entryId, $userId]
+                [$lat, $lng, $nowSql, $nowSql, $entryId, $userId]
             );
         } else {
             if ($row['work_start_at'] === null) {
@@ -884,11 +909,24 @@ class ScheduleWeekController
                 $this->error('End already recorded for this day', 409);
                 return;
             }
+            $startIso = $clock->toApiIso($row['work_start_at']);
+            if ($startIso !== null) {
+                try {
+                    $startDt = new \DateTimeImmutable($startIso);
+                    $now = $clock->now();
+                    if ($now < $startDt) {
+                        $this->error('End time cannot be before start time on the same work day.', 409);
+                        return;
+                    }
+                } catch (\Throwable) {
+                    // continue
+                }
+            }
             $conn->executeStatement(
                 'UPDATE fw_worker_task_schedules
-                 SET work_end_lat = ?, work_end_lng = ?, work_end_at = NOW(3), updated_at = NOW(3)
+                 SET work_end_lat = ?, work_end_lng = ?, work_end_at = ?, updated_at = ?
                  WHERE id = ? AND user_id = ?',
-                [$lat, $lng, $entryId, $userId]
+                [$lat, $lng, $nowSql, $nowSql, $entryId, $userId]
             );
         }
 
@@ -1261,10 +1299,10 @@ class ScheduleWeekController
             'expected_end_time' => $this->formatExpectedTimeForResponse($r['expected_end_time'] ?? null),
             'work_start_lat' => $startLat,
             'work_start_lng' => $startLng,
-            'work_start_at' => $r['work_start_at'] ?? null,
+            'work_start_at' => (new \App\Services\WorkClockService())->toApiIso($r['work_start_at'] ?? null),
             'work_end_lat' => $endLat,
             'work_end_lng' => $endLng,
-            'work_end_at' => $r['work_end_at'] ?? null,
+            'work_end_at' => (new \App\Services\WorkClockService())->toApiIso($r['work_end_at'] ?? null),
             'work_start_distance_km' => $this->haversineKm($startLat, $startLng, $siteLat, $siteLng),
             'work_end_distance_km' => $this->haversineKm($endLat, $endLng, $siteLat, $siteLng),
         ];

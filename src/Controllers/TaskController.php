@@ -5,7 +5,11 @@ namespace App\Controllers;
 use App\Database\Database;
 use App\Services\EventLoggingService;
 use App\Services\FieldWorkNotificationService;
+use App\Services\ProjectSiteLocationService;
+use App\Services\SiteGeoFenceService;
 use App\Services\TaskAuthorizationService;
+use App\Services\TaskDayWorkService;
+use App\Services\WorkClockService;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception;
 use Flight;
@@ -4571,6 +4575,289 @@ class TaskController
     }
 
     /**
+     * Per-day actual Start/End on a task (+ optional mirror to project timesheet row).
+     * POST /api/v1/projects/{projectId}/tasks/{taskId}/day-work/check-in
+     * Body: { work_date: "YYYY-MM-DD", phase: "start"|"end", lat, lng, also_schedule?: true }
+     */
+    public function checkInTaskDayWork(int $projectId, int $taskId): void
+    {
+        try {
+            $payload = json_decode(Flight::request()->getBody(), true) ?? [];
+            $workDate = isset($payload['work_date']) && is_string($payload['work_date'])
+                ? trim($payload['work_date'])
+                : '';
+            $phase = isset($payload['phase']) && is_string($payload['phase'])
+                ? strtolower(trim($payload['phase']))
+                : '';
+            if (!isset($payload['lat'], $payload['lng']) || !is_numeric($payload['lat']) || !is_numeric($payload['lng'])) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'lat and lng are required numbers',
+                    'data' => null,
+                ], 400);
+                return;
+            }
+            $lat = (float) $payload['lat'];
+            $lng = (float) $payload['lng'];
+            $alsoSchedule = !array_key_exists('also_schedule', $payload) || (bool) $payload['also_schedule'];
+
+            $actorId = (int) (Flight::get('current_user')['id'] ?? 0);
+            if ($actorId <= 0) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Unauthorized',
+                    'data' => null,
+                ], 401);
+                return;
+            }
+
+            $connection = $this->database->getConnection();
+            $dayWork = new TaskDayWorkService();
+            if (!$dayWork->tableExists($connection)) {
+                Flight::json([
+                    'error_code' => 503,
+                    'status' => 'error',
+                    'message' => 'Task day work is not available until database migration is applied',
+                    'data' => null,
+                ], 503);
+                return;
+            }
+
+            if (!$this->taskAuth->canSubmitFieldWork($connection, $projectId, $taskId, $actorId)) {
+                Flight::json([
+                    'error_code' => 403,
+                    'status' => 'error',
+                    'message' => 'You are not allowed to record day work for this task',
+                    'data' => null,
+                ], 403);
+                return;
+            }
+
+            $siteService = new ProjectSiteLocationService($this->logger);
+            $site = $siteService->resolve($connection, $projectId);
+            $fence = new SiteGeoFenceService();
+            $geo = $fence->assertWithinSite(
+                $site['lat'] ?? null,
+                $site['lng'] ?? null,
+                $lat,
+                $lng,
+            );
+            if (!$geo['ok']) {
+                Flight::json([
+                    'error_code' => 403,
+                    'status' => 'error',
+                    'message' => $geo['message'],
+                    'data' => [
+                        'distance_m' => $geo['distance_m'] ?? null,
+                        'max_m' => $geo['max_m'] ?? null,
+                    ],
+                ], 403);
+                return;
+            }
+
+            $result = $dayWork->checkIn(
+                $connection,
+                $projectId,
+                $taskId,
+                $actorId,
+                $workDate,
+                $phase,
+                $lat,
+                $lng,
+            );
+            if (!$result['ok']) {
+                Flight::json([
+                    'error_code' => $result['status'],
+                    'status' => 'error',
+                    'message' => $result['message'],
+                    'data' => null,
+                ], $result['status']);
+                return;
+            }
+
+            $scheduleEntry = null;
+            if ($alsoSchedule) {
+                $scheduleEntry = $this->mirrorDayCheckInToSchedule(
+                    $connection,
+                    $actorId,
+                    $projectId,
+                    $workDate,
+                    $phase,
+                    $lat,
+                    $lng,
+                );
+            }
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => $phase === 'start' ? 'Task day start recorded' : 'Task day end recorded',
+                'data' => [
+                    'day_work' => $result['row'],
+                    'schedule_entry' => $scheduleEntry,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed task day-work check-in', [
+                'error' => $e->getMessage(),
+                'project_id' => $projectId,
+                'task_id' => $taskId,
+            ]);
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Failed to record task day check-in',
+                'data' => null,
+            ], 500);
+        }
+    }
+
+    /**
+     * GET /api/v1/projects/{projectId}/tasks/{taskId}/day-work?work_date=YYYY-MM-DD
+     */
+    public function getTaskDayWork(int $projectId, int $taskId): void
+    {
+        try {
+            $workDate = isset($_GET['work_date']) && is_string($_GET['work_date'])
+                ? trim($_GET['work_date'])
+                : '';
+            if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $workDate)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'work_date query parameter required (YYYY-MM-DD)',
+                    'data' => null,
+                ], 400);
+                return;
+            }
+            $actorId = (int) (Flight::get('current_user')['id'] ?? 0);
+            if ($actorId <= 0) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Unauthorized',
+                    'data' => null,
+                ], 401);
+                return;
+            }
+
+            $connection = $this->database->getConnection();
+            $dayWork = new TaskDayWorkService();
+            if (!$dayWork->tableExists($connection)) {
+                Flight::json([
+                    'error_code' => 0,
+                    'status' => 'success',
+                    'message' => 'OK',
+                    'data' => ['day_work' => null],
+                ]);
+                return;
+            }
+
+            $task = $connection->executeQuery(
+                'SELECT id FROM fw_prj_tasks WHERE id = ? AND project_id = ?',
+                [$taskId, $projectId]
+            )->fetchAssociative();
+            if (!$task) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => 'Task not found',
+                    'data' => null,
+                ], 404);
+                return;
+            }
+
+            $row = $dayWork->findDayRow($connection, $taskId, $actorId, $workDate);
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'OK',
+                'data' => [
+                    'day_work' => $row ? $dayWork->formatRow($row) : null,
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Failed get task day-work', [
+                'error' => $e->getMessage(),
+                'project_id' => $projectId,
+                'task_id' => $taskId,
+            ]);
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Failed to load task day work',
+                'data' => null,
+            ], 500);
+        }
+    }
+
+    /**
+     * Best-effort: if PM published a timesheet row for this user+project+day, write the same punch there.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function mirrorDayCheckInToSchedule(
+        \Doctrine\DBAL\Connection $conn,
+        int $userId,
+        int $projectId,
+        string $workDateYmd,
+        string $phase,
+        float $lat,
+        float $lng,
+    ): ?array {
+        $row = $conn->executeQuery(
+            'SELECT id, work_start_at, work_end_at
+             FROM fw_worker_task_schedules
+             WHERE user_id = ? AND project_id = ? AND work_date = ?
+             ORDER BY CASE day_part WHEN \'full\' THEN 1 WHEN \'am\' THEN 2 WHEN \'pm\' THEN 3 ELSE 4 END, id
+             LIMIT 1',
+            [$userId, $projectId, $workDateYmd]
+        )->fetchAssociative();
+        if (!$row) {
+            return null;
+        }
+        $entryId = (int) $row['id'];
+        $clock = new WorkClockService();
+        $nowSql = $clock->nowSql();
+        if ($phase === 'start') {
+            if (!empty($row['work_start_at'])) {
+                return null;
+            }
+            $conn->executeStatement(
+                'UPDATE fw_worker_task_schedules
+                 SET work_start_lat = ?, work_start_lng = ?, work_start_at = ?, updated_at = ?
+                 WHERE id = ? AND user_id = ?',
+                [$lat, $lng, $nowSql, $nowSql, $entryId, $userId]
+            );
+        } else {
+            if (empty($row['work_start_at']) || !empty($row['work_end_at'])) {
+                return null;
+            }
+            $conn->executeStatement(
+                'UPDATE fw_worker_task_schedules
+                 SET work_end_lat = ?, work_end_lng = ?, work_end_at = ?, updated_at = ?
+                 WHERE id = ? AND user_id = ?',
+                [$lat, $lng, $nowSql, $nowSql, $entryId, $userId]
+            );
+        }
+
+        $saved = $conn->executeQuery(
+            'SELECT e.id, e.user_id, e.task_id, e.work_date, e.day_part, e.schedule_week_id, e.project_id,
+                    e.assignment_note, e.distance_km,
+                    e.expected_start_time, e.expected_end_time,
+                    e.work_start_lat, e.work_start_lng, e.work_start_at,
+                    e.work_end_lat, e.work_end_lng, e.work_end_at
+             FROM fw_worker_task_schedules e
+             WHERE e.id = ?',
+            [$entryId]
+        )->fetchAssociative();
+
+        return $saved ?: null;
+    }
+
+    /**
      * Worker / foreman phone geo check-in for task field work start or end.
      * Stored on fw_prj_tasks (separate from schedule slot trip columns).
      * POST /api/v1/projects/{projectId}/tasks/{taskId}/field-work/check-in
@@ -4632,6 +4919,28 @@ class TaskController
                     'status' => 'error',
                     'message' => 'You are not allowed to record field work for this task',
                     'data' => null,
+                ], 403);
+                return;
+            }
+
+            $siteService = new ProjectSiteLocationService($this->logger);
+            $site = $siteService->resolve($connection, $projectId);
+            $fence = new SiteGeoFenceService();
+            $geo = $fence->assertWithinSite(
+                $site['lat'] ?? null,
+                $site['lng'] ?? null,
+                $lat,
+                $lng,
+            );
+            if (!$geo['ok']) {
+                Flight::json([
+                    'error_code' => 403,
+                    'status' => 'error',
+                    'message' => $geo['message'],
+                    'data' => [
+                        'distance_m' => $geo['distance_m'] ?? null,
+                        'max_m' => $geo['max_m'] ?? null,
+                    ],
                 ], 403);
                 return;
             }
@@ -4835,20 +5144,6 @@ class TaskController
                     'message' => 'Work already submitted for PM review',
                     'data' => null,
                 ], 409);
-                return;
-            }
-
-            if (
-                $this->taskOptionalColumnPresent($connection, 'field_work_started_at')
-                && $this->taskOptionalColumnPresent($connection, 'field_work_ended_at')
-                && (empty($taskRow['field_work_started_at']) || empty($taskRow['field_work_ended_at']))
-            ) {
-                Flight::json([
-                    'error_code' => 400,
-                    'status' => 'error',
-                    'message' => 'Start and end work times are required before submitting',
-                    'data' => null,
-                ], 400);
                 return;
             }
 
