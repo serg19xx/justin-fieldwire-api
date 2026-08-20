@@ -3,7 +3,6 @@
 namespace App\Controllers;
 
 use App\Database\Database;
-use App\Support\ClientListContactFilter;
 use App\Support\ClientListSort;
 use Flight;
 use Exception;
@@ -91,18 +90,10 @@ class PharmacistController
                 }
             }
 
-            ClientListContactFilter::apply(
-                'pharmacist',
-                $whereConditions,
-                Flight::request()->query->nonEmpty ?? null,
-                Flight::request()->query->empty ?? null,
-                Flight::request()->query->missingContacts ?? null,
-            );
-
             $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
 
             // Получить общее количество
-            $countSql = "SELECT COUNT(*) as total FROM pharmacist pp LEFT JOIN pharma pa ON pp.pharmId = pa.id $whereClause";
+            $countSql = "SELECT COUNT(*) as total FROM fw_pharmacist pp LEFT JOIN fw_pharma pa ON pp.pharmId = pa.id $whereClause";
             $countResult = $this->database->getConnection()->executeQuery($countSql, $params);
             $total = $countResult->fetchAssociative()['total'];
 
@@ -121,7 +112,7 @@ class PharmacistController
             );
 
             // Получить фармацевтов с JOIN
-            $sql = "SELECT pp.*, pa.operName, pa.city, pa.country, pa.region FROM pharmacist pp LEFT JOIN pharma pa ON pp.pharmId = pa.id $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
+            $sql = "SELECT pp.*, pa.operName, pa.city, pa.country, pa.region FROM fw_pharmacist pp LEFT JOIN fw_pharma pa ON pp.pharmId = pa.id $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
             $pharmacists = $result->fetchAllAssociative();
@@ -170,7 +161,7 @@ class PharmacistController
                 return;
             }
 
-            $sql = "SELECT pp.*, pa.operName FROM pharmacist pp LEFT JOIN pharma pa ON pp.pharmId = pa.id WHERE pp.id = ?";
+            $sql = "SELECT pp.*, pa.operName FROM fw_pharmacist pp LEFT JOIN fw_pharma pa ON pp.pharmId = pa.id WHERE pp.id = ?";
             $params = [$id];
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
@@ -240,7 +231,7 @@ class PharmacistController
                 $values[] = $value;
             }
 
-            $sql = "INSERT INTO pharmacist (" . implode(', ', $fields) . ") VALUES (" . implode(', ', $placeholders) . ")";
+            $sql = "INSERT INTO fw_pharmacist (" . implode(', ', $fields) . ") VALUES (" . implode(', ', $placeholders) . ")";
             
             $this->database->getConnection()->executeStatement($sql, $values);
             
@@ -292,7 +283,7 @@ class PharmacistController
             ];
 
             // Проверить существование фармацевта
-            $checkSql = "SELECT id FROM pharmacist WHERE id = ?";
+            $checkSql = "SELECT id FROM fw_pharmacist WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
             
             if (!$checkStmt->fetchAssociative()) {
@@ -328,7 +319,7 @@ class PharmacistController
 
             $values[] = $id; // Для WHERE условия
 
-            $sql = "UPDATE pharmacist SET " . implode(', ', $fields) . " WHERE id = ?";
+            $sql = "UPDATE fw_pharmacist SET " . implode(', ', $fields) . " WHERE id = ?";
             
             $affectedRows = $this->database->getConnection()->executeStatement($sql, $values);
 
@@ -372,7 +363,7 @@ class PharmacistController
             }
 
             // Проверить существование фармацевта
-            $checkSql = "SELECT id FROM pharmacist WHERE id = ?";
+            $checkSql = "SELECT id FROM fw_pharmacist WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
             
             if (!$checkStmt->fetchAssociative()) {
@@ -386,7 +377,7 @@ class PharmacistController
             }
 
             // Удалить фармацевта
-            $sql = "DELETE FROM pharmacist WHERE id = ?";
+            $sql = "DELETE FROM fw_pharmacist WHERE id = ?";
             $affectedRows = $this->database->getConnection()->executeStatement($sql, [$id]);
 
             if ($affectedRows === 0) {

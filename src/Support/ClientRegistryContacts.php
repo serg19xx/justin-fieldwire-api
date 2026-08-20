@@ -17,22 +17,22 @@ class ClientRegistryContacts
     /** @var array<string, array{table: string, name_sql: string, select: string}> */
     private const TYPE_CONFIG = [
         'pharma' => [
-            'table' => 'pharma',
+            'table' => 'fw_pharma',
             'name_sql' => 'operName',
             'select' => 'id, operName, phone, cell, email, fax',
         ],
         'physician' => [
-            'table' => 'physician',
+            'table' => 'fw_physician',
             'name_sql' => 'fullName',
             'select' => 'id, fullName, cellPhone, officePhone, email, faxNumber',
         ],
         'pharmacist' => [
-            'table' => 'pharmacist',
+            'table' => 'fw_pharmacist',
             'name_sql' => 'fullName',
             'select' => 'id, fullName, cell_phone, email',
         ],
         'medical_clinic' => [
-            'table' => 'medical_clinic',
+            'table' => 'fw_medical_clinic',
             'name_sql' => 'clinicName',
             'select' => 'id, clinicName, contactName, phone, email, fax',
         ],

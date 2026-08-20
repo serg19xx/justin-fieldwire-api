@@ -3182,19 +3182,19 @@ class ProjectController
         // Маппинг типов таблиц на их реальные имена в БД и поля name
         $clientTables = [
             'pharma' => [
-                'table' => 'pharma',
+                'table' => 'fw_pharma',
                 'name_field' => 'operName'
             ],
             'physician' => [
-                'table' => 'physician',
+                'table' => 'fw_physician',
                 'name_field' => 'fullName'
             ],
             'pharmacist' => [
-                'table' => 'pharmacist',
+                'table' => 'fw_pharmacist',
                 'name_field' => 'fullName'
             ],
             'medical_clinic' => [
-                'table' => 'medical_clinic',
+                'table' => 'fw_medical_clinic',
                 'name_field' => 'clinicName'
             ]
         ];
