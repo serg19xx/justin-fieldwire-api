@@ -34,8 +34,9 @@ class TaskController
         'created_at', 'updated_at',
     ];
 
-    /** Optional columns added by field-work migrations (may be missing on older DBs). */
+    /** Optional columns added by field-work / category migrations (may be missing on older DBs). */
     private const TASK_DETAIL_OPTIONAL_COLUMNS = [
+        'category',
         'field_submitted_at',
         'field_submitted_by',
         'field_work_started_at',
@@ -223,9 +224,17 @@ class TaskController
     /** @return array<string, bool> */
     private function taskOptionalColumnMap(Connection $connection): array
     {
+        // If any optional column was previously missing, re-probe so migrations applied
+        // while the PHP process is alive (e.g. adding category) take effect without restart.
         if (self::$taskOptionalColumnExists !== null) {
-            return self::$taskOptionalColumnExists;
+            $hasMissing = in_array(false, self::$taskOptionalColumnExists, true);
+            if (!$hasMissing) {
+                return self::$taskOptionalColumnExists;
+            }
+            self::$taskOptionalColumnExists = null;
+            self::$resolvedTaskDetailSelect = null;
         }
+
         $map = [];
         foreach (self::TASK_DETAIL_OPTIONAL_COLUMNS as $column) {
             $map[$column] = $this->columnExistsOnTable($connection, 'fw_prj_tasks', $column);
@@ -521,7 +530,11 @@ class TaskController
                 $limit = min(max((int)$limitParam, 1), 2000);
             }
 
-            $sql = 'SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks'
+            $sql = 'SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at';
+            if ($this->taskOptionalColumnPresent($connection, 'category')) {
+                $sql .= ', category';
+            }
+            $sql .= ' FROM fw_prj_tasks'
                 . $whereSql
                 . ' ORDER BY task_order ASC, start_planned ASC';
 
@@ -636,6 +649,9 @@ class TaskController
                     'project_id' => (int)$task['project_id'],
                     'address' => $this->formatTaskAddressForResponse(isset($task['address']) ? (string) $task['address'] : null),
                     'name' => $task['name'],
+                    'category' => isset($task['category']) && is_string($task['category']) && trim($task['category']) !== ''
+                        ? trim($task['category'])
+                        : null,
                     'start_planned' => $task['start_planned'],
                     'end_planned' => $task['end_planned'],
                     'start_time' => $task['start_time'] ?? null,
@@ -898,6 +914,9 @@ class TaskController
                 'project_id' => (int)$task['project_id'],
                 'address' => $this->formatTaskAddressForResponse(isset($task['address']) ? (string) $task['address'] : null),
                 'name' => $task['name'],
+                'category' => isset($task['category']) && is_string($task['category']) && trim($task['category']) !== ''
+                    ? trim($task['category'])
+                    : null,
                 'start_planned' => $task['start_planned'],
                 'end_planned' => $task['end_planned'],
                 'start_time' => $task['start_time'] ?? null,
@@ -1066,10 +1085,6 @@ class TaskController
                 [$projectId]
             );
             $nextOrder = (int)$nextOrderResult->fetchOne();
-            
-            $sql = "INSERT INTO fw_prj_tasks (task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
-            // task_order, project_id, address, name, ...
 
             $address = $this->normalizeTaskAddressForStorage($data);
 
@@ -1089,7 +1104,12 @@ class TaskController
             if ($taskLeadId === null) {
                 $taskLeadId = $this->taskAuth->resolveProjectForemanUserId($connection, $projectId);
             }
-
+            
+            $insertColumns = [
+                'task_order', 'project_id', 'address', 'name', 'start_planned', 'end_planned',
+                'start_time', 'end_time', 'milestone', 'status', 'progress_pct', 'notes', 'resources',
+                'baseline_start', 'baseline_end', 'actual_start', 'actual_end', 'slack_days',
+            ];
             $params = [
                 $nextOrder,
                 $projectId,
@@ -1110,6 +1130,19 @@ class TaskController
                 $data['actual_end'] ?? null,
                 $data['slack_days'] ?? null
             ];
+
+            if ($this->taskOptionalColumnPresent($connection, 'category')) {
+                $insertColumns[] = 'category';
+                $category = null;
+                if (array_key_exists('category', $data)) {
+                    $rawCategory = is_string($data['category']) ? trim($data['category']) : '';
+                    $category = $rawCategory === '' ? null : $rawCategory;
+                }
+                $params[] = $category;
+            }
+
+            $placeholders = implode(', ', array_fill(0, count($insertColumns), '?'));
+            $sql = 'INSERT INTO fw_prj_tasks (' . implode(', ', $insertColumns) . ') VALUES (' . $placeholders . ')';
 
             $connection->executeStatement($sql, $params);
             $taskId = $connection->lastInsertId();
@@ -1643,6 +1676,11 @@ class TaskController
             if (isset($data['notes'])) {
                 $updateFields[] = "notes = ?";
                 $params[] = $data['notes'];
+            }
+            if (array_key_exists('category', $data) && $this->taskOptionalColumnPresent($connection, 'category')) {
+                $updateFields[] = 'category = ?';
+                $rawCategory = is_string($data['category'] ?? null) ? trim((string)$data['category']) : '';
+                $params[] = $rawCategory === '' ? null : $rawCategory;
             }
             // Обработка task_lead_id и team_members - НЕ добавляем в команду проекта отдельно
             // Пользователь будет добавлен в команду проекта автоматически при назначении на задачу
@@ -2966,6 +3004,9 @@ class TaskController
             'project_id' => (int)$task['project_id'],
             'address' => $this->formatTaskAddressForResponse(isset($task['address']) ? (string) $task['address'] : null),
             'name' => $task['name'],
+            'category' => isset($task['category']) && is_string($task['category']) && trim($task['category']) !== ''
+                ? trim($task['category'])
+                : null,
             'start_planned' => $task['start_planned'],
             'end_planned' => $task['end_planned'],
             'start_time' => $task['start_time'] ?? null,
