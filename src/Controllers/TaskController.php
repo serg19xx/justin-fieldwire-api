@@ -2817,10 +2817,23 @@ class TaskController
 
         // Проверка границ проекта убрана - теперь выполняется на фронтенде
 
-        // Валидация статуса
+        // Status validation (rich UI statuses + legacy API values)
         if (isset($data['status'])) {
-            $validStatuses = ['planned', 'in_progress', 'done', 'blocked', 'delayed'];
-            if (!in_array($data['status'], $validStatuses)) {
+            $validStatuses = [
+                'planned',
+                'scheduled',
+                'scheduled_accepted',
+                'in_progress',
+                'partially_completed',
+                'delayed_due_to_issue',
+                'ready_for_inspection',
+                'completed',
+                // Legacy values still present in DB / older clients
+                'done',
+                'blocked',
+                'delayed',
+            ];
+            if (!in_array($data['status'], $validStatuses, true)) {
                 return [
                     'valid' => false,
                     'message' => 'Invalid status. Must be one of: ' . implode(', ', $validStatuses)
