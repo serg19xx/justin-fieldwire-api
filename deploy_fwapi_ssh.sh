@@ -63,7 +63,7 @@ rm -rf "${BUILD_DIR}"; mkdir -p "${PKG_DIR}"
 rsync -a \
   --exclude ".git" --exclude ".github" --exclude "node_modules" \
   --exclude "tests" --exclude "docs" --exclude "*.md" --exclude "logs" \
-  --exclude ".deploy_build" --exclude ".env" \
+  --exclude ".deploy_build" --exclude ".env*" --exclude "/public/uploads/" \
   --exclude "env.development" --exclude "env.production" --exclude "env.local" --exclude "env.staging" \
   ./ "${PKG_DIR}/"
 
@@ -117,7 +117,8 @@ rm -rf "${PKG_DIR}/vendor"
 RUN_REMOTE "mkdir -p '${REMOTE_BASE}'"
 
 # 7) Заливка кода (быстро)
-RSYNC_EXCLUDES=(--exclude "vendor")
+# Excluded paths are also protected from --delete, so server-side uploads and env files survive.
+RSYNC_EXCLUDES=(--exclude "vendor" --exclude "/public/uploads/" --exclude ".env.*")
 if [[ "${UPLOAD_ENV}" != "yes" ]]; then
   RSYNC_EXCLUDES+=(--exclude ".env")
 fi
