@@ -46,6 +46,8 @@ class Database
                 \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
                 \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
                 \PDO::ATTR_EMULATE_PREPARES => false,
+                // Fail fast when the local SSH tunnel stalls instead of blocking the worker for minutes.
+                \PDO::ATTR_TIMEOUT => (int) self::env('DB_CONNECT_TIMEOUT', '10'),
             ],
         ];
 

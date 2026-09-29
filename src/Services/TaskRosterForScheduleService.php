@@ -12,6 +12,8 @@ use Doctrine\DBAL\Connection;
  */
 final class TaskRosterForScheduleService
 {
+    private const FIELD_STAFF_ROLE_CODES = ['worker', 'foreman'];
+
     /** Any row for (project, task, user) counts (task_lead, member, etc.). */
     public function isUserOnTask(Connection $conn, int $projectId, int $taskId, int $userId): bool
     {
@@ -34,6 +36,23 @@ final class TaskRosterForScheduleService
         )->fetchOne();
 
         return (bool) $one;
+    }
+
+    /**
+     * Field staff can be scheduled on any project; other users must already be on the project roster.
+     */
+    public function canBeScheduledOnProject(Connection $conn, int $projectId, int $userId): bool
+    {
+        if ($this->isUserProjectParticipant($conn, $projectId, $userId)) {
+            return true;
+        }
+
+        $roleCode = $conn->executeQuery(
+            'SELECT role_code FROM fw_v_users WHERE id = ? AND archived_at IS NULL',
+            [$userId]
+        )->fetchOne();
+
+        return in_array($roleCode, self::FIELD_STAFF_ROLE_CODES, true);
     }
 
     public function userExistsActive(Connection $conn, int $userId): bool

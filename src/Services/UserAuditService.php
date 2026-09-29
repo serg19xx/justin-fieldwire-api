@@ -69,14 +69,33 @@ class UserAuditService
     /**
      * Log user login
      */
-    public function logLogin(int $userId, bool $success = true, ?string $errorMessage = null): int
+    public function logLogin(?int $userId, bool $success = true, ?string $errorMessage = null): int
     {
+        if ($success && $userId !== null) {
+            $this->touchLastLogin($userId);
+        }
+
         return $this->logUserAction(
             userId: $userId,
             actionType: $success ? 'login' : 'login_failed',
             success: $success,
             errorMessage: $errorMessage
         );
+    }
+
+    private function touchLastLogin(int $userId): void
+    {
+        try {
+            $this->connection->executeStatement(
+                'UPDATE fw_users SET last_login = NOW() WHERE id = ?',
+                [$userId]
+            );
+        } catch (\Exception $e) {
+            $this->logger->warning('Failed to update last_login', [
+                'error' => $e->getMessage(),
+                'user_id' => $userId
+            ]);
+        }
     }
 
     /**

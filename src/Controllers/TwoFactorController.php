@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Database\Database;
 use App\Services\TwilioService;
 use App\Services\EmailService;
+use App\Services\UserAuditService;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
@@ -321,6 +322,15 @@ class TwoFactorController
 
             // Mark code as used
             $this->markCodeAsUsed($userId, $code);
+
+            try {
+                (new UserAuditService($this->logger))->logLogin($userId, true);
+            } catch (\Exception $e) {
+                $this->logger->warning('Failed to log 2FA login', [
+                    'error' => $e->getMessage(),
+                    'user_id' => $userId
+                ]);
+            }
 
             $this->logger->info('2FA verification successful', [
                 'user_id' => $userId,

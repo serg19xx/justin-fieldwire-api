@@ -298,9 +298,9 @@ class ScheduleWeekController
                 $this->error($this->entryValidationMessage($i, $row, 'user not found or archived'), 400);
                 return;
             }
-            if (!$roster->isUserProjectParticipant($conn, $projectId, $wid)) {
+            if (!$roster->canBeScheduledOnProject($conn, $projectId, $wid)) {
                 $this->error(
-                    $this->entryValidationMessage($i, $row, 'user is not a member of this project'),
+                    $this->entryValidationMessage($i, $row, 'user is not on this project team; assign them to a project task first'),
                     400
                 );
                 return;
@@ -572,9 +572,9 @@ class ScheduleWeekController
                 );
                 return;
             }
-            if (!$roster->isUserProjectParticipant($conn, $projectId, $uid)) {
+            if (!$roster->canBeScheduledOnProject($conn, $projectId, $uid)) {
                 $this->error(
-                    "Invalid entry (user_id={$uid}, work_date={$wd}): user is not a member of this project",
+                    "Invalid entry (user_id={$uid}, work_date={$wd}): user is not on this project team; assign them to a project task first",
                     400
                 );
                 return;
