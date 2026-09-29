@@ -1390,7 +1390,9 @@ class ApiRoutes
         Flight::route('POST /api/v1/projects/@project_id/team', function($project_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
                 $teamController = new \App\Controllers\ProjectTeamController($this->logger);
-                Flight::json($teamController->addTeamMember((int)$project_id));
+                $result = $teamController->addTeamMember((int)$project_id);
+                $isError = ($result['status'] ?? '') === 'error';
+                Flight::json($result, $isError ? ((int) ($result['error_code'] ?? 0) ?: 500) : 200);
             }
         });
 
