@@ -13,9 +13,18 @@ use Monolog\Logger;
  */
 class CalendarController
 {
+    /** Projects the user manages, is on the team of, or is scheduled on. Binds the user id three times. */
+    private const PARTICIPANT_PROJECTS_SQL =
+        'SELECT p2.id FROM fw_projects p2 WHERE p2.prj_manager = ?'
+        . ' UNION SELECT tm.project_id FROM fw_prj_team_members tm WHERE tm.user_id = ?'
+        . ' UNION SELECT s.project_id FROM fw_worker_task_schedules s WHERE s.user_id = ?';
+
     public function __construct(private readonly Logger $logger) {}
 
-    /** GET /api/v1/calendar/events — all events for current user (global view). */
+    /**
+     * GET /api/v1/calendar/events — own events plus project events of projects the user works on
+     * (read-only when created by someone else).
+     */
     public function listGlobal(): void
     {
         $userId = $this->currentUserId();
@@ -25,15 +34,17 @@ class CalendarController
 
         [$from, $to] = $this->parseDateRange();
         $events = $this->fetchEvents(
-            'e.user_id = ?' . $this->dateRangeSql('e', $from, $to),
-            $this->bindWithRange([$userId], $from, $to),
+            '(e.user_id = ? OR (e.project_id IS NOT NULL AND e.project_id IN (' . self::PARTICIPANT_PROJECTS_SQL . ')))'
+                . $this->dateRangeSql('e', $from, $to),
+            $this->bindWithRange([$userId, $userId, $userId, $userId], $from, $to),
             'global',
+            $userId,
         );
 
         $this->jsonSuccess('Calendar events retrieved', ['events' => $events]);
     }
 
-    /** GET /api/v1/projects/{id}/calendar/events — global (read-only) + this project. */
+    /** GET /api/v1/projects/{id}/calendar/events — own personal (read-only) + all events of this project. */
     public function listForProject(int $projectId): void
     {
         $userId = $this->currentUserId();
@@ -48,9 +59,10 @@ class CalendarController
 
         [$from, $to] = $this->parseDateRange();
         $events = $this->fetchEvents(
-            'e.user_id = ? AND (e.project_id IS NULL OR e.project_id = ?)' . $this->dateRangeSql('e', $from, $to),
+            '((e.user_id = ? AND e.project_id IS NULL) OR e.project_id = ?)' . $this->dateRangeSql('e', $from, $to),
             $this->bindWithRange([$userId, $projectId], $from, $to),
             'project',
+            $userId,
             $projectId,
         );
 
@@ -343,7 +355,7 @@ class CalendarController
      * @param array<int, mixed> $bind
      * @return list<array<string, mixed>>
      */
-    private function fetchEvents(string $where, array $bind, string $viewMode, ?int $projectContextId = null): array
+    private function fetchEvents(string $where, array $bind, string $viewMode, int $viewerId, ?int $projectContextId = null): array
     {
         $conn = Database::getConnection();
         $sql = 'SELECT e.id, e.user_id, e.project_id, e.title, e.description, e.location,
@@ -357,7 +369,7 @@ class CalendarController
         $rows = $conn->executeQuery($sql, $bind)->fetchAllAssociative();
         $out = [];
         foreach ($rows as $row) {
-            $out[] = $this->formatEventRow($row, $viewMode, $projectContextId);
+            $out[] = $this->formatEventRow($row, $viewMode, $viewerId, $projectContextId);
         }
         return $out;
     }
@@ -382,20 +394,22 @@ class CalendarController
             return null;
         }
 
-        return $this->formatEventRow($row, $viewMode, $projectContextId);
+        return $this->formatEventRow($row, $viewMode, $userId, $projectContextId);
     }
 
     /**
      * @param array<string, mixed> $row
      * @return array<string, mixed>
      */
-    private function formatEventRow(array $row, string $viewMode, ?int $projectContextId = null): array
+    private function formatEventRow(array $row, string $viewMode, int $viewerId, ?int $projectContextId = null): array
     {
         $projectId = $row['project_id'] !== null ? (int) $row['project_id'] : null;
         $scope = $projectId === null ? 'global' : 'project';
 
         $editable = false;
-        if ($viewMode === 'global') {
+        if ((int) $row['user_id'] !== $viewerId) {
+            $editable = false;
+        } elseif ($viewMode === 'global') {
             $editable = $projectId === null;
         } elseif ($viewMode === 'project' && $projectContextId !== null) {
             $editable = $projectId === $projectContextId;
