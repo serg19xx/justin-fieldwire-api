@@ -1027,6 +1027,18 @@ class ApiRoutes
                 $workerController->sendInvitation();
             }
         });
+
+        Flight::route('POST /api/v1/workers/@id:[0-9]+/invitation/resend', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\WorkerController($this->logger))->resendInvitation((int)$id);
+            }
+        });
+
+        Flight::route('DELETE /api/v1/workers/@id:[0-9]+/invitation', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\WorkerController($this->logger))->revokeInvitation((int)$id);
+            }
+        });
         
         Flight::route('GET /api/v1/workers/email-providers', function() use ($authMiddleware) {
             if ($authMiddleware->handle()) {

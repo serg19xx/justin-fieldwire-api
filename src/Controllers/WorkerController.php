@@ -17,6 +17,12 @@ use OpenApi\Annotations as OA;
  */
 class WorkerController
 {
+    // Nothing writes 'expired' on timeout, so a stale 'invited' row is expired by its expiry date.
+    // Expiry is written and checked with the PHP clock (see RegistrationController), not MySQL NOW(),
+    // because the two run in different time zones.
+    private const EXPIRED_INVITATION_SQL = " AND (u.invitation_status = 'expired'"
+        . " OR (u.invitation_status = 'invited' AND u.invitation_expires_at < ?))";
+
     private Logger $logger;
     private Database $database;
     private EmailService $emailService;
@@ -303,9 +309,13 @@ class WorkerController
             }
 
             // Фильтр по статусу приглашения
+            // Empty/NULL invitation_status (legacy archived rows) counts as registered so admins still see them.
             if ($invitationStatus) {
-                if (in_array($invitationStatus, ['invited', 'registered', 'expired'])) {
-                    $sql .= " AND u.invitation_status = ?";
+                if ($invitationStatus === 'expired') {
+                    $sql .= self::EXPIRED_INVITATION_SQL;
+                    $params[] = date('Y-m-d H:i:s');
+                } elseif (in_array($invitationStatus, ['invited', 'registered'])) {
+                    $sql .= " AND COALESCE(NULLIF(u.invitation_status, ''), 'registered') = ?";
                     $params[] = $invitationStatus;
                 } else {
                     // Для невалидных статусов возвращаем пустой результат
@@ -396,8 +406,11 @@ class WorkerController
             }
             
             if ($invitationStatus) {
-                if (in_array($invitationStatus, ['invited', 'registered', 'expired'])) {
-                    $countSql .= " AND u.invitation_status = ?";
+                if ($invitationStatus === 'expired') {
+                    $countSql .= self::EXPIRED_INVITATION_SQL;
+                    $countParams[] = date('Y-m-d H:i:s');
+                } elseif (in_array($invitationStatus, ['invited', 'registered'])) {
+                    $countSql .= " AND COALESCE(NULLIF(u.invitation_status, ''), 'registered') = ?";
                     $countParams[] = $invitationStatus;
                 } else {
                     // Для невалидных статусов возвращаем пустой результат
@@ -627,7 +640,7 @@ class WorkerController
             // Проверяем, не существует ли уже пользователь с таким email
             $connection = $this->database->getConnection();
             $existingUser = $connection->executeQuery(
-                "SELECT id, invitation_status FROM fw_v_users WHERE email = ?",
+                "SELECT id, invitation_status, invitation_expires_at FROM fw_v_users WHERE email = ?",
                 [$email]
             )->fetchAssociative();
 
@@ -640,7 +653,10 @@ class WorkerController
                         'data' => null
                     ], 400);
                     return;
-                } elseif ($existingUser['invitation_status'] === 'invited') {
+                } elseif (
+                    $existingUser['invitation_status'] === 'invited'
+                    && !$this->isInvitationExpired($existingUser['invitation_expires_at'])
+                ) {
                     Flight::json([
                         'error_code' => 400,
                         'status' => 'error',
@@ -653,6 +669,7 @@ class WorkerController
 
             // Генерируем токен приглашения
             $invitationToken = bin2hex(random_bytes(32));
+            $sentAt = date('Y-m-d H:i:s');
             $expiresAt = date('Y-m-d H:i:s', strtotime('+7 days')); // Приглашение действует 7 дней
 
             // Генерируем временный пароль
@@ -676,7 +693,7 @@ class WorkerController
                 }
                 
                 $sql .= " invitation_status = 'invited', invitation_token = ?, 
-                                invitation_sent_at = NOW(), invitation_expires_at = ?, invited_by = ?,
+                                invitation_sent_at = ?, invitation_expires_at = ?, invited_by = ?,
                                 password_hash = ?
                         WHERE email = ?";
                 
@@ -684,7 +701,7 @@ class WorkerController
                 if ($roleId !== null) {
                     $params[] = $roleId;
                 }
-                $params = array_merge($params, [$invitationToken, $expiresAt, $currentUserId, $tempPasswordHash, $email]);
+                $params = array_merge($params, [$invitationToken, $sentAt, $expiresAt, $currentUserId, $tempPasswordHash, $email]);
                 
                 $connection->executeStatement($sql, $params);
             } else {
@@ -704,13 +721,13 @@ class WorkerController
                     $sql .= " ?,";
                 }
                 
-                $sql .= " 'invited', ?, NOW(), ?, ?, ?, NOW())";
+                $sql .= " 'invited', ?, ?, ?, ?, ?, NOW())";
                 
                 $params = [$email, $firstName, $lastName, $jobTitle, $phone];
                 if ($roleId !== null) {
                     $params[] = $roleId;
                 }
-                $params = array_merge($params, [$invitationToken, $expiresAt, $currentUserId, $tempPasswordHash]);
+                $params = array_merge($params, [$invitationToken, $sentAt, $expiresAt, $currentUserId, $tempPasswordHash]);
                 
                 $connection->executeStatement($sql, $params);
             }
@@ -827,6 +844,217 @@ class WorkerController
                 'message' => 'Failed to send invitation',
                 'data' => null
             ], 500);
+        }
+    }
+
+    /**
+     * Re-issue a pending or expired invitation with a fresh token and expiry.
+     * POST /api/v1/workers/{id}/invitation/resend
+     */
+    public function resendInvitation(int $userId): void
+    {
+        $actor = $this->requireInvitationManager();
+        if ($actor === null) {
+            return;
+        }
+
+        $invitee = $this->findPendingInvitee($userId);
+        if ($invitee === null) {
+            return;
+        }
+
+        $connection = $this->database->getConnection();
+        $invitationToken = bin2hex(random_bytes(32));
+        $sentAt = date('Y-m-d H:i:s');
+        $expiresAt = date('Y-m-d H:i:s', strtotime('+7 days'));
+        $tempPassword = $this->generateTempPassword();
+        $emailProvider = Flight::request()->data->email_provider ?? 'auto';
+
+        $connection->beginTransaction();
+        try {
+            $connection->executeStatement(
+                "UPDATE fw_users SET invitation_status = 'invited', invitation_token = ?,
+                        invitation_sent_at = ?, invitation_expires_at = ?, invited_by = ?,
+                        password_hash = ?, invitation_attempts = COALESCE(invitation_attempts, 0) + 1
+                 WHERE id = ?",
+                [$invitationToken, $sentAt, $expiresAt, (int)$actor['id'], password_hash($tempPassword, PASSWORD_DEFAULT), $userId]
+            );
+
+            $emailSent = $this->emailService->sendWorkerInvitation(
+                (string)$invitee['email'],
+                (string)$invitee['first_name'],
+                (string)$invitee['last_name'],
+                $invitationToken,
+                $emailProvider,
+                $tempPassword
+            );
+            if (!$emailSent) {
+                $connection->rollBack();
+                Flight::json([
+                    'error_code' => 500,
+                    'status' => 'error',
+                    'message' => 'Failed to send invitation email',
+                    'data' => null
+                ], 500);
+                return;
+            }
+
+            $connection->commit();
+        } catch (\Throwable $e) {
+            if ($connection->isTransactionActive()) {
+                $connection->rollBack();
+            }
+            $this->logger->error('Error resending invitation: ' . $e->getMessage(), ['user_id' => $userId]);
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'Failed to resend invitation',
+                'data' => null
+            ], 500);
+            return;
+        }
+
+        $this->logInvitationEvent('WORKER_INVITATION_RESENT', $userId, (int)$actor['id'], [
+            'email' => $invitee['email'],
+            'invitation_expires_at' => $expiresAt,
+        ]);
+
+        Flight::json([
+            'error_code' => 0,
+            'status' => 'success',
+            'message' => 'Invitation resent successfully',
+            'data' => [
+                'id' => $userId,
+                'invitation_status' => 'invited',
+                'invitation_sent_at' => $sentAt,
+                'invitation_expires_at' => $expiresAt,
+                'invitation_is_expired' => false,
+            ]
+        ]);
+    }
+
+    /**
+     * Withdraw an invitation that was never accepted; removes the placeholder account
+     * so the email can be invited again.
+     * DELETE /api/v1/workers/{id}/invitation
+     */
+    public function revokeInvitation(int $userId): void
+    {
+        $actor = $this->requireInvitationManager();
+        if ($actor === null) {
+            return;
+        }
+
+        $invitee = $this->findPendingInvitee($userId);
+        if ($invitee === null) {
+            return;
+        }
+
+        $connection = $this->database->getConnection();
+        $connection->beginTransaction();
+        try {
+            $connection->executeStatement('DELETE FROM fw_prj_team_members WHERE user_id = ?', [$userId]);
+            $connection->executeStatement(
+                "DELETE FROM fw_users WHERE id = ? AND invitation_status IN ('invited', 'expired')",
+                [$userId]
+            );
+            $connection->commit();
+        } catch (\Throwable $e) {
+            if ($connection->isTransactionActive()) {
+                $connection->rollBack();
+            }
+            $this->logger->error('Error revoking invitation: ' . $e->getMessage(), ['user_id' => $userId]);
+            Flight::json([
+                'error_code' => 409,
+                'status' => 'error',
+                'message' => 'Invitation cannot be removed: the user already has related records',
+                'data' => null
+            ], 409);
+            return;
+        }
+
+        $this->logInvitationEvent('WORKER_INVITATION_REVOKED', $userId, (int)$actor['id'], [
+            'email' => $invitee['email'],
+            'first_name' => $invitee['first_name'],
+            'last_name' => $invitee['last_name'],
+        ]);
+
+        Flight::json([
+            'error_code' => 0,
+            'status' => 'success',
+            'message' => 'Invitation removed',
+            'data' => ['id' => $userId]
+        ]);
+    }
+
+    private function isInvitationExpired(?string $expiresAt): bool
+    {
+        return $expiresAt !== null && $expiresAt !== '' && strtotime($expiresAt) < time();
+    }
+
+    /**
+     * @return array<string, mixed>|null Current user when allowed to manage invitations
+     */
+    private function requireInvitationManager(): ?array
+    {
+        $actor = Flight::get('current_user');
+        if (!is_array($actor) || !in_array($actor['role_code'] ?? null, ['admin', 'project_manager'], true)) {
+            Flight::json([
+                'error_code' => 403,
+                'status' => 'error',
+                'message' => 'Only administrators and project managers can manage invitations',
+                'data' => null
+            ], 403);
+            return null;
+        }
+        return $actor;
+    }
+
+    /**
+     * @return array<string, mixed>|null Invitee row when the invitation is still unaccepted
+     */
+    private function findPendingInvitee(int $userId): ?array
+    {
+        $invitee = $this->database->getConnection()->executeQuery(
+            'SELECT id, email, first_name, last_name, invitation_status FROM fw_users WHERE id = ?',
+            [$userId]
+        )->fetchAssociative();
+
+        if (!$invitee) {
+            Flight::json([
+                'error_code' => 404,
+                'status' => 'error',
+                'message' => 'User not found',
+                'data' => null
+            ], 404);
+            return null;
+        }
+
+        if (!in_array($invitee['invitation_status'], ['invited', 'expired'], true)) {
+            Flight::json([
+                'error_code' => 409,
+                'status' => 'error',
+                'message' => 'User has already accepted the invitation',
+                'data' => null
+            ], 409);
+            return null;
+        }
+
+        return $invitee;
+    }
+
+    private function logInvitationEvent(string $eventType, int $userId, int $actorId, array $payload): void
+    {
+        try {
+            (new \App\Services\EventLoggingService($this->logger))->logSimple(
+                'user',
+                $userId,
+                $eventType,
+                $payload,
+                ['actor_type' => 'user', 'actor_id' => $actorId]
+            );
+        } catch (\Throwable $t) {
+            $this->logger->warning('Failed to log ' . $eventType . ' event', ['error' => $t->getMessage()]);
         }
     }
 
@@ -1151,9 +1379,11 @@ class WorkerController
             'avatar_url' => $worker['avatar_url'],
             'created_at' => $worker['created_at'],
             'updated_at' => $worker['updated_at'],
-            'invitation_status' => $worker['invitation_status'],
+            'invitation_status' => ($worker['invitation_status'] ?? '') !== '' ? $worker['invitation_status'] : 'registered',
             'invitation_sent_at' => $worker['invitation_sent_at'],
             'invitation_expires_at' => $worker['invitation_expires_at'],
+            'invitation_is_expired' => ($worker['invitation_status'] ?? '') === 'expired'
+                || (($worker['invitation_status'] ?? '') === 'invited' && $this->isInvitationExpired($worker['invitation_expires_at'])),
             'invited_by' => $worker['invited_by'] ? (int)$worker['invited_by'] : null,
             'registration_completed_at' => $worker['registration_completed_at'],
             'invitation_attempts' => (int)$worker['invitation_attempts'],

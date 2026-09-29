@@ -58,6 +58,11 @@ echo -e "   • http://localhost:$PORT/api${NC}"
 echo -e "   • http://localhost:$PORT/api/docs${NC}"
 echo -e "${YELLOW}🛑 Press Ctrl+C to stop the server${NC}"
 
+# Clear ambient HTTP proxies (Cursor/IDE shells) — they break SendGrid DNS/CONNECT locally.
+unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy NO_PROXY no_proxy
+
 # Start PHP development server on IPv4 localhost (Firefox/Vite use 127.0.0.1 reliably).
 # Use public/php.ini so fax/document uploads respect 52M upload_max_filesize.
+# Without workers the built-in server is single-threaded and queues parallel SPA requests.
+export PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-8}"
 php -c public/php.ini -S 127.0.0.1:$PORT -t public
