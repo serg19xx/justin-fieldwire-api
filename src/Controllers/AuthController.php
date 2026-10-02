@@ -1740,4 +1740,186 @@ class AuthController
         setcookie('refresh_token', '', $cookieOptions);
     }
 
+    /**
+     * Self-service client account access request for Doctors and Pharmacists.
+     * Matches email and cell phone against fw_physician or fw_pharmacist.
+     * - If no match: 404 (contact admin)
+     * - If multiple matches: 409 (resolve duplicates)
+     * - If exactly 1 match: creates/updates fw_users account and issues JWT
+     */
+    public function requestClientAccess(): void
+    {
+        try {
+            $requestBody = Flight::request()->getBody();
+            $data = json_decode($requestBody, true);
+            if (!is_array($data)) {
+                $data = Flight::request()->data->getData();
+            }
+
+            $role = strtolower(trim((string) ($data['role'] ?? '')));
+            $email = strtolower(trim((string) ($data['email'] ?? '')));
+            $phone = trim((string) ($data['phone'] ?? ''));
+            $password = (string) ($data['password'] ?? '');
+
+            if (!in_array($role, ['doctor', 'pharmacist'], true) || empty($email) || empty($phone) || empty($password)) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => 'Role (doctor or pharmacist), email, phone, and password are required.',
+                    'data' => null,
+                ], 400);
+                return;
+            }
+
+            $cleanPhone = preg_replace('/[^0-9]/', '', $phone);
+            $last10 = strlen($cleanPhone) >= 10 ? substr($cleanPhone, -10) : $cleanPhone;
+
+            $connection = Database::getConnection();
+
+            if ($role === 'doctor') {
+                $sql = "SELECT id, fullName, email, cellPhone, officePhone 
+                        FROM fw_physician 
+                        WHERE LOWER(TRIM(email)) = ? 
+                          AND (
+                            RIGHT(REGEXP_REPLACE(COALESCE(cellPhone, ''), '[^0-9]', ''), 10) = ?
+                            OR RIGHT(REGEXP_REPLACE(COALESCE(officePhone, ''), '[^0-9]', ''), 10) = ?
+                          )";
+                $stmt = $connection->executeQuery($sql, [$email, $last10, $last10]);
+                $matches = $stmt->fetchAllAssociative();
+                $recordType = 'Doctor (Physician)';
+                $clientTableIdCol = 'physician_id';
+            } else {
+                $sql = "SELECT id, fullName, email, cell_phone 
+                        FROM fw_pharmacist 
+                        WHERE LOWER(TRIM(email)) = ? 
+                          AND RIGHT(REGEXP_REPLACE(COALESCE(cell_phone, ''), '[^0-9]', ''), 10) = ?";
+                $stmt = $connection->executeQuery($sql, [$email, $last10]);
+                $matches = $stmt->fetchAllAssociative();
+                $recordType = 'Pharmacist';
+                $clientTableIdCol = 'pharmacist_id';
+            }
+
+            $count = count($matches);
+            if ($count === 0) {
+                Flight::json([
+                    'error_code' => 404,
+                    'status' => 'error',
+                    'message' => "No matching {$recordType} record found with this email and phone number. Please contact your project administrator.",
+                    'data' => null,
+                ], 404);
+                return;
+            }
+
+            if ($count > 1) {
+                Flight::json([
+                    'error_code' => 409,
+                    'status' => 'error',
+                    'message' => "Multiple {$recordType} records match this email and phone number. Please contact your administrator to resolve duplicate records.",
+                    'data' => null,
+                ], 409);
+                return;
+            }
+
+            $matchedRecord = $matches[0];
+            $clientId = (int) $matchedRecord['id'];
+            $firstName = $matchedRecord['firstName'] ?? '';
+            $lastName = $matchedRecord['lastName'] ?? '';
+            if (empty($firstName) && empty($lastName) && !empty($matchedRecord['fullName'])) {
+                $parts = explode(' ', trim((string) $matchedRecord['fullName']), 2);
+                $firstName = $parts[0] ?? '';
+                $lastName = $parts[1] ?? '';
+            }
+
+            // Look up role in fw_glob_roles
+            $roleRow = $connection->fetchAssociative("SELECT id, code, name, category FROM fw_glob_roles WHERE code = ? LIMIT 1", [$role]);
+            $roleId = $roleRow ? (int) $roleRow['id'] : null;
+
+            $passwordHash = password_hash($password, PASSWORD_BCRYPT);
+
+            // Check if user already exists in fw_users
+            $existingUser = $connection->fetchAssociative("SELECT id FROM fw_users WHERE LOWER(TRIM(email)) = ? LIMIT 1", [$email]);
+
+            if ($existingUser) {
+                $userId = (int) $existingUser['id'];
+                $updateFields = [
+                    'password_hash' => $passwordHash,
+                    'status' => 'active',
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ];
+                if ($roleId !== null) {
+                    $updateFields['role_id'] = $roleId;
+                }
+                $updateFields[$clientTableIdCol] = $clientId;
+
+                $connection->update('fw_users', $updateFields, ['id' => $userId]);
+            } else {
+                $insertData = [
+                    'email' => $email,
+                    'password_hash' => $passwordHash,
+                    'first_name' => $firstName ?: ucfirst($role),
+                    'last_name' => $lastName ?: 'User',
+                    'phone' => $phone,
+                    'status' => 'active',
+                    'two_factor_enabled' => 0,
+                    'created_at' => date('Y-m-d H:i:s'),
+                    'updated_at' => date('Y-m-d H:i:s'),
+                ];
+                if ($roleId !== null) {
+                    $insertData['role_id'] = $roleId;
+                }
+                $insertData[$clientTableIdCol] = $clientId;
+
+                $connection->insert('fw_users', $insertData);
+                $userId = (int) $connection->lastInsertId();
+            }
+
+            $userRow = $connection->fetchAssociative("SELECT * FROM fw_v_users WHERE id = ? LIMIT 1", [$userId]);
+            if (!$userRow) {
+                $userRow = [
+                    'id' => $userId,
+                    'email' => $email,
+                    'first_name' => $firstName,
+                    'last_name' => $lastName,
+                    'phone' => $phone,
+                    'role_code' => $role,
+                    'role_name' => ucfirst($role),
+                    'role_category' => 'client',
+                    'role_id' => $roleId,
+                ];
+            }
+
+            $token = $this->generateToken($userRow);
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Account access granted successfully.',
+                'data' => [
+                    'token' => $token,
+                    'user' => [
+                        'id' => $userId,
+                        'email' => $email,
+                        'name' => trim(($firstName ?: '') . ' ' . ($lastName ?: '')) ?: ucfirst($role),
+                        'first_name' => $firstName,
+                        'last_name' => $lastName,
+                        'role_code' => $role,
+                        'role_name' => ucfirst($role),
+                        'role_category' => 'client',
+                        'role_id' => $roleId,
+                        'physician_id' => $role === 'doctor' ? $clientId : null,
+                        'pharmacist_id' => $role === 'pharmacist' ? $clientId : null,
+                    ],
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('Client access request failed', ['error' => $e->getMessage()]);
+            Flight::json([
+                'error_code' => 500,
+                'status' => 'error',
+                'message' => 'An error occurred while verifying your record. Please contact your administrator.',
+                'data' => null,
+            ], 500);
+        }
+    }
+
 }

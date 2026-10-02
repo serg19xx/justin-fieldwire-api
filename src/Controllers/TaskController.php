@@ -37,6 +37,9 @@ class TaskController
     /** Optional columns added by field-work / category migrations (may be missing on older DBs). */
     private const TASK_DETAIL_OPTIONAL_COLUMNS = [
         'category',
+        'executor_type',
+        'contractor_id',
+        'inspector_id',
         'field_submitted_at',
         'field_submitted_by',
         'field_work_started_at',
@@ -318,6 +321,340 @@ class TaskController
     }
 
     /**
+     * Normalize and validate executor_type / contractor_id / inspector_id for create or update.
+     *
+     * @param array<string, mixed> $data
+     * @param array<string, mixed>|null $existingTask
+     * @return array{
+     *   valid: bool,
+     *   message?: string,
+     *   changed?: bool,
+     *   executor_type?: string|null,
+     *   contractor_id?: int|null,
+     *   inspector_id?: int|null,
+     *   skip_task_lead?: bool,
+     *   clear_task_lead_rows?: bool,
+     *   switching_to_user?: bool
+     * }
+     */
+    private function resolveExecutorAssignment(
+        Connection $connection,
+        array $data,
+        bool $isCreate,
+        ?array $existingTask = null,
+    ): array {
+        $hasExecutorColumns = $this->taskOptionalColumnPresent($connection, 'executor_type')
+            && $this->taskOptionalColumnPresent($connection, 'contractor_id')
+            && $this->taskOptionalColumnPresent($connection, 'inspector_id');
+
+        if (!$hasExecutorColumns) {
+            return ['valid' => true, 'changed' => false, 'skip_task_lead' => false, 'clear_task_lead_rows' => false];
+        }
+
+        $hasAnyKey = array_key_exists('executor_type', $data)
+            || array_key_exists('contractor_id', $data)
+            || array_key_exists('inspector_id', $data);
+
+        if (!$hasAnyKey) {
+            $existingType = $existingTask['executor_type'] ?? null;
+            $isContractor = $existingType === 'contractor';
+
+            return [
+                'valid' => true,
+                'changed' => false,
+                'skip_task_lead' => $isContractor,
+                'clear_task_lead_rows' => false,
+                'switching_to_user' => false,
+            ];
+        }
+
+        $existingType = isset($existingTask['executor_type']) && is_string($existingTask['executor_type'])
+            ? $existingTask['executor_type']
+            : null;
+        if ($existingType !== 'user' && $existingType !== 'contractor') {
+            $existingType = null;
+        }
+        $existingContractorId = isset($existingTask['contractor_id']) && $existingTask['contractor_id'] !== null
+            ? (int) $existingTask['contractor_id']
+            : null;
+        if ($existingContractorId !== null && $existingContractorId <= 0) {
+            $existingContractorId = null;
+        }
+        $existingInspectorId = isset($existingTask['inspector_id']) && $existingTask['inspector_id'] !== null
+            ? (int) $existingTask['inspector_id']
+            : null;
+        if ($existingInspectorId !== null && $existingInspectorId <= 0) {
+            $existingInspectorId = null;
+        }
+
+        if (array_key_exists('executor_type', $data)) {
+            $rawType = $data['executor_type'];
+            if ($rawType === null || $rawType === '') {
+                $executorType = null;
+            } elseif (is_string($rawType) && in_array($rawType, ['user', 'contractor'], true)) {
+                $executorType = $rawType;
+            } else {
+                return [
+                    'valid' => false,
+                    'message' => "executor_type must be null, 'user', or 'contractor'",
+                ];
+            }
+        } else {
+            $executorType = $isCreate ? null : $existingType;
+        }
+
+        if (array_key_exists('contractor_id', $data)) {
+            $rawCid = $data['contractor_id'];
+            if ($rawCid === null || $rawCid === '') {
+                $contractorId = null;
+            } elseif (is_numeric($rawCid) && (int) $rawCid > 0) {
+                $contractorId = (int) $rawCid;
+            } else {
+                return [
+                    'valid' => false,
+                    'message' => 'contractor_id must be a positive number or null',
+                ];
+            }
+        } else {
+            $contractorId = $isCreate ? null : $existingContractorId;
+        }
+
+        if (array_key_exists('inspector_id', $data)) {
+            $rawIid = $data['inspector_id'];
+            if ($rawIid === null || $rawIid === '') {
+                $inspectorId = null;
+            } elseif (is_numeric($rawIid) && (int) $rawIid > 0) {
+                $inspectorId = (int) $rawIid;
+            } else {
+                return [
+                    'valid' => false,
+                    'message' => 'inspector_id must be a positive number or null',
+                ];
+            }
+        } else {
+            $inspectorId = $isCreate ? null : $existingInspectorId;
+        }
+
+        if ($executorType === 'contractor') {
+            if ($contractorId === null || $contractorId <= 0) {
+                return [
+                    'valid' => false,
+                    'message' => 'contractor_id is required when executor_type is contractor',
+                ];
+            }
+            $contractorCheck = $this->assertActiveExternalContact($connection, 'fw_contractors', $contractorId, 'Contractor');
+            if ($contractorCheck !== null) {
+                return ['valid' => false, 'message' => $contractorCheck];
+            }
+        } else {
+            // user or null: never store contractor_id
+            $contractorId = null;
+        }
+
+        if ($inspectorId !== null) {
+            $inspectorCheck = $this->assertActiveExternalContact($connection, 'fw_inspectors', $inspectorId, 'Inspector');
+            if ($inspectorCheck !== null) {
+                return ['valid' => false, 'message' => $inspectorCheck];
+            }
+        }
+
+        $switchingToUser = !$isCreate
+            && $existingType === 'contractor'
+            && ($executorType === 'user' || $executorType === null);
+
+        return [
+            'valid' => true,
+            'changed' => true,
+            'executor_type' => $executorType,
+            'contractor_id' => $contractorId,
+            'inspector_id' => $inspectorId,
+            'skip_task_lead' => $executorType === 'contractor',
+            'clear_task_lead_rows' => !$isCreate && $executorType === 'contractor',
+            'switching_to_user' => $switchingToUser,
+        ];
+    }
+
+    private function assertActiveExternalContact(
+        Connection $connection,
+        string $table,
+        int $id,
+        string $label,
+    ): ?string {
+        try {
+            $row = $connection->executeQuery(
+                'SELECT id, is_active FROM ' . $table . ' WHERE id = ? LIMIT 1',
+                [$id]
+            )->fetchAssociative();
+            if (!$row) {
+                return "{$label} with ID {$id} not found";
+            }
+            if (!(bool) ($row['is_active'] ?? false)) {
+                return "{$label} with ID {$id} is inactive";
+            }
+        } catch (Exception $e) {
+            $this->logger->warning('Failed to validate external contact', [
+                'table' => $table,
+                'id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return null;
+    }
+
+    private function clearTaskLeadTeamMembers(Connection $connection, int $projectId, int $taskId): void
+    {
+        $rows = $connection->executeQuery(
+            'SELECT id, role_in_project FROM fw_prj_team_members WHERE task_id = ? AND project_id = ?',
+            [$taskId, $projectId]
+        )->fetchAllAssociative();
+
+        foreach ($rows as $row) {
+            $role = $row['role_in_project'] ?? null;
+            if ($role === 'task_lead' || $this->taskAuth->isTaskLeadProjectRole(is_string($role) ? $role : null)) {
+                $connection->executeStatement(
+                    'DELETE FROM fw_prj_team_members WHERE id = ?',
+                    [(int) $row['id']]
+                );
+            }
+        }
+    }
+
+    /**
+     * @param list<int> $ids
+     * @return array<int, array{id: int, name: string, company: string|null, phone: string|null, email: string|null, trade: string|null}>
+     */
+    private function loadContractorSummariesByIds(Connection $connection, array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
+        if ($ids === []) {
+            return [];
+        }
+
+        $map = [];
+        foreach (array_chunk($ids, 200) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $rows = $connection->executeQuery(
+                "SELECT id, name, company, phone, email, trade FROM fw_contractors WHERE id IN ($placeholders)",
+                $chunk
+            )->fetchAllAssociative();
+            foreach ($rows as $row) {
+                $id = (int) $row['id'];
+                $map[$id] = [
+                    'id' => $id,
+                    'name' => (string) $row['name'],
+                    'company' => $row['company'] !== null ? (string) $row['company'] : null,
+                    'phone' => $row['phone'] !== null ? (string) $row['phone'] : null,
+                    'email' => $row['email'] !== null ? (string) $row['email'] : null,
+                    'trade' => $row['trade'] !== null ? (string) $row['trade'] : null,
+                ];
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param list<int> $ids
+     * @return array<int, array{id: int, name: string, company: string|null, phone: string|null, email: string|null, specialty: string|null}>
+     */
+    private function loadInspectorSummariesByIds(Connection $connection, array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter($ids, static fn (int $id): bool => $id > 0)));
+        if ($ids === []) {
+            return [];
+        }
+
+        $map = [];
+        foreach (array_chunk($ids, 200) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $rows = $connection->executeQuery(
+                "SELECT id, name, company, phone, email, specialty FROM fw_inspectors WHERE id IN ($placeholders)",
+                $chunk
+            )->fetchAllAssociative();
+            foreach ($rows as $row) {
+                $id = (int) $row['id'];
+                $map[$id] = [
+                    'id' => $id,
+                    'name' => (string) $row['name'],
+                    'company' => $row['company'] !== null ? (string) $row['company'] : null,
+                    'phone' => $row['phone'] !== null ? (string) $row['phone'] : null,
+                    'email' => $row['email'] !== null ? (string) $row['email'] : null,
+                    'specialty' => $row['specialty'] !== null ? (string) $row['specialty'] : null,
+                ];
+            }
+        }
+
+        return $map;
+    }
+
+    /**
+     * @param array<string, mixed> $task
+     * @param array<int, array<string, mixed>>|null $contractorsById
+     * @param array<int, array<string, mixed>>|null $inspectorsById
+     * @return array{
+     *   executor_type: string|null,
+     *   contractor_id: int|null,
+     *   inspector_id: int|null,
+     *   contractor: array<string, mixed>|null,
+     *   inspector: array<string, mixed>|null
+     * }
+     */
+    private function formatExecutorFields(
+        array $task,
+        ?Connection $connection = null,
+        ?array $contractorsById = null,
+        ?array $inspectorsById = null,
+    ): array {
+        $executorType = $task['executor_type'] ?? null;
+        if ($executorType !== 'user' && $executorType !== 'contractor') {
+            $executorType = null;
+        }
+
+        $contractorId = isset($task['contractor_id']) && $task['contractor_id'] !== null && $task['contractor_id'] !== ''
+            ? (int) $task['contractor_id']
+            : null;
+        if ($contractorId !== null && $contractorId <= 0) {
+            $contractorId = null;
+        }
+
+        $inspectorId = isset($task['inspector_id']) && $task['inspector_id'] !== null && $task['inspector_id'] !== ''
+            ? (int) $task['inspector_id']
+            : null;
+        if ($inspectorId !== null && $inspectorId <= 0) {
+            $inspectorId = null;
+        }
+
+        $contractor = null;
+        if ($contractorId !== null) {
+            if ($contractorsById !== null) {
+                $contractor = $contractorsById[$contractorId] ?? null;
+            } else {
+                $conn = $connection ?? $this->database->getConnection();
+                $contractor = $this->loadContractorSummariesByIds($conn, [$contractorId])[$contractorId] ?? null;
+            }
+        }
+
+        $inspector = null;
+        if ($inspectorId !== null) {
+            if ($inspectorsById !== null) {
+                $inspector = $inspectorsById[$inspectorId] ?? null;
+            } else {
+                $conn = $connection ?? $this->database->getConnection();
+                $inspector = $this->loadInspectorSummariesByIds($conn, [$inspectorId])[$inspectorId] ?? null;
+            }
+        }
+
+        return [
+            'executor_type' => $executorType,
+            'contractor_id' => $contractorId,
+            'inspector_id' => $inspectorId,
+            'contractor' => $contractor,
+            'inspector' => $inspector,
+        ];
+    }
+
+    /**
      * API response value: string or null. Supports legacy rows stored as JSON-encoded strings.
      */
     private function formatTaskAddressForResponse(?string $raw): ?string
@@ -534,6 +871,15 @@ class TaskController
             if ($this->taskOptionalColumnPresent($connection, 'category')) {
                 $sql .= ', category';
             }
+            if ($this->taskOptionalColumnPresent($connection, 'executor_type')) {
+                $sql .= ', executor_type';
+            }
+            if ($this->taskOptionalColumnPresent($connection, 'contractor_id')) {
+                $sql .= ', contractor_id';
+            }
+            if ($this->taskOptionalColumnPresent($connection, 'inspector_id')) {
+                $sql .= ', inspector_id';
+            }
             $sql .= ' FROM fw_prj_tasks'
                 . $whereSql
                 . ' ORDER BY task_order ASC, start_planned ASC';
@@ -633,7 +979,20 @@ class TaskController
             }
 
             // Форматируем данные задач
-            $formattedTasks = array_map(function($task) use ($taskAssignees, $taskLeads, $taskInvitedPeople) {
+            $contractorIds = [];
+            $inspectorIds = [];
+            foreach ($tasks as $taskRow) {
+                if (isset($taskRow['contractor_id']) && $taskRow['contractor_id'] !== null && (int) $taskRow['contractor_id'] > 0) {
+                    $contractorIds[] = (int) $taskRow['contractor_id'];
+                }
+                if (isset($taskRow['inspector_id']) && $taskRow['inspector_id'] !== null && (int) $taskRow['inspector_id'] > 0) {
+                    $inspectorIds[] = (int) $taskRow['inspector_id'];
+                }
+            }
+            $contractorsById = $this->loadContractorSummariesByIds($connection, $contractorIds);
+            $inspectorsById = $this->loadInspectorSummariesByIds($connection, $inspectorIds);
+
+            $formattedTasks = array_map(function($task) use ($taskAssignees, $taskLeads, $taskInvitedPeople, $connection, $contractorsById, $inspectorsById) {
                 $taskId = (int)$task['id'];
                 $teamMembers = isset($taskAssignees[$taskId]) ? $taskAssignees[$taskId] : null;
                 $taskLeadId = isset($taskLeads[$taskId]) ? $taskLeads[$taskId] : null;
@@ -670,7 +1029,8 @@ class TaskController
                     'actual_end' => $task['actual_end'],
                     'slack_days' => $task['slack_days'] ? (int)$task['slack_days'] : null,
                     'created_at' => $task['created_at'],
-                    'updated_at' => $task['updated_at']
+                    'updated_at' => $task['updated_at'],
+                    ...$this->formatExecutorFields($task, $connection, $contractorsById, $inspectorsById),
                 ];
             }, $tasks);
 
@@ -936,6 +1296,7 @@ class TaskController
                 'slack_days' => $task['slack_days'] ? (int)$task['slack_days'] : null,
                 'created_at' => $task['created_at'],
                 'updated_at' => $task['updated_at'],
+                ...$this->formatExecutorFields($task, $connection),
                 ...$this->fieldSubmissionPayloadFromRow($task, $projectLat, $projectLng),
             ];
 
@@ -1100,8 +1461,22 @@ class TaskController
             
             // Обработка task_lead_id - все пользователи должны быть прикреплены к задачам
             // Не проверяем наличие в команде проекта, так как все должны быть назначены на задачи
+            $executorAssignment = $this->resolveExecutorAssignment($connection, is_array($data) ? $data : [], true, null);
+            if (!$executorAssignment['valid']) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => $executorAssignment['message'] ?? 'Invalid executor assignment',
+                    'data' => null,
+                ], 400);
+                return;
+            }
+            $skipTaskLead = (bool) ($executorAssignment['skip_task_lead'] ?? false);
+
             $taskLeadId = isset($data['task_lead_id']) && $data['task_lead_id'] ? (int)$data['task_lead_id'] : null;
-            if ($taskLeadId === null) {
+            if ($skipTaskLead) {
+                $taskLeadId = null;
+            } elseif ($taskLeadId === null) {
                 $taskLeadId = $this->taskAuth->resolveProjectForemanUserId($connection, $projectId);
             }
             
@@ -1139,6 +1514,21 @@ class TaskController
                     $category = $rawCategory === '' ? null : $rawCategory;
                 }
                 $params[] = $category;
+            }
+
+            if (!empty($executorAssignment['changed'])) {
+                if ($this->taskOptionalColumnPresent($connection, 'executor_type')) {
+                    $insertColumns[] = 'executor_type';
+                    $params[] = $executorAssignment['executor_type'] ?? null;
+                }
+                if ($this->taskOptionalColumnPresent($connection, 'contractor_id')) {
+                    $insertColumns[] = 'contractor_id';
+                    $params[] = $executorAssignment['contractor_id'] ?? null;
+                }
+                if ($this->taskOptionalColumnPresent($connection, 'inspector_id')) {
+                    $insertColumns[] = 'inspector_id';
+                    $params[] = $executorAssignment['inspector_id'] ?? null;
+                }
             }
 
             $placeholders = implode(', ', array_fill(0, count($insertColumns), '?'));
@@ -1235,25 +1625,27 @@ class TaskController
                     $invitedPeopleJson = null;
                 }
                 
-                // Создаем или обновляем ОДНУ запись для milestone
-                try {
-                    $connection->executeStatement(
-                        "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project, invited_people) VALUES (?, ?, ?, 'task_lead', ?)
-                         ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), invited_people = VALUES(invited_people)",
-                        [$projectId, $taskId, $taskLeadId, $invitedPeopleJson]
-                    );
-                } catch (\Exception $e) {
-                    $this->logger->warning('Failed to create/update milestone team member', [
-                        'task_id' => $taskId,
-                        'task_lead_id' => $taskLeadId,
-                        'error' => $e->getMessage()
-                    ]);
+                // Contractor executor: do not create task_lead team member rows
+                if (!$skipTaskLead) {
+                    try {
+                        $connection->executeStatement(
+                            "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project, invited_people) VALUES (?, ?, ?, 'task_lead', ?)
+                             ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), invited_people = VALUES(invited_people)",
+                            [$projectId, $taskId, $taskLeadId, $invitedPeopleJson]
+                        );
+                    } catch (\Exception $e) {
+                        $this->logger->warning('Failed to create/update milestone team member', [
+                            'task_id' => $taskId,
+                            'task_lead_id' => $taskLeadId,
+                            'error' => $e->getMessage()
+                        ]);
+                    }
                 }
             } else {
                 // Для обычной задачи: отдельные строки для каждого члена бригады
                 
                 // Сохраняем task_lead_id с role_in_project = 'task_lead'
-                if ($taskLeadId) {
+                if ($taskLeadId && !$skipTaskLead) {
                     try {
                         $connection->executeStatement(
                             "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project) VALUES (?, ?, ?, 'task_lead')
@@ -1291,7 +1683,7 @@ class TaskController
 
             // Получаем созданную задачу
             $result = $connection->executeQuery(
-                "SELECT id, task_order, project_id, address, name, start_planned, end_planned, start_time, end_time, milestone, status, progress_pct, notes, resources, baseline_start, baseline_end, actual_start, actual_end, slack_days, created_at, updated_at FROM fw_prj_tasks WHERE id = ?",
+                'SELECT ' . $this->resolveTaskDetailSelect($connection) . ' FROM fw_prj_tasks WHERE id = ?',
                 [$taskId]
             );
             $task = $result->fetchAssociative();
@@ -1402,7 +1794,7 @@ class TaskController
                 'status' => 'success',
                 'message' => 'Task created successfully',
                 'data' => [
-                    'task' => $this->formatTask($task, $projectLat, $projectLng)
+                    'task' => $this->formatTask($task, $projectLat, $projectLng, $connection)
                 ]
             ], 201);
 
@@ -1628,6 +2020,24 @@ class TaskController
             $beforeData['team_members'] = !empty($beforeTeamMembers) ? json_encode($beforeTeamMembers) : null;
             $beforeData['invited_people'] = $beforeInvitedPeople;
 
+            $executorAssignment = $this->resolveExecutorAssignment(
+                $connection,
+                is_array($data) ? $data : [],
+                false,
+                is_array($beforeData) ? $beforeData : null,
+            );
+            if (!$executorAssignment['valid']) {
+                Flight::json([
+                    'error_code' => 400,
+                    'status' => 'error',
+                    'message' => $executorAssignment['message'] ?? 'Invalid executor assignment',
+                    'data' => null,
+                ], 400);
+                return;
+            }
+            $skipTaskLead = (bool) ($executorAssignment['skip_task_lead'] ?? false);
+            $clearTaskLeadRows = (bool) ($executorAssignment['clear_task_lead_rows'] ?? false);
+
             // Строим SQL запрос для обновления
             $updateFields = [];
             $params = [];
@@ -1682,6 +2092,20 @@ class TaskController
                 $rawCategory = is_string($data['category'] ?? null) ? trim((string)$data['category']) : '';
                 $params[] = $rawCategory === '' ? null : $rawCategory;
             }
+            if (!empty($executorAssignment['changed'])) {
+                if ($this->taskOptionalColumnPresent($connection, 'executor_type')) {
+                    $updateFields[] = 'executor_type = ?';
+                    $params[] = $executorAssignment['executor_type'] ?? null;
+                }
+                if ($this->taskOptionalColumnPresent($connection, 'contractor_id')) {
+                    $updateFields[] = 'contractor_id = ?';
+                    $params[] = $executorAssignment['contractor_id'] ?? null;
+                }
+                if ($this->taskOptionalColumnPresent($connection, 'inspector_id')) {
+                    $updateFields[] = 'inspector_id = ?';
+                    $params[] = $executorAssignment['inspector_id'] ?? null;
+                }
+            }
             // Обработка task_lead_id и team_members - НЕ добавляем в команду проекта отдельно
             // Пользователь будет добавлен в команду проекта автоматически при назначении на задачу
             // Это предотвращает дублирование записей с task_id = NULL
@@ -1692,6 +2116,20 @@ class TaskController
             } else {
                 // Используем старое значение, если новое не передано
                 $taskLeadId = $beforeTaskLeadId;
+            }
+            if ($skipTaskLead) {
+                $taskLeadId = null;
+            }
+            if (!empty($executorAssignment['switching_to_user'])) {
+                if ($taskLeadId === null || $taskLeadId <= 0) {
+                    Flight::json([
+                        'error_code' => 400,
+                        'status' => 'error',
+                        'message' => 'task_lead_id is required when switching executor_type to user',
+                        'data' => null,
+                    ], 400);
+                    return;
+                }
             }
             $teamMembers = [];
             $hasTeamMembersInRequest = array_key_exists('team_members', $data);
@@ -1775,7 +2213,29 @@ class TaskController
                 $params[] = $data['slack_days'];
             }
 
-            if (empty($updateFields)) {
+            // Для milestone всегда обновляем team_members, если передаются task_lead_id или invited_people
+            // Для обычной задачи обновляем, если передаются task_lead_id или team_members
+            $oldIsMilestone = isset($beforeData['milestone']) && $beforeData['milestone'] !== null && $beforeData['milestone'] !== '';
+            $newIsMilestone = isset($data['milestone']) 
+                ? ($data['milestone'] !== null && $data['milestone'] !== '')
+                : $oldIsMilestone;
+            $milestoneChanged = isset($data['milestone']) && ($oldIsMilestone !== $newIsMilestone);
+
+            $shouldUpdateTeamMembers = false;
+            if ($newIsMilestone) {
+                $hasTaskLeadId = array_key_exists('task_lead_id', $data);
+                $hasInvitedPeople = array_key_exists('invited_people', $data);
+                $shouldUpdateTeamMembers = $milestoneChanged || $hasTaskLeadId || $hasInvitedPeople;
+            } else {
+                $shouldUpdateTeamMembers = $milestoneChanged 
+                    || array_key_exists('task_lead_id', $data) 
+                    || array_key_exists('team_members', $data);
+            }
+            if ($clearTaskLeadRows || (!empty($executorAssignment['switching_to_user']) && array_key_exists('task_lead_id', $data))) {
+                $shouldUpdateTeamMembers = true;
+            }
+
+            if (empty($updateFields) && !$shouldUpdateTeamMembers && !$clearTaskLeadRows) {
                 Flight::json([
                     'error_code' => 400,
                     'status' => 'error',
@@ -1785,46 +2245,21 @@ class TaskController
                 return;
             }
 
-            $updateFields[] = "updated_at = NOW()";
-            $params[] = $taskId;
+            if (!empty($updateFields)) {
+                $updateFields[] = "updated_at = NOW()";
+                $params[] = $taskId;
 
-            $sql = "UPDATE fw_prj_tasks SET " . implode(', ', $updateFields) . " WHERE id = ?";
-            $connection->executeStatement($sql, $params);
-            
-            // Определяем старое значение milestone из beforeData
-            $oldIsMilestone = isset($beforeData['milestone']) && $beforeData['milestone'] !== null && $beforeData['milestone'] !== '';
-            
-            // Определяем новое значение milestone (после обновления)
-            $newIsMilestone = isset($data['milestone']) 
-                ? ($data['milestone'] !== null && $data['milestone'] !== '')
-                : $oldIsMilestone;
-            
-            // Если milestone изменился, нужно пересоздать записи в fw_prj_team_members
-            $milestoneChanged = isset($data['milestone']) && ($oldIsMilestone !== $newIsMilestone);
-            
-            // Для milestone всегда обновляем team_members, если передаются task_lead_id или invited_people
-            // Для обычной задачи обновляем, если передаются task_lead_id или team_members
-            $shouldUpdateTeamMembers = false;
-            if ($newIsMilestone) {
-                // Для milestone обновляем, если передается task_lead_id или invited_people
-                // Используем array_key_exists для проверки наличия ключа, даже если значение null или пустой массив
-                $hasTaskLeadId = array_key_exists('task_lead_id', $data);
-                $hasInvitedPeople = array_key_exists('invited_people', $data);
-                $shouldUpdateTeamMembers = $milestoneChanged || $hasTaskLeadId || $hasInvitedPeople;
-                
-                $this->logger->info('Checking if should update team members for milestone', [
-                    'task_id' => $taskId,
-                    'milestone_changed' => $milestoneChanged,
-                    'has_task_lead_id' => $hasTaskLeadId,
-                    'has_invited_people' => $hasInvitedPeople,
-                    'should_update' => $shouldUpdateTeamMembers,
-                    'data_keys' => array_keys($data)
-                ]);
-            } else {
-                // Для обычной задачи обновляем, если передается task_lead_id или team_members
-                $shouldUpdateTeamMembers = $milestoneChanged 
-                    || array_key_exists('task_lead_id', $data) 
-                    || array_key_exists('team_members', $data);
+                $sql = "UPDATE fw_prj_tasks SET " . implode(', ', $updateFields) . " WHERE id = ?";
+                $connection->executeStatement($sql, $params);
+            } elseif ($clearTaskLeadRows || $shouldUpdateTeamMembers) {
+                $connection->executeStatement(
+                    'UPDATE fw_prj_tasks SET updated_at = NOW() WHERE id = ?',
+                    [$taskId]
+                );
+            }
+
+            if ($clearTaskLeadRows) {
+                $this->clearTaskLeadTeamMembers($connection, $projectId, $taskId);
             }
             
             if ($shouldUpdateTeamMembers) {
@@ -1933,13 +2368,13 @@ class TaskController
                         ]);
                     }
                     
-                    // Проверяем, существует ли уже запись для этого milestone
-                    $existingRecord = $connection->executeQuery(
+                    // Contractor executor: do not write task_lead rows (cleared separately when switching)
+                    if ($skipTaskLead) {
+                        // keep invited_people updates out of team_members when contractor is executor
+                    } elseif ($existingRecord = $connection->executeQuery(
                         "SELECT id FROM fw_prj_team_members WHERE task_id = ? AND project_id = ? AND role_in_project = 'task_lead'",
                         [$taskId, $projectId]
-                    )->fetchAssociative();
-                    
-                    if ($existingRecord) {
+                    )->fetchAssociative()) {
                         // Обновляем существующую запись
                         try {
                             $this->logger->info('Updating existing milestone team member', [
@@ -2014,7 +2449,7 @@ class TaskController
                     );
 
                     // task_lead row
-                    if ($taskLeadId) {
+                    if ($taskLeadId && !$skipTaskLead) {
                         try {
                             $connection->executeStatement(
                                 "INSERT INTO fw_prj_team_members (project_id, task_id, user_id, role_in_project) VALUES (?, ?, ?, 'task_lead')",
@@ -2333,7 +2768,7 @@ class TaskController
                 'status' => 'success',
                 'message' => 'Task updated successfully',
                 'data' => [
-                    'task' => $this->formatTask($task, $projectLat, $projectLng)
+                    'task' => $this->formatTask($task, $projectLat, $projectLng, $connection)
                 ]
             ]);
 
@@ -3008,9 +3443,16 @@ class TaskController
 
     /**
      * Форматирование задачи
+     *
+     * @param array<string, mixed> $task
+     * @return array<string, mixed>
      */
-    private function formatTask(array $task, ?float $projectLat = null, ?float $projectLng = null): array
-    {
+    private function formatTask(
+        array $task,
+        ?float $projectLat = null,
+        ?float $projectLng = null,
+        ?Connection $connection = null,
+    ): array {
         return [
             'id' => (int)$task['id'],
             'task_order' => (int)$task['task_order'],
@@ -3038,6 +3480,7 @@ class TaskController
             'slack_days' => isset($task['slack_days']) && $task['slack_days'] ? (int)$task['slack_days'] : null,
             'created_at' => $task['created_at'],
             'updated_at' => $task['updated_at'],
+            ...$this->formatExecutorFields($task, $connection),
             ...$this->fieldSubmissionPayloadFromRow($task, $projectLat, $projectLng),
         ];
     }

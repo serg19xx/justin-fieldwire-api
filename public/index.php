@@ -1,34 +1,11 @@
 <?php
-// Включить буферизацию вывода для предотвращения вывода warning'ов
+// Buffer all accidental output so API JSON stays valid (PHP 8.5 vendor deprecations, notices, etc.).
 ob_start();
-
-// Настройка отображения ошибок в зависимости от окружения
-$appEnv = $_ENV['APP_ENV'] ?? 'development';
-
-if ($appEnv === 'production') {
-    // В продакшн режиме не показываем ошибки пользователю
-    error_reporting(0);
-    ini_set('display_errors', 0);
-    ini_set('display_startup_errors', 0);
-} else {
-    // In development mode show errors but ignore vendor deprecations (PHP 8.5+).
-    error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
-    ini_set('display_errors', 1);
-    ini_set('display_startup_errors', 1);
-}
-
-// Логирование ошибок всегда включено
-ini_set('log_errors', 1);
-ini_set('error_log', __DIR__ . '/../logs/php_errors.log');
-
-// CORS заголовки обрабатываются через CorsMiddleware в Application.php
 
 define('APP_START_TIME', time());
 
-// Загрузка автозагрузчика
 require_once __DIR__ . '/../vendor/autoload.php';
 
-// Загрузка .env
 try {
     $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
     $dotenv->load();
@@ -36,14 +13,27 @@ try {
     error_log('ENV ERROR: ' . $e->getMessage());
 }
 
-// Инициализация приложения
+$appEnv = $_ENV['APP_ENV'] ?? getenv('APP_ENV') ?: 'development';
+
+// Never print errors to the response body — that breaks JSON clients (local SendGrid list, etc.).
+error_reporting(E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED);
+ini_set('display_errors', '0');
+ini_set('display_startup_errors', '0');
+ini_set('log_errors', '1');
+ini_set('error_log', __DIR__ . '/../logs/php_errors.log');
+
+// CORS headers are handled by CorsMiddleware in Application.php
+
 try {
     $config = new App\Config\Config();
     $app = new App\Bootstrap\Application($config);
 } catch (\Exception $e) {
     error_log('APP ERROR: ' . $e->getMessage());
     error_log('STACK: ' . $e->getTraceAsString());
-    
+
+    while (ob_get_level() > 0) {
+        ob_end_clean();
+    }
     header('Content-Type: application/json');
     http_response_code(500);
     echo json_encode(['error' => $e->getMessage()]);
@@ -51,40 +41,31 @@ try {
 }
 
 // Handle all routes through FlightPHP
-Flight::route('*', function() {
-    // Get the request URI
+Flight::route('*', function () {
     $uri = $_SERVER['REQUEST_URI'];
-    
-    // Remove query string
     $uri = strtok($uri, '?');
-    
-    // НЕ блокировать API маршруты!
+
+    // Do not block API routes.
     if (str_starts_with($uri, '/api/')) {
-        return; // Пропускаем API запросы
+        return;
     }
-    
-    // Handle specific routes
+
     if ($uri === '/docs') {
-        // Serve Swagger UI
         require_once __DIR__ . '/swagger-ui.php';
         return;
     }
-    
+
     if ($uri === '/swagger.json') {
-        // Serve Swagger JSON
         require_once __DIR__ . '/swagger.php';
         return;
     }
-    
-    // For all other routes, let FlightPHP handle them
-    // This will trigger the 404 handler if route not found
+
     Flight::notFound();
 });
 
-// Очистить буфер от warning'ов в продакшн режиме
-if ($appEnv === 'production') {
+// Drop any buffered noise before Flight writes the JSON/body.
+if (ob_get_length()) {
     ob_clean();
 }
 
-// Start the application
 Flight::start();

@@ -52,6 +52,55 @@ class EmailService
     }
 
     /**
+     * Run a callback with HTTP(S)_PROXY env cleared.
+     * Local IDE/agent shells often inject a proxy that breaks SendGrid (CONNECT 403 / DNS fail).
+     *
+     * @template T
+     * @param callable(): T $fn
+     * @return T
+     */
+    private function withoutHttpProxy(callable $fn): mixed
+    {
+        $keys = [
+            'http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY',
+            'ALL_PROXY', 'all_proxy', 'NO_PROXY', 'no_proxy',
+        ];
+        $savedEnv = [];
+        $savedServer = [];
+        foreach ($keys as $key) {
+            $savedEnv[$key] = getenv($key);
+            putenv($key);
+            if (array_key_exists($key, $_ENV)) {
+                $savedEnv['__isset_env_' . $key] = true;
+                $savedEnv['__val_env_' . $key] = $_ENV[$key];
+                unset($_ENV[$key]);
+            }
+            if (array_key_exists($key, $_SERVER)) {
+                $savedServer[$key] = $_SERVER[$key];
+                unset($_SERVER[$key]);
+            }
+        }
+        try {
+            return $fn();
+        } finally {
+            foreach ($keys as $key) {
+                $prev = $savedEnv[$key] ?? false;
+                if ($prev === false || $prev === null || $prev === '') {
+                    putenv($key);
+                } else {
+                    putenv($key . '=' . $prev);
+                }
+                if (!empty($savedEnv['__isset_env_' . $key])) {
+                    $_ENV[$key] = $savedEnv['__val_env_' . $key];
+                }
+                if (array_key_exists($key, $savedServer)) {
+                    $_SERVER[$key] = $savedServer[$key];
+                }
+            }
+        }
+    }
+
+    /**
      * Send email using specified provider or auto-fallback
      * 
      * @param string $to Recipient email
@@ -122,26 +171,59 @@ class EmailService
     }
 
     /**
-     * List active SendGrid dynamic templates (templates with at least one active version).
+     * List active SendGrid dynamic templates (templates with at least one version).
      *
      * @return array<int, array{id: string, name: string, version_name: string}>
      */
     public function listActiveDynamicTemplates(): array
     {
-        if (!$this->sendGridAvailable) {
+        return $this->withoutHttpProxy(fn (): array => $this->listActiveDynamicTemplatesUnproxied());
+    }
+
+    /**
+     * @return array<int, array{id: string, name: string, version_name: string}>
+     */
+    private function listActiveDynamicTemplatesUnproxied(): array
+    {
+        if (!$this->sendGridAvailable || $this->sendGrid === null) {
             $this->logger->warning('SendGrid not available — cannot list dynamic templates');
             return [];
         }
 
-        $response = $this->sendGridGet('/templates?generations=dynamic&page_size=200');
-        if ($response === null) {
-            $this->logger->warning('SendGrid templates request failed — returning empty list');
-            return [];
+        try {
+            $response = $this->sendGrid->client->templates()->get(null, [
+                'generations' => 'dynamic',
+                'page_size' => 200,
+            ]);
+            $statusCode = (int) $response->statusCode();
+            $rawBody = (string) $response->body();
+            $decoded = json_decode($rawBody, true);
+
+            if ($statusCode < 200 || $statusCode >= 300 || !is_array($decoded)) {
+                $this->logger->error('SendGrid templates SDK request failed', [
+                    'status_code' => $statusCode,
+                    'body' => substr($rawBody, 0, 500),
+                ]);
+                $decoded = $this->sendGridGet('/templates?generations=dynamic&page_size=200');
+                if ($decoded === null) {
+                    return [];
+                }
+            }
+        } catch (\Throwable $e) {
+            $this->logger->error('SendGrid templates SDK exception', [
+                'error' => $e->getMessage(),
+            ]);
+            $decoded = $this->sendGridGet('/templates?generations=dynamic&page_size=200');
+            if ($decoded === null) {
+                return [];
+            }
         }
 
-        $rawTemplates = $response['result'] ?? $response['templates'] ?? [];
-        $rawCount = count($rawTemplates);
-        $this->logger->info('SendGrid dynamic templates fetched', ['raw_count' => $rawCount]);
+        $rawTemplates = $decoded['result'] ?? $decoded['templates'] ?? [];
+        if (!is_array($rawTemplates)) {
+            $rawTemplates = [];
+        }
+        $this->logger->info('SendGrid dynamic templates fetched', ['raw_count' => count($rawTemplates)]);
 
         $templates = [];
         foreach ($rawTemplates as $tpl) {
@@ -156,18 +238,26 @@ class EmailService
             }
 
             $versionName = null;
+            $fallbackVersionName = null;
             foreach ($tpl['versions'] ?? [] as $version) {
                 if (!is_array($version)) {
                     continue;
                 }
+                $nameCandidate = trim((string) ($version['name'] ?? ''));
+                if ($nameCandidate === '') {
+                    $nameCandidate = 'Version';
+                }
+                if ($fallbackVersionName === null) {
+                    $fallbackVersionName = $nameCandidate;
+                }
                 if (!empty($version['active'])) {
-                    $versionName = trim((string) ($version['name'] ?? 'Active'));
+                    $versionName = $nameCandidate;
                     break;
                 }
             }
 
             if ($versionName === null || $versionName === '') {
-                continue;
+                $versionName = $fallbackVersionName ?? 'default';
             }
 
             $templates[] = [
@@ -331,13 +421,14 @@ class EmailService
             CURLOPT_HEADER => true,
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => $json,
+            CURLOPT_TIMEOUT => 30,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $apiKey,
                 'Content-Type: application/json',
             ],
         ]);
 
-        $response = curl_exec($ch);
+        $response = $this->withoutHttpProxy(static fn () => curl_exec($ch));
         $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $headerSize = (int) curl_getinfo($ch, CURLINFO_HEADER_SIZE);
 
@@ -365,7 +456,7 @@ class EmailService
      */
     private function sendGridGet(string $path, bool $allowNotFound = false): ?array
     {
-        $apiKey = $_ENV['SENDGRID_API_KEY'] ?? '';
+        $apiKey = (string) ($_ENV['SENDGRID_API_KEY'] ?? getenv('SENDGRID_API_KEY') ?: '');
         if ($apiKey === '') {
             return null;
         }
@@ -378,14 +469,16 @@ class EmailService
 
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 30,
             CURLOPT_HTTPHEADER => [
                 'Authorization: Bearer ' . $apiKey,
                 'Content-Type: application/json',
             ],
         ]);
 
-        $body = curl_exec($ch);
+        $body = $this->withoutHttpProxy(static fn () => curl_exec($ch));
         $statusCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curlErr = curl_error($ch);
 
         if ($statusCode === 404 && $allowNotFound) {
             return null;
@@ -395,7 +488,8 @@ class EmailService
             $this->logger->error('SendGrid GET request failed', [
                 'path' => $path,
                 'status_code' => $statusCode,
-                'body' => is_string($body) ? $body : '',
+                'curl_error' => $curlErr,
+                'body' => is_string($body) ? substr($body, 0, 500) : '',
             ]);
             return null;
         }

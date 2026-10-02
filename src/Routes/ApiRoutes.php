@@ -194,6 +194,12 @@ class ApiRoutes
 
         // Authentication routes
         Flight::route('POST /api/v1/auth/login', [new AuthController($this->logger), 'login']);
+        Flight::route('POST /api/v1/auth/contractor-access', function () {
+            (new \App\Controllers\TaskAccessKeyController($this->logger))->redeem();
+        });
+        Flight::route('POST /api/v1/auth/request-client-access', function () {
+            (new \App\Controllers\AuthController($this->logger))->requestClientAccess();
+        });
         
         // Logout route with auth middleware
         $authMiddleware = new \App\Middleware\AuthMiddleware($this->logger);
@@ -927,6 +933,7 @@ class ApiRoutes
 
         // Twilio inbound SMS webhook (no JWT — Twilio signature validation)
         Flight::route('POST /api/v1/twilio/sms/inbound', function() {
+            $outreachRecipients = new \App\Services\OutreachRecipientService($this->logger);
             $controller = new \App\Controllers\TwilioSmsWebhookController(
                 $this->logger,
                 new \App\Services\SmsMeetingInviteService(
@@ -934,8 +941,34 @@ class ApiRoutes
                     new \App\Services\TwilioService($this->logger),
                 ),
                 new \App\Services\TwilioService($this->logger),
+                new \App\Services\OutreachSmsReplyService($this->logger, $outreachRecipients),
             );
             $controller->inboundSms();
+        });
+
+        // SendGrid Event Webhook (unsubscribe / spamreport) — auth via secret header or ?secret=
+        Flight::route('POST /api/v1/sendgrid/events', function () {
+            $controller = new \App\Controllers\SendGridEventWebhookController(
+                $this->logger,
+                new \App\Services\OutreachRecipientService($this->logger),
+            );
+            $controller->handle();
+        });
+
+        // Public outreach unsubscribe link (footer in custom emails)
+        Flight::route('GET /api/v1/outreach/unsubscribe', function () {
+            $controller = new \App\Controllers\OutreachUnsubscribeController(
+                $this->logger,
+                new \App\Services\OutreachRecipientService($this->logger),
+            );
+            $controller->handle();
+        });
+        Flight::route('POST /api/v1/outreach/unsubscribe', function () {
+            $controller = new \App\Controllers\OutreachUnsubscribeController(
+                $this->logger,
+                new \App\Services\OutreachRecipientService($this->logger),
+            );
+            $controller->handle();
         });
 
         // BoldSign e-signature (status works without API key; webhook has no JWT)
@@ -1044,6 +1077,58 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $workerController = new \App\Controllers\WorkerController($this->logger);
                 $workerController->getEmailProviders();
+            }
+        });
+
+        // External contacts (no login): contractors & inspectors
+        Flight::route('GET /api/v1/contractors', function () use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ExternalContactController($this->logger))->list('contractors');
+            }
+        });
+        Flight::route('POST /api/v1/contractors', function () use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ExternalContactController($this->logger))->create('contractors');
+            }
+        });
+        Flight::route('GET /api/v1/contractors/@id', function ($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ExternalContactController($this->logger))->getOne('contractors', (int) $id);
+            }
+        });
+        Flight::route('PUT /api/v1/contractors/@id', function ($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ExternalContactController($this->logger))->update('contractors', (int) $id);
+            }
+        });
+        Flight::route('DELETE /api/v1/contractors/@id', function ($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ExternalContactController($this->logger))->delete('contractors', (int) $id);
+            }
+        });
+        Flight::route('GET /api/v1/inspectors', function () use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ExternalContactController($this->logger))->list('inspectors');
+            }
+        });
+        Flight::route('POST /api/v1/inspectors', function () use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ExternalContactController($this->logger))->create('inspectors');
+            }
+        });
+        Flight::route('GET /api/v1/inspectors/@id', function ($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ExternalContactController($this->logger))->getOne('inspectors', (int) $id);
+            }
+        });
+        Flight::route('PUT /api/v1/inspectors/@id', function ($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ExternalContactController($this->logger))->update('inspectors', (int) $id);
+            }
+        });
+        Flight::route('DELETE /api/v1/inspectors/@id', function ($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ExternalContactController($this->logger))->delete('inspectors', (int) $id);
             }
         });
 
@@ -1252,6 +1337,90 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $taskFieldPhotoController->delete((int) $project_id, (int) $task_id, (int) $photo_id);
             }
+        });
+
+        // Temporary contractor access keys (PM / foreman)
+        Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/access-key', function ($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\TaskAccessKeyController($this->logger))->getForTask((int) $project_id, (int) $task_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/access-key', function ($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\TaskAccessKeyController($this->logger))->createOrRotate((int) $project_id, (int) $task_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/access-key/send', function ($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\TaskAccessKeyController($this->logger))->send((int) $project_id, (int) $task_id);
+            }
+        });
+        Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/access-key/revoke', function ($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\TaskAccessKeyController($this->logger))->revoke((int) $project_id, (int) $task_id);
+            }
+        });
+
+        // Contractor portal (JWT from access key)
+        Flight::route('GET /api/v1/contractor-portal/workspace', function () use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ContractorPortalController($this->logger))->workspace();
+            }
+        });
+        Flight::route('GET /api/v1/contractor-portal/field-photos/@photo_id/download', function ($photo_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ContractorPortalController($this->logger))->downloadFieldPhoto((int) $photo_id);
+            }
+        });
+
+        // Outreach invitation campaigns (staff JWT + n8n secret)
+        Flight::route('GET /api/v1/outreach/campaigns', function () use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\OutreachCampaignController($this->logger))->listCampaigns();
+            }
+        });
+        Flight::route('POST /api/v1/outreach/campaigns', function () use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\OutreachCampaignController($this->logger))->createCampaign();
+            }
+        });
+        Flight::route('GET /api/v1/outreach/campaigns/@id', function ($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\OutreachCampaignController($this->logger))->getCampaign((int) $id);
+            }
+        });
+        Flight::route('GET /api/v1/outreach/campaigns/@id/recipients', function ($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\OutreachCampaignController($this->logger))->listRecipients((int) $id);
+            }
+        });
+        Flight::route('GET /api/v1/outreach/campaigns/@id/events', function ($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\OutreachCampaignController($this->logger))->listEvents((int) $id);
+            }
+        });
+        Flight::route('POST /api/v1/outreach/campaigns/@id/start', function ($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\OutreachCampaignController($this->logger))->startCampaign((int) $id);
+            }
+        });
+        Flight::route('POST /api/v1/outreach/campaigns/@id/pause', function ($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\OutreachCampaignController($this->logger))->pauseCampaign((int) $id);
+            }
+        });
+        // n8n (X-Outreach-Secret)
+        Flight::route('GET /api/v1/outreach/campaigns/@id/batch', function ($id) {
+            (new \App\Controllers\OutreachCampaignController($this->logger))->claimBatch((int) $id);
+        });
+        Flight::route('POST /api/v1/outreach/campaigns/@id/expire-waiting', function ($id) {
+            (new \App\Controllers\OutreachCampaignController($this->logger))->expireWaiting((int) $id);
+        });
+        Flight::route('POST /api/v1/outreach/expire-waiting-all', function () {
+            (new \App\Controllers\OutreachCampaignController($this->logger))->expireWaitingAll();
+        });
+        Flight::route('POST /api/v1/outreach/recipients/@id/status', function ($id) {
+            (new \App\Controllers\OutreachCampaignController($this->logger))->updateRecipientStatus((int) $id);
         });
 
         Flight::route('DELETE /api/v1/projects/@project_id/tasks/@task_id', function($project_id, $task_id) use ($authMiddleware) {

@@ -74,9 +74,11 @@ class ClientCommunicationController
             $templates = $this->emailService->listActiveDynamicTemplates();
             Flight::json([
                 'status' => 'success',
+                'error_code' => 0,
                 'data' => [
                     'templates' => $templates,
                     'sendgrid_configured' => $this->emailService->isSendGridAvailable(),
+                    'count' => count($templates),
                 ],
             ]);
         } catch (\Throwable $e) {

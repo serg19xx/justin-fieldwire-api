@@ -115,7 +115,7 @@ class DashboardController
         }
 
         $role = strtolower((string) ($user['role_code'] ?? ''));
-        return in_array($role, ['worker', 'foreman', 'contractor'], true);
+        return in_array($role, ['worker', 'foreman'], true);
     }
 
     /**

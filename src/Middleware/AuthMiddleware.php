@@ -61,9 +61,38 @@ class AuthMiddleware
                 return false;
             }
 
-            // Get user from database
-            $this->logger->info('Getting user from database', ['user_id' => $payload['user_id']]);
-            $user = $this->getUserById($payload['user_id']);
+            // Get user from database — or contractor temporary access session
+            if (($payload['typ'] ?? null) === 'contractor_access') {
+                $contractorUser = $this->resolveContractorAccessUser($payload);
+                if ($contractorUser === null) {
+                    Flight::json([
+                        'error_code' => 401,
+                        'status' => 'error',
+                        'message' => 'Invalid or expired contractor access',
+                        'data' => null
+                    ], 401);
+                    return false;
+                }
+                Flight::set('current_user', $contractorUser);
+                $this->logger->info('Contractor access auth successful', [
+                    'task_id' => $contractorUser['task_id'] ?? null,
+                    'access_key_id' => $contractorUser['access_key_id'] ?? null,
+                ]);
+
+                return true;
+            }
+
+            $this->logger->info('Getting user from database', ['user_id' => $payload['user_id'] ?? null]);
+            if (!isset($payload['user_id'])) {
+                Flight::json([
+                    'error_code' => 401,
+                    'status' => 'error',
+                    'message' => 'Invalid or expired token',
+                    'data' => null
+                ], 401);
+                return false;
+            }
+            $user = $this->getUserById((int) $payload['user_id']);
             $this->logger->info('User retrieved', ['user' => $user ? 'found' : 'not found']);
             if (!$user) {
                 Flight::json([
@@ -153,9 +182,22 @@ class AuthMiddleware
             //     $this->logger->warning('JWT signature mismatch');
             //     return null;
             // }
+
+            $currentTime = time();
+
+            // Contractor temporary access: fail closed on signature / expiry
+            if (($payloadData['typ'] ?? null) === 'contractor_access') {
+                if (!hash_equals($expectedSignature, $signature)) {
+                    $this->logger->warning('Contractor JWT signature mismatch');
+                    return null;
+                }
+                if (!isset($payloadData['exp']) || (int) $payloadData['exp'] < $currentTime) {
+                    $this->logger->warning('Contractor JWT expired');
+                    return null;
+                }
+            }
             
             // Check expiration
-            $currentTime = time();
             $this->logger->info('JWT expiration check', [
                 'exp' => $payloadData['exp'] ?? 'not set',
                 'current_time' => $currentTime,
@@ -174,6 +216,69 @@ class AuthMiddleware
             $this->logger->error('JWT decode error', [
                 'error' => $e->getMessage()
             ]);
+            return null;
+        }
+    }
+
+    /**
+     * Resolve temporary contractor session from JWT claims; re-check key still active.
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>|null
+     */
+    private function resolveContractorAccessUser(array $payload): ?array
+    {
+        $accessKeyId = isset($payload['access_key_id']) ? (int) $payload['access_key_id'] : 0;
+        $taskId = isset($payload['task_id']) ? (int) $payload['task_id'] : 0;
+        $projectId = isset($payload['project_id']) ? (int) $payload['project_id'] : 0;
+        if ($accessKeyId <= 0 || $taskId <= 0 || $projectId <= 0) {
+            return null;
+        }
+
+        // Prefer hard expiry for contractor sessions
+        if (isset($payload['exp']) && (int) $payload['exp'] < time()) {
+            return null;
+        }
+
+        try {
+            $connection = Database::getConnection();
+            $row = $connection->executeQuery(
+                'SELECT id, task_id, project_id, contractor_id, expires_at, revoked_at
+                 FROM fw_task_access_keys WHERE id = ? LIMIT 1',
+                [$accessKeyId]
+            )->fetchAssociative();
+            if (!$row) {
+                return null;
+            }
+            if ($row['revoked_at'] !== null) {
+                return null;
+            }
+            if (strtotime((string) $row['expires_at']) < time()) {
+                return null;
+            }
+            if ((int) $row['task_id'] !== $taskId || (int) $row['project_id'] !== $projectId) {
+                return null;
+            }
+
+            return [
+                'id' => 0,
+                'auth_type' => 'contractor_access',
+                'role_code' => 'contractor_access',
+                'role_category' => 'contractor_access',
+                'email' => null,
+                'name' => 'Contractor',
+                'first_name' => 'Contractor',
+                'last_name' => '',
+                'task_id' => $taskId,
+                'project_id' => $projectId,
+                'contractor_id' => $row['contractor_id'] !== null ? (int) $row['contractor_id'] : null,
+                'access_key_id' => $accessKeyId,
+                'key_expires_at' => $row['expires_at'],
+                'status' => 1,
+            ];
+        } catch (\Exception $e) {
+            $this->logger->error('Error resolving contractor access', ['error' => $e->getMessage()]);
+
             return null;
         }
     }

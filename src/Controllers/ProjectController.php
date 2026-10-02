@@ -1102,9 +1102,10 @@ class ProjectController
             $insertPlaceholders = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
             $params = [
                 $data['prj_name'],
-                isset($data['address']) && is_string($data['address']) && trim($data['address']) !== ''
+                // DB column address is NOT NULL; allow empty when unknown at create time.
+                isset($data['address']) && is_string($data['address'])
                     ? trim($data['address'])
-                    : null,
+                    : '',
                 $data['date_start'] ?? null,
                 $data['date_end'] ?? null,
                 $data['priority'] ?? null,

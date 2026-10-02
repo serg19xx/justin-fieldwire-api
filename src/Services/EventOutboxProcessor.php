@@ -552,8 +552,8 @@ class EventOutboxProcessor
                 continue;
             }
 
-            // Global role codes used as recipients (worker, foreman, contractor, …)
-            if (in_array($role, ['worker', 'foreman', 'contractor', 'inspector', 'project_manager'], true)) {
+            // Global role codes used as recipients (worker, foreman, project_manager, …)
+            if (in_array($role, ['worker', 'foreman', 'project_manager'], true)) {
                 foreach ($this->fetchActiveUserIdsByRole($role) as $id) {
                     $ids[] = $id;
                 }

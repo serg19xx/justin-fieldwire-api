@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Database\Database;
 use App\Support\ClientListSort;
+use App\Support\PhoneNormalizer;
 use Flight;
 use Exception;
 use Monolog\Logger;
@@ -12,6 +13,9 @@ class PharmacistController
 {
     private Logger $logger;
     private Database $database;
+
+    /** @var list<string> */
+    private const PHONE_FIELDS = ['cell_phone'];
 
     public function __construct(Logger $logger)
     {
@@ -57,7 +61,7 @@ class PharmacistController
             $city = Flight::request()->query->city ?? null;
             $search = trim((string)(Flight::request()->query->search ?? ''));
             $page = (int)(Flight::request()->query->page ?? 1);
-            $limit = (int)(Flight::request()->query->limit ?? 50);
+            $limit = min(max(1, (int)(Flight::request()->query->limit ?? 50)), 1000);
             $offset = ($page - 1) * $limit;
 
             $whereConditions = [];
@@ -106,6 +110,7 @@ class PharmacistController
                     'reg_number' => 'pp.reg_number',
                     'operName' => 'pa.operName',
                     'workplace' => 'pp.workplace',
+                    'cell_phone' => 'pp.cell_phone',
                     'email' => 'pp.email',
                 ],
                 'fullName',
@@ -228,6 +233,9 @@ class PharmacistController
                 if (in_array($key, ['id', 'operName'], true)) continue;
                 $fields[] = $key;
                 $placeholders[] = '?';
+                if (in_array($key, self::PHONE_FIELDS, true) && (is_string($value) || is_numeric($value) || $value === null)) {
+                    $value = PhoneNormalizer::toE164($value === null ? null : (string) $value);
+                }
                 $values[] = $value;
             }
 
@@ -304,6 +312,9 @@ class PharmacistController
                 if (in_array($key, ['id', 'operName'], true)) continue;
                 if (!in_array($key, $allowedFields, true)) continue;
                 $fields[] = "$key = ?";
+                if (in_array($key, self::PHONE_FIELDS, true) && (is_string($value) || is_numeric($value) || $value === null)) {
+                    $value = PhoneNormalizer::toE164($value === null ? null : (string) $value);
+                }
                 $values[] = $value;
             }
 

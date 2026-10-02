@@ -541,7 +541,7 @@ class EventConditionsService
         );
         
         $user = $result->fetchAssociative();
-        return $user['role_code'] ?? 'contractor';
+        return $user['role_code'] ?? 'viewer';
     }
 
     /**
@@ -617,19 +617,19 @@ class EventConditionsService
             'user_roles' => [
                 'description' => 'Разрешенные роли пользователей для срабатывания правила',
                 'type' => 'array',
-                'values' => ['admin', 'project_manager', 'contractor', 'architect', 'viewer', 'guest'],
+                'values' => ['admin', 'project_manager', 'architect', 'foreman', 'worker', 'viewer', 'guest'],
                 'example' => ['admin', 'project_manager']
             ],
             'exclude_roles' => [
                 'description' => 'Исключенные роли пользователей',
                 'type' => 'array',
-                'values' => ['admin', 'project_manager', 'contractor', 'architect', 'viewer', 'guest'],
-                'example' => ['contractor']
+                'values' => ['admin', 'project_manager', 'architect', 'foreman', 'worker', 'viewer', 'guest'],
+                'example' => ['guest']
             ],
             'notify_roles' => [
                 'description' => 'Роли для уведомления (обязательно для action: notify)',
                 'type' => 'array',
-                'values' => ['admin', 'project_manager', 'contractor', 'architect', 'viewer', 'guest'],
+                'values' => ['admin', 'project_manager', 'architect', 'foreman', 'worker', 'viewer', 'guest'],
                 'example' => ['admin', 'project_manager']
             ],
             'user_conditions' => [

@@ -367,7 +367,7 @@ class NotificationPreferenceService
     {
         return in_array(
             (string) $roleCode,
-            ['worker', 'foreman', 'contractor', 'inspector'],
+            ['worker', 'foreman'],
             true
         );
     }
@@ -478,9 +478,6 @@ class NotificationPreferenceService
                 }
                 if (str_contains($normalized, 'admin')) {
                     $roles[] = 'admin';
-                }
-                if (str_contains($normalized, 'contractor')) {
-                    $roles[] = 'contractor';
                 }
                 if (str_contains($normalized, 'worker')) {
                     $roles[] = 'worker';

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Services\OutreachSmsReplyService;
 use App\Services\SmsMeetingInviteService;
 use App\Services\TwilioService;
 use Flight;
@@ -16,6 +17,7 @@ class TwilioSmsWebhookController
         private readonly Logger $logger,
         private readonly SmsMeetingInviteService $inviteService,
         private readonly TwilioService $twilioService,
+        private readonly ?OutreachSmsReplyService $outreachSms = null,
     ) {
     }
 
@@ -32,6 +34,22 @@ class TwilioSmsWebhookController
             'from' => $payload['From'] ?? null,
             'body_preview' => isset($payload['Body']) ? substr((string) $payload['Body'], 0, 40) : null,
         ]);
+
+        // Prefer outreach keyword replies (YES / DECLINE / STOP) when a sent SMS recipient matches.
+        if ($this->outreachSms !== null) {
+            $outreach = $this->outreachSms->handleInbound($payload);
+            if (!empty($outreach['handled'])) {
+                $reply = trim((string) ($outreach['reply_sms'] ?? ''));
+                if ($reply !== '' && isset($payload['From'])) {
+                    $this->twilioService->sendSms((string) $payload['From'], $reply);
+                }
+                header('Content-Type: text/xml; charset=utf-8');
+                echo '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
+                Flight::stop();
+
+                return;
+            }
+        }
 
         $result = $this->inviteService->handleInboundSms($payload);
         if (!$result['success']) {

@@ -43,7 +43,7 @@ class DashboardService
     }
 
     /**
-     * Live dashboard for field roles (foreman, worker, contractor) scoped to assigned projects.
+     * Live dashboard for field roles (foreman, worker) scoped to assigned projects.
      *
      * @return array<string, mixed>
      */
