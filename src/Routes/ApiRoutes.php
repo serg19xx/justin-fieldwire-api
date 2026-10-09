@@ -253,6 +253,16 @@ class ApiRoutes
                     $workerTimesheetController->myMonthlyTimesheet();
                 }
             });
+            Flight::route('GET /api/v1/me/work-day', function() use ($workerTimesheetController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $workerTimesheetController->myWorkDay();
+                }
+            });
+            Flight::route('POST /api/v1/me/work-day/check-in', function() use ($workerTimesheetController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $workerTimesheetController->checkInMyWorkDay();
+                }
+            });
             Flight::route('GET /api/v1/users/@user_id/schedule', function($user_id) use ($scheduleWeekController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
                     $scheduleWeekController->getUserSchedule((int) $user_id);

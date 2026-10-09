@@ -2078,6 +2078,15 @@ class TaskController
             if (isset($data['status'])) {
                 $updateFields[] = "status = ?";
                 $params[] = $data['status'];
+                // PM re-opened the task: the field crew must be able to mark it done again.
+                if (
+                    !in_array($data['status'], ['ready_for_inspection', 'completed', 'done'], true)
+                    && $this->taskOptionalColumnPresent($connection, 'field_submitted_at')
+                    && $this->taskOptionalColumnPresent($connection, 'field_submitted_by')
+                ) {
+                    $updateFields[] = 'field_submitted_at = NULL';
+                    $updateFields[] = 'field_submitted_by = NULL';
+                }
             }
             if (isset($data['progress_pct'])) {
                 $updateFields[] = "progress_pct = ?";
@@ -5634,7 +5643,11 @@ class TaskController
                 return;
             }
 
-            if (!empty($taskRow['field_submitted_at'])) {
+            // A submission only blocks while the PM has not moved the task back to a working status.
+            if (
+                !empty($taskRow['field_submitted_at'])
+                && in_array((string) ($taskRow['status'] ?? ''), ['ready_for_inspection', 'completed', 'done'], true)
+            ) {
                 Flight::json([
                     'error_code' => 409,
                     'status' => 'error',
@@ -5659,6 +5672,10 @@ class TaskController
 
             $updateSql = 'UPDATE fw_prj_tasks SET field_submitted_at = NOW(), field_submitted_by = ?, updated_at = NOW()';
             $params = [$actorId];
+            // The PM reviews and sets the final status; completed tasks stay completed.
+            if (!in_array((string) ($taskRow['status'] ?? ''), ['completed', 'done'], true)) {
+                $updateSql .= ", status = 'ready_for_inspection'";
+            }
             if ($fieldNotes !== null && $fieldNotes !== '' && $this->taskOptionalColumnPresent($connection, 'field_notes')) {
                 $updateSql .= ', field_notes = ?';
                 $params[] = $fieldNotes;
