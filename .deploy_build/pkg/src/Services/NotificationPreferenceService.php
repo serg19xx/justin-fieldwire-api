@@ -491,18 +491,15 @@ class NotificationPreferenceService
             }
         }
 
-        // Legacy fallback: conditions.notify_roles (pre-recipients-on-action schema)
-        if ($roles === []) {
-            $conditions = is_string($rawConditions) ? json_decode($rawConditions, true) : $rawConditions;
-            if (is_array($conditions)) {
-                $notifyRoles = $conditions['notify_roles']['value']
-                    ?? $conditions['notify_roles']
-                    ?? null;
-                if (is_array($notifyRoles)) {
-                    foreach ($notifyRoles as $role) {
-                        if (is_string($role) && $role !== '') {
-                            $roles[] = $role;
-                        }
+        $conditions = is_string($rawConditions) ? json_decode($rawConditions, true) : $rawConditions;
+        if (is_array($conditions)) {
+            $notifyRoles = $conditions['notify_roles']['value']
+                ?? $conditions['notify_roles']
+                ?? null;
+            if (is_array($notifyRoles)) {
+                foreach ($notifyRoles as $role) {
+                    if (is_string($role) && $role !== '') {
+                        $roles[] = $role;
                     }
                 }
             }

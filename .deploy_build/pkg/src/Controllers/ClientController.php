@@ -22,22 +22,22 @@ class ClientController
     // Маппинг типов таблиц на их реальные имена в БД и поля name
     private const CLIENT_TABLES = [
         'pharma' => [
-            'table' => 'fw_pharma',
+            'table' => 'pharma',
             'name_field' => 'operName',
             'id_field' => 'id'
         ],
         'physician' => [
-            'table' => 'fw_physician',
+            'table' => 'physician',
             'name_field' => 'fullName',
             'id_field' => 'id'
         ],
         'pharmacist' => [
-            'table' => 'fw_pharmacist',
+            'table' => 'pharmacist',
             'name_field' => 'fullName',
             'id_field' => 'id'
         ],
         'medical_clinic' => [
-            'table' => 'fw_medical_clinic',
+            'table' => 'medical_clinic',
             'name_field' => 'clinicName',
             'id_field' => 'id'
         ]

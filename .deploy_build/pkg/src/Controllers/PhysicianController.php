@@ -3,6 +3,7 @@
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Support\ClientListContactFilter;
 use App\Support\ClientListSort;
 use Flight;
 use Exception;
@@ -96,10 +97,18 @@ class PhysicianController
                 }
             }
 
+            ClientListContactFilter::apply(
+                'physician',
+                $whereConditions,
+                Flight::request()->query->nonEmpty ?? null,
+                Flight::request()->query->empty ?? null,
+                Flight::request()->query->missingContacts ?? null,
+            );
+
             $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
 
             // Получить общее количество
-            $countSql = "SELECT COUNT(*) as total FROM fw_physician $whereClause";
+            $countSql = "SELECT COUNT(*) as total FROM physician $whereClause";
             $countResult = $this->database->getConnection()->executeQuery($countSql, $params);
             $total = $countResult->fetchAssociative()['total'];
 
@@ -117,7 +126,7 @@ class PhysicianController
             );
 
             // Получить врачей
-            $sql = "SELECT id, prefTitle, fullName, company, specialty, cellPhone, email, faxNumber, officePhone, fullAddress, unitNumb, streetNumber, country, region, city, postal, notes, lat, lng FROM fw_physician $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
+            $sql = "SELECT id, prefTitle, fullName, company, specialty, cellPhone, email, faxNumber, officePhone, fullAddress, unitNumb, streetNumber, country, region, city, postal, notes, lat, lng FROM physician $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
             $physicians = $result->fetchAllAssociative();
@@ -166,7 +175,7 @@ class PhysicianController
                 return;
             }
 
-            $sql = "SELECT id, prefTitle, fullName, company, specialty, cellPhone, email, faxNumber, officePhone, fullAddress, unitNumb, streetNumber, country, region, city, postal, notes, lat, lng FROM fw_physician WHERE id = ?";
+            $sql = "SELECT id, prefTitle, fullName, company, specialty, cellPhone, email, faxNumber, officePhone, fullAddress, unitNumb, streetNumber, country, region, city, postal, notes, lat, lng FROM physician WHERE id = ?";
             $params = [$id];
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
@@ -236,7 +245,7 @@ class PhysicianController
                 $values[] = $value;
             }
 
-            $sql = "INSERT INTO fw_physician (" . implode(', ', $fields) . ") VALUES (" . implode(', ', $placeholders) . ")";
+            $sql = "INSERT INTO physician (" . implode(', ', $fields) . ") VALUES (" . implode(', ', $placeholders) . ")";
             
             $this->database->getConnection()->executeStatement($sql, $values);
             
@@ -290,7 +299,7 @@ class PhysicianController
             ];
 
             // Проверить существование врача
-            $checkSql = "SELECT id FROM fw_physician WHERE id = ?";
+            $checkSql = "SELECT id FROM physician WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
             
             if (!$checkStmt->fetchAssociative()) {
@@ -326,7 +335,7 @@ class PhysicianController
 
             $values[] = $id; // Для WHERE условия
 
-            $sql = "UPDATE fw_physician SET " . implode(', ', $fields) . " WHERE id = ?";
+            $sql = "UPDATE physician SET " . implode(', ', $fields) . " WHERE id = ?";
             
             $affectedRows = $this->database->getConnection()->executeStatement($sql, $values);
 
@@ -370,7 +379,7 @@ class PhysicianController
             }
 
             // Проверить существование врача
-            $checkSql = "SELECT id FROM fw_physician WHERE id = ?";
+            $checkSql = "SELECT id FROM physician WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
             
             if (!$checkStmt->fetchAssociative()) {
@@ -384,7 +393,7 @@ class PhysicianController
             }
 
             // Удалить врача
-            $sql = "DELETE FROM fw_physician WHERE id = ?";
+            $sql = "DELETE FROM physician WHERE id = ?";
             $affectedRows = $this->database->getConnection()->executeStatement($sql, [$id]);
 
             if ($affectedRows === 0) {
