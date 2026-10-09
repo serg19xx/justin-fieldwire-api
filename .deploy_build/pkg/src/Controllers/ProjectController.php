@@ -1102,7 +1102,9 @@ class ProjectController
             $insertPlaceholders = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
             $params = [
                 $data['prj_name'],
-                $data['address'],
+                isset($data['address']) && is_string($data['address']) && trim($data['address']) !== ''
+                    ? trim($data['address'])
+                    : null,
                 $data['date_start'] ?? null,
                 $data['date_end'] ?? null,
                 $data['priority'] ?? null,
@@ -1130,7 +1132,10 @@ class ProjectController
             if ($this->projectForemanColumnPresent($connection)) {
                 $insertColumns .= ', project_foreman_id';
                 $insertPlaceholders .= ', ?';
-                $params[] = isset($data['project_foreman_id']) ? (int) $data['project_foreman_id'] : null;
+                $rawForemanId = $data['project_foreman_id'] ?? null;
+                $params[] = ($rawForemanId !== null && $rawForemanId !== '' && (int) $rawForemanId > 0)
+                    ? (int) $rawForemanId
+                    : null;
             }
 
             if ($this->locationsOfInterestColumnPresent($connection)) {
@@ -1244,6 +1249,12 @@ class ProjectController
 
             $connection->executeStatement($sql, $params);
             $projectId = (int) $connection->lastInsertId();
+
+            $this->refreshProjectGeocode(
+                $connection,
+                $projectId,
+                isset($data['address']) && is_string($data['address']) ? trim($data['address']) : null
+            );
 
             if (!array_key_exists('additional_clients', $data) && !empty($data['client2_id']) && !empty($data['client2_table'])) {
                 $normalizedAdditional = $this->normalizeAdditionalClientsPayload(
@@ -1789,6 +1800,11 @@ class ProjectController
             $sql = "UPDATE fw_projects SET " . implode(', ', $updateFields) . " WHERE id = ?";
             $connection->executeStatement($sql, $params);
 
+            if (isset($data['address']) && $this->projectGeoColumnsPresent($connection)) {
+                $addr = is_string($data['address']) ? trim($data['address']) : '';
+                $this->refreshProjectGeocode($connection, $id, $addr !== '' ? $addr : null);
+            }
+
             // Keep fw_project_clients in sync when primary and/or additional clients change.
             $shouldSyncProjectClients =
                 $normalizedAdditionalForSync !== null
@@ -2256,7 +2272,8 @@ class ProjectController
     private function validateProjectData(array $data, bool $isCreate = true): array
     {
         // date_start and date_end are optional (nullable) - project dates can be derived from tasks
-        $requiredFields = ['prj_name', 'address', 'created_by'];
+        // address is optional — may be unknown at create time
+        $requiredFields = ['prj_name', 'created_by'];
         
         if ($isCreate) {
             foreach ($requiredFields as $field) {
@@ -2272,12 +2289,13 @@ class ProjectController
 
         try {
             $connection = $this->database->getConnection();
-            if ($isCreate && $this->projectForemanColumnPresent($connection)) {
-                $foremanId = $data['project_foreman_id'] ?? null;
-                if ($foremanId === null || !is_numeric($foremanId) || (int) $foremanId <= 0) {
+            if ($this->projectForemanColumnPresent($connection) && array_key_exists('project_foreman_id', $data)) {
+                $foremanId = $data['project_foreman_id'];
+                // Optional: empty/null is allowed (foreman may be unknown at create time)
+                if ($foremanId !== null && $foremanId !== '' && (!is_numeric($foremanId) || (int) $foremanId <= 0)) {
                     return [
                         'valid' => false,
-                        'message' => "Field 'project_foreman_id' is required",
+                        'message' => "Field 'project_foreman_id' must be a positive user id or empty",
                     ];
                 }
             }
@@ -3164,19 +3182,19 @@ class ProjectController
         // Маппинг типов таблиц на их реальные имена в БД и поля name
         $clientTables = [
             'pharma' => [
-                'table' => 'pharma',
+                'table' => 'fw_pharma',
                 'name_field' => 'operName'
             ],
             'physician' => [
-                'table' => 'physician',
+                'table' => 'fw_physician',
                 'name_field' => 'fullName'
             ],
             'pharmacist' => [
-                'table' => 'pharmacist',
+                'table' => 'fw_pharmacist',
                 'name_field' => 'fullName'
             ],
             'medical_clinic' => [
-                'table' => 'medical_clinic',
+                'table' => 'fw_medical_clinic',
                 'name_field' => 'clinicName'
             ]
         ];
@@ -3278,6 +3296,57 @@ class ProjectController
     private function projectForemanColumnPresent(\Doctrine\DBAL\Connection $connection): bool
     {
         return $this->taskAuth->projectForemanColumnPresent($connection);
+    }
+
+    private function projectGeoColumnsPresent(\Doctrine\DBAL\Connection $connection): bool
+    {
+        static $cached = null;
+        if ($cached !== null) {
+            return $cached;
+        }
+        try {
+            $cols = $connection->createSchemaManager()->listTableColumns('fw_projects');
+            $cached = isset($cols['latitude']) && isset($cols['longitude']);
+        } catch (\Throwable) {
+            $cached = false;
+        }
+        return $cached;
+    }
+
+    /**
+     * Best-effort geocode of project address into latitude/longitude. Never throws to callers.
+     */
+    private function refreshProjectGeocode(\Doctrine\DBAL\Connection $connection, int $projectId, ?string $address): void
+    {
+        if ($projectId <= 0 || !$this->projectGeoColumnsPresent($connection)) {
+            return;
+        }
+        if ($address === null || trim($address) === '') {
+            try {
+                $connection->executeStatement(
+                    'UPDATE fw_projects SET latitude = NULL, longitude = NULL, updated_at = NOW() WHERE id = ?',
+                    [$projectId]
+                );
+            } catch (\Throwable $e) {
+                $this->logger->warning('Clear project geo failed', ['project_id' => $projectId, 'error' => $e->getMessage()]);
+            }
+            return;
+        }
+        try {
+            $geo = (new \App\Services\GeocodeService($this->logger))->geocodeAddress($address);
+            if ($geo === null) {
+                return;
+            }
+            $connection->executeStatement(
+                'UPDATE fw_projects SET latitude = ?, longitude = ?, updated_at = NOW() WHERE id = ?',
+                [$geo['lat'], $geo['lng'], $projectId]
+            );
+        } catch (\Throwable $e) {
+            $this->logger->warning('Project geocode failed', [
+                'project_id' => $projectId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function projectForemanSelectSql(\Doctrine\DBAL\Connection $connection): string

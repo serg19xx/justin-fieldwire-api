@@ -3,7 +3,6 @@
 namespace App\Controllers;
 
 use App\Database\Database;
-use App\Support\ClientListContactFilter;
 use App\Support\ClientListSort;
 use Flight;
 use Exception;
@@ -103,18 +102,10 @@ class PharmacyController
                 }
             }
 
-            ClientListContactFilter::apply(
-                'pharma',
-                $whereConditions,
-                Flight::request()->query->nonEmpty ?? null,
-                Flight::request()->query->empty ?? null,
-                Flight::request()->query->missingContacts ?? null,
-            );
-
             $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
 
             // Получить общее количество
-            $countSql = "SELECT COUNT(*) as total FROM pharma $whereClause";
+            $countSql = "SELECT COUNT(*) as total FROM fw_pharma $whereClause";
             $countResult = $this->database->getConnection()->executeQuery($countSql, $params);
             $total = $countResult->fetchAssociative()['total'];
 
@@ -134,7 +125,7 @@ class PharmacyController
             );
 
             // Получить аптеки
-            $sql = "SELECT id, operName, legalName, contact, owner, manager, unitNumb, phone, cell, email, fax, twilioPhone, fullAddress, street, city, region, country, postcode, lat, lng, `no-centrals`, otpFee, marketingFee, sub_type, comp_volumes, sales_cycle, notes FROM pharma $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
+            $sql = "SELECT id, operName, legalName, contact, owner, manager, unitNumb, phone, cell, email, fax, twilioPhone, fullAddress, street, city, region, country, postcode, lat, lng, `no-centrals`, otpFee, marketingFee, sub_type, comp_volumes, sales_cycle, notes FROM fw_pharma $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
             $pharmacies = $result->fetchAllAssociative();
@@ -183,7 +174,7 @@ class PharmacyController
                 return;
             }
 
-            $sql = "SELECT id, operName, legalName, contact, owner, manager, unitNumb, phone, cell, email, fax, twilioPhone, fullAddress, street, city, region, country, postcode, lat, lng, `no-centrals`, otpFee, marketingFee, sub_type, comp_volumes, sales_cycle, notes FROM pharma WHERE id = ?";
+            $sql = "SELECT id, operName, legalName, contact, owner, manager, unitNumb, phone, cell, email, fax, twilioPhone, fullAddress, street, city, region, country, postcode, lat, lng, `no-centrals`, otpFee, marketingFee, sub_type, comp_volumes, sales_cycle, notes FROM fw_pharma WHERE id = ?";
             $params = [$id];
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
@@ -253,7 +244,7 @@ class PharmacyController
                 $values[] = $value;
             }
 
-            $sql = "INSERT INTO pharma (" . implode(', ', $fields) . ") VALUES (" . implode(', ', $placeholders) . ")";
+            $sql = "INSERT INTO fw_pharma (" . implode(', ', $fields) . ") VALUES (" . implode(', ', $placeholders) . ")";
             
             $this->database->getConnection()->executeStatement($sql, $values);
             
@@ -308,7 +299,7 @@ class PharmacyController
             ];
 
             // Проверить существование аптеки
-            $checkSql = "SELECT id FROM pharma WHERE id = ?";
+            $checkSql = "SELECT id FROM fw_pharma WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
             
             if (!$checkStmt->fetchAssociative()) {
@@ -344,7 +335,7 @@ class PharmacyController
 
             $values[] = $id; // Для WHERE условия
 
-            $sql = "UPDATE pharma SET " . implode(', ', $fields) . " WHERE id = ?";
+            $sql = "UPDATE fw_pharma SET " . implode(', ', $fields) . " WHERE id = ?";
             
             $affectedRows = $this->database->getConnection()->executeStatement($sql, $values);
 
@@ -388,7 +379,7 @@ class PharmacyController
             }
 
             // Проверить существование аптеки
-            $checkSql = "SELECT id FROM pharma WHERE id = ?";
+            $checkSql = "SELECT id FROM fw_pharma WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
             
             if (!$checkStmt->fetchAssociative()) {
@@ -402,7 +393,7 @@ class PharmacyController
             }
 
             // Удалить аптеку
-            $sql = "DELETE FROM pharma WHERE id = ?";
+            $sql = "DELETE FROM fw_pharma WHERE id = ?";
             $affectedRows = $this->database->getConnection()->executeStatement($sql, [$id]);
 
             if ($affectedRows === 0) {

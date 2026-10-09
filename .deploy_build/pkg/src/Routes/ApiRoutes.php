@@ -12,6 +12,7 @@ use App\Controllers\ProjectController;
 use App\Controllers\TaskController;
 use App\Controllers\ProjectTeamController;
 use App\Controllers\ScheduleWeekController;
+use App\Controllers\WorkerTimesheetController;
 use App\Controllers\ScheduleEntryMessageController;
 use App\Controllers\ScheduleEntryDocumentController;
 use App\Controllers\TaskFieldPhotoController;
@@ -233,6 +234,17 @@ class ApiRoutes
             Flight::route('GET /api/v1/me/schedule', function() use ($scheduleWeekController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
                     $scheduleWeekController->getMySchedule();
+                }
+            });
+            Flight::route('POST /api/v1/me/schedule-entries/@entry_id/check-in', function($entry_id) use ($scheduleWeekController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $scheduleWeekController->checkInMyScheduleEntry((int) $entry_id);
+                }
+            });
+            $workerTimesheetController = new WorkerTimesheetController($this->logger);
+            Flight::route('GET /api/v1/me/work-timesheet', function() use ($workerTimesheetController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $workerTimesheetController->myMonthlyTimesheet();
                 }
             });
             Flight::route('GET /api/v1/users/@user_id/schedule', function($user_id) use ($scheduleWeekController, $authMiddleware) {
@@ -926,6 +938,51 @@ class ApiRoutes
             $controller->inboundSms();
         });
 
+        // BoldSign e-signature (status works without API key; webhook has no JWT)
+        Flight::route('GET /api/v1/esign/status', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\BoldSignController(
+                    $this->logger,
+                    new \App\Services\BoldSignService($this->logger),
+                );
+                $controller->status();
+            }
+        });
+        Flight::route('POST /api/v1/esign/send', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\BoldSignController(
+                    $this->logger,
+                    new \App\Services\BoldSignService($this->logger),
+                );
+                $controller->send();
+            }
+        });
+        Flight::route('GET /api/v1/esign/envelopes', function() use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\BoldSignController(
+                    $this->logger,
+                    new \App\Services\BoldSignService($this->logger),
+                );
+                $controller->listEnvelopes();
+            }
+        });
+        Flight::route('GET /api/v1/esign/envelopes/@id', function($id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $controller = new \App\Controllers\BoldSignController(
+                    $this->logger,
+                    new \App\Services\BoldSignService($this->logger),
+                );
+                $controller->getEnvelope((string) $id);
+            }
+        });
+        Flight::route('POST /api/v1/esign/webhook', function() {
+            $controller = new \App\Controllers\BoldSignController(
+                $this->logger,
+                new \App\Services\BoldSignService($this->logger),
+            );
+            $controller->webhook();
+        });
+
         // Role routes v1 (protected)
         Flight::route('GET /api/v1/roles', function() use ($authMiddleware) {
             if ($authMiddleware->handle()) {
@@ -1132,6 +1189,27 @@ class ApiRoutes
             if ($authMiddleware->handle()) {
                 $taskController = new \App\Controllers\TaskController($this->logger);
                 $taskController->updateTask((int)$project_id, (int)$task_id);
+            }
+        });
+
+        Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/field-work/check-in', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->checkInFieldWork((int)$project_id, (int)$task_id);
+            }
+        });
+
+        Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/day-work', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->getTaskDayWork((int)$project_id, (int)$task_id);
+            }
+        });
+
+        Flight::route('POST /api/v1/projects/@project_id/tasks/@task_id/day-work/check-in', function($project_id, $task_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                $taskController = new \App\Controllers\TaskController($this->logger);
+                $taskController->checkInTaskDayWork((int)$project_id, (int)$task_id);
             }
         });
 

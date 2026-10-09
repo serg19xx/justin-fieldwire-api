@@ -348,7 +348,7 @@ class CalendarController
         $conn = Database::getConnection();
         $sql = 'SELECT e.id, e.user_id, e.project_id, e.title, e.description, e.location,
                        e.start_at, e.end_at, e.all_day, e.requires_presence, e.created_at, e.updated_at,
-                       p.prj_name AS project_name
+                       p.prj_name AS project_name, p.address AS project_address
                 FROM fw_calendar_events e
                 LEFT JOIN fw_projects p ON p.id = e.project_id
                 WHERE ' . $where . '
@@ -371,7 +371,7 @@ class CalendarController
         $row = $conn->executeQuery(
             'SELECT e.id, e.user_id, e.project_id, e.title, e.description, e.location,
                     e.start_at, e.end_at, e.all_day, e.requires_presence, e.created_at, e.updated_at,
-                    p.prj_name AS project_name
+                    p.prj_name AS project_name, p.address AS project_address
              FROM fw_calendar_events e
              LEFT JOIN fw_projects p ON p.id = e.project_id
              WHERE e.id = ? AND e.user_id = ?',
@@ -401,11 +401,17 @@ class CalendarController
             $editable = $projectId === $projectContextId;
         }
 
+        $projectAddress = null;
+        if (isset($row['project_address']) && $row['project_address'] !== null && trim((string) $row['project_address']) !== '') {
+            $projectAddress = trim((string) $row['project_address']);
+        }
+
         return [
             'id' => (int) $row['id'],
             'user_id' => (int) $row['user_id'],
             'project_id' => $projectId,
             'project_name' => $row['project_name'] ?? null,
+            'project_address' => $projectAddress,
             'title' => (string) $row['title'],
             'description' => $row['description'] !== null ? (string) $row['description'] : null,
             'location' => $row['location'] !== null ? (string) $row['location'] : null,

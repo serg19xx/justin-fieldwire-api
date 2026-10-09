@@ -21,6 +21,8 @@ for dir in "$ROOT/logs" "$ROOT/storage/logs"; do
   for log in "$dir"/*.log; do
     [ -f "$log" ] || continue
     [ -s "$log" ] || continue
+    # This script's own cron output is being written while it runs.
+    [ "$(basename "$log")" = "rotate-logs.log" ] && continue
     archive="${log%.log}-$STAMP.log.gz"
     [ -e "$archive" ] && continue
     size="$(du -h "$log" | cut -f1)"

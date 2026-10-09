@@ -36,12 +36,12 @@ class Database
     {
         $config = [
             'driver' => 'pdo_mysql',
-            'host' => $_ENV['DB_HOST'] ?? 'localhost',
-            'port' => $_ENV['DB_PORT'] ?? 3306,
-            'dbname' => $_ENV['DB_NAME'] ?? 'fieldwire_api',
-            'user' => $_ENV['DB_USERNAME'] ?? 'root',
-            'password' => $_ENV['DB_PASSWORD'] ?? '',
-            'charset' => $_ENV['DB_CHARSET'] ?? 'utf8mb4',
+            'host' => self::env('DB_HOST', 'localhost'),
+            'port' => (int) self::env('DB_PORT', '3306'),
+            'dbname' => self::env('DB_NAME', 'fieldwire_api'),
+            'user' => self::env('DB_USERNAME', 'root'),
+            'password' => self::env('DB_PASSWORD', ''),
+            'charset' => self::env('DB_CHARSET', 'utf8mb4'),
             'options' => [
                 \PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION,
                 \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
@@ -73,6 +73,22 @@ class Database
             
             throw new \RuntimeException('Failed to connect to database: ' . $e->getMessage(), 0, $e);
         }
+    }
+
+    /** Dotenv may populate getenv/$_SERVER without $_ENV depending on php.ini variables_order. */
+    private static function env(string $key, string $default = ''): string
+    {
+        if (array_key_exists($key, $_ENV) && $_ENV[$key] !== null && $_ENV[$key] !== '') {
+            return (string) $_ENV[$key];
+        }
+        if (array_key_exists($key, $_SERVER) && $_SERVER[$key] !== null && $_SERVER[$key] !== '') {
+            return (string) $_SERVER[$key];
+        }
+        $fromGetenv = getenv($key);
+        if ($fromGetenv !== false && $fromGetenv !== '') {
+            return (string) $fromGetenv;
+        }
+        return $default;
     }
 
     /**

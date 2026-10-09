@@ -3,7 +3,6 @@
 namespace App\Controllers;
 
 use App\Database\Database;
-use App\Support\ClientListContactFilter;
 use App\Support\ClientListSort;
 use Flight;
 use Exception;
@@ -97,18 +96,10 @@ class MedicalClinicController
                 }
             }
 
-            ClientListContactFilter::apply(
-                'medical_clinic',
-                $whereConditions,
-                Flight::request()->query->nonEmpty ?? null,
-                Flight::request()->query->empty ?? null,
-                Flight::request()->query->missingContacts ?? null,
-            );
-
             $whereClause = !empty($whereConditions) ? "WHERE " . implode(" AND ", $whereConditions) : "";
 
             // Получить общее количество
-            $countSql = "SELECT COUNT(*) as total FROM medical_clinic $whereClause";
+            $countSql = "SELECT COUNT(*) as total FROM fw_medical_clinic $whereClause";
             $countResult = $this->database->getConnection()->executeQuery($countSql, $params);
             $total = $countResult->fetchAssociative()['total'];
 
@@ -126,7 +117,7 @@ class MedicalClinicController
             );
 
             // Получить медицинские клиники
-            $sql = "SELECT id, clinicName, clinicType, contactName, phone, fax, email, unitNumb, streetName, city, region, country, postal, notes, fullAddress, geoAddress, geoCoordinates FROM medical_clinic $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
+            $sql = "SELECT id, clinicName, clinicType, contactName, phone, fax, email, unitNumb, streetName, city, region, country, postal, notes, fullAddress, geoAddress, geoCoordinates FROM fw_medical_clinic $whereClause ORDER BY $orderBy LIMIT $limit OFFSET $offset";
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
             $medicalClinics = $result->fetchAllAssociative();
@@ -175,7 +166,7 @@ class MedicalClinicController
                 return;
             }
 
-            $sql = "SELECT id, clinicName, clinicType, contactName, phone, fax, email, unitNumb, streetName, city, region, country, postal, notes, fullAddress, geoAddress, geoCoordinates FROM medical_clinic WHERE id = ?";
+            $sql = "SELECT id, clinicName, clinicType, contactName, phone, fax, email, unitNumb, streetName, city, region, country, postal, notes, fullAddress, geoAddress, geoCoordinates FROM fw_medical_clinic WHERE id = ?";
             $params = [$id];
 
             $result = $this->database->getConnection()->executeQuery($sql, $params);
@@ -245,7 +236,7 @@ class MedicalClinicController
                 $values[] = $value;
             }
 
-            $sql = "INSERT INTO medical_clinic (" . implode(', ', $fields) . ") VALUES (" . implode(', ', $placeholders) . ")";
+            $sql = "INSERT INTO fw_medical_clinic (" . implode(', ', $fields) . ") VALUES (" . implode(', ', $placeholders) . ")";
             
             $this->database->getConnection()->executeStatement($sql, $values);
             
@@ -298,7 +289,7 @@ class MedicalClinicController
             ];
 
             // Проверить существование клиники
-            $checkSql = "SELECT id FROM medical_clinic WHERE id = ?";
+            $checkSql = "SELECT id FROM fw_medical_clinic WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
             
             if (!$checkStmt->fetchAssociative()) {
@@ -334,7 +325,7 @@ class MedicalClinicController
 
             $values[] = $id; // Для WHERE условия
 
-            $sql = "UPDATE medical_clinic SET " . implode(', ', $fields) . " WHERE id = ?";
+            $sql = "UPDATE fw_medical_clinic SET " . implode(', ', $fields) . " WHERE id = ?";
             
             $affectedRows = $this->database->getConnection()->executeStatement($sql, $values);
 
@@ -378,7 +369,7 @@ class MedicalClinicController
             }
 
             // Проверить существование клиники
-            $checkSql = "SELECT id FROM medical_clinic WHERE id = ?";
+            $checkSql = "SELECT id FROM fw_medical_clinic WHERE id = ?";
             $checkStmt = $this->database->getConnection()->executeQuery($checkSql, [$id]);
             
             if (!$checkStmt->fetchAssociative()) {
@@ -392,7 +383,7 @@ class MedicalClinicController
             }
 
             // Удалить клинику
-            $sql = "DELETE FROM medical_clinic WHERE id = ?";
+            $sql = "DELETE FROM fw_medical_clinic WHERE id = ?";
             $affectedRows = $this->database->getConnection()->executeStatement($sql, [$id]);
 
             if ($affectedRows === 0) {
