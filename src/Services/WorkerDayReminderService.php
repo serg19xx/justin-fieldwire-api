@@ -12,9 +12,11 @@ use Monolog\Logger;
 /**
  * SMS reminders for the worker Timesheet punch (Start day / End day).
  *
- * A worker's scheduled day is the earliest task start_time and the latest task end_time
- * among open tasks they are on that cover the date. Reminders go out GRACE_MINUTES after
- * the scheduled start (no Start day yet) and after the scheduled end (no End day yet).
+ * A worker's scheduled day comes from the published PM Schedule (earliest expected start, latest
+ * expected end of their slots that day). Weekdays without a published slot fall back to the
+ * earliest task start_time and latest task end_time among open tasks covering the date.
+ * Reminders go out GRACE_MINUTES after the scheduled start (no Start day yet) and after the
+ * scheduled end (no End day yet).
  */
 class WorkerDayReminderService
 {
@@ -47,11 +49,55 @@ class WorkerDayReminderService
     }
 
     /**
-     * Field crew (foreman / worker) with a scheduled day on $ymd.
+     * Field crew (foreman / worker) with a scheduled day on $ymd: PM Schedule first, task plan on weekdays.
      *
      * @return list<array{user_id: int, first_name: string, phone: ?string, start_time: string, end_time: string}>
      */
-    public function scheduledWorkers(Connection $conn, string $ymd): array
+    public function scheduledWorkers(Connection $conn, string $ymd, bool $includeTaskPlan = true): array
+    {
+        $byUser = [];
+        if ($includeTaskPlan) {
+            foreach ($this->taskPlanWorkers($conn, $ymd) as $worker) {
+                $byUser[$worker['user_id']] = $worker;
+            }
+        }
+
+        $expected = array_filter(
+            (new PublishedScheduleService())->expectedDaysOn($conn, $ymd),
+            static fn (array $d): bool => $d['start_time'] !== null && $d['end_time'] !== null
+        );
+        if ($expected !== []) {
+            $ids = array_keys($expected);
+            $users = $conn->executeQuery(
+                "SELECT u.id AS user_id, u.first_name, u.phone
+                 FROM fw_users u
+                 INNER JOIN fw_glob_roles r ON r.id = u.role_id AND r.category = 'task'
+                 WHERE u.id IN (" . implode(', ', array_fill(0, count($ids), '?')) . ')
+                   AND u.status = 1
+                   AND u.archived_at IS NULL',
+                $ids
+            )->fetchAllAssociative();
+            foreach ($users as $u) {
+                $uid = (int) $u['user_id'];
+                $byUser[$uid] = [
+                    'user_id' => $uid,
+                    'first_name' => trim((string) ($u['first_name'] ?? '')),
+                    'phone' => $u['phone'] !== null ? (string) $u['phone'] : null,
+                    'start_time' => (string) $expected[$uid]['start_time'],
+                    'end_time' => (string) $expected[$uid]['end_time'],
+                ];
+            }
+        }
+
+        ksort($byUser);
+
+        return array_values($byUser);
+    }
+
+    /**
+     * @return list<array{user_id: int, first_name: string, phone: ?string, start_time: string, end_time: string}>
+     */
+    private function taskPlanWorkers(Connection $conn, string $ymd): array
     {
         $placeholders = implode(', ', array_fill(0, count(self::CLOSED_TASK_STATUSES), '?'));
         $rows = $conn->executeQuery(
@@ -106,16 +152,13 @@ class WorkerDayReminderService
             'actions' => [],
         ];
 
-        if ((int) $now->format('N') >= 6) {
-            $result['skipped_reason'] = 'weekend';
-            return $result;
-        }
         if (!$this->dayWork->tableExists($conn) || !$this->tableExists($conn)) {
             $result['skipped_reason'] = 'missing tables';
             return $result;
         }
 
-        foreach ($this->scheduledWorkers($conn, $ymd) as $worker) {
+        $isWeekday = (int) $now->format('N') < 6;
+        foreach ($this->scheduledWorkers($conn, $ymd, $isWeekday) as $worker) {
             $result['checked']++;
             $kind = $this->dueReminderKind($conn, $worker, $ymd, $now);
             if ($kind === null || $this->alreadyRecorded($conn, $worker['user_id'], $ymd, $kind)) {

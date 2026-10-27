@@ -118,7 +118,7 @@ RUN_REMOTE "mkdir -p '${REMOTE_BASE}'"
 
 # 7) Заливка кода (быстро)
 # Excluded paths are also protected from --delete, so server-side uploads and env files survive.
-RSYNC_EXCLUDES=(--exclude "vendor" --exclude "/public/uploads/" --exclude ".env.*")
+RSYNC_EXCLUDES=(--exclude "vendor" --exclude "/public/uploads/" --exclude ".env.*" --exclude "/logs/" --exclude "/storage/")
 if [[ "${UPLOAD_ENV}" != "yes" ]]; then
   RSYNC_EXCLUDES+=(--exclude ".env")
 fi

@@ -100,7 +100,7 @@ class CorsMiddleware
         header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Accept, Origin');
         header('Access-Control-Allow-Credentials: true');
         header('Access-Control-Max-Age: 86400'); // 24 hours
-        header('Access-Control-Expose-Headers: Content-Length, X-JSON');
+        header('Access-Control-Expose-Headers: Content-Length, X-JSON, X-Renewed-Token');
 
         // Handle preflight requests
         if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {

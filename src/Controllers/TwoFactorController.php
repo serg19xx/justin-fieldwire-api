@@ -6,6 +6,7 @@ use App\Database\Database;
 use App\Services\TwilioService;
 use App\Services\EmailService;
 use App\Services\UserAuditService;
+use App\Support\JwtToken;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
@@ -351,7 +352,7 @@ class TwoFactorController
                     'phone' => $user['phone'],
                     'two_factor_enabled' => (bool)($user['two_factor_enabled'] ?? false)
                 ],
-                'expires_at' => date('c', time() + 3600) // 1 hour
+                'expires_at' => date('c', time() + JwtToken::ACCESS_TTL_SECONDS)
             ]);
 
         } catch (\Exception $e) {
@@ -538,23 +539,7 @@ class TwoFactorController
 
     private function generateToken(array $user): string
     {
-        $header = json_encode(['typ' => 'JWT', 'alg' => 'HS256']);
-        $payload = json_encode([
-            'user_id' => $user['id'],
-            'email' => $user['email'],
-            'name' => $user['first_name'] . ' ' . $user['last_name'],
-            'iat' => time(),
-            'exp' => time() + 3600 // 1 hour
-        ]);
-
-        $base64Header = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
-        $base64Payload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($payload));
-
-        $secret = $_ENV['JWT_SECRET'] ?? 'your-secret-key-change-in-production';
-        $signature = hash_hmac('sha256', $base64Header . "." . $base64Payload, $secret, true);
-        $base64Signature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
-
-        return $base64Header . "." . $base64Payload . "." . $base64Signature;
+        return JwtToken::issueAccessToken($user);
     }
 
 

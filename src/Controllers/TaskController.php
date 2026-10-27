@@ -26,6 +26,9 @@ class TaskController
 {
     private const TASK_ADDRESS_MAX_LEN = 500;
 
+    /** Upper bound for the PM's "estimated time to complete" (365 days, in minutes). */
+    private const TASK_ESTIMATE_MAX_MINUTES = 365 * 24 * 60;
+
     /** Base columns always present on fw_prj_tasks. */
     private const TASK_DETAIL_BASE_COLUMNS = [
         'id', 'task_order', 'project_id', 'address', 'name', 'start_planned', 'end_planned',
@@ -37,6 +40,7 @@ class TaskController
     /** Optional columns added by field-work / category migrations (may be missing on older DBs). */
     private const TASK_DETAIL_OPTIONAL_COLUMNS = [
         'category',
+        'estimated_minutes',
         'executor_type',
         'contractor_id',
         'inspector_id',
@@ -111,6 +115,29 @@ class TaskController
         }
 
         return null;
+    }
+
+    /**
+     * Whole minutes from the request body; null for empty, zero, negative or non-numeric input.
+     */
+    private function normalizeEstimatedMinutes(mixed $raw): ?int
+    {
+        if ($raw === null || $raw === '' || !is_numeric($raw)) {
+            return null;
+        }
+        $minutes = (int) round((float) $raw);
+
+        return $minutes > 0 ? min($minutes, self::TASK_ESTIMATE_MAX_MINUTES) : null;
+    }
+
+    /**
+     * @param array<string, mixed> $task
+     */
+    private function estimatedMinutesFromRow(array $task): ?int
+    {
+        $raw = $task['estimated_minutes'] ?? null;
+
+        return $raw === null || (int) $raw <= 0 ? null : (int) $raw;
     }
 
     private function truncateTaskAddress(string $s): string
@@ -871,6 +898,9 @@ class TaskController
             if ($this->taskOptionalColumnPresent($connection, 'category')) {
                 $sql .= ', category';
             }
+            if ($this->taskOptionalColumnPresent($connection, 'estimated_minutes')) {
+                $sql .= ', estimated_minutes';
+            }
             if ($this->taskOptionalColumnPresent($connection, 'executor_type')) {
                 $sql .= ', executor_type';
             }
@@ -1011,6 +1041,7 @@ class TaskController
                     'category' => isset($task['category']) && is_string($task['category']) && trim($task['category']) !== ''
                         ? trim($task['category'])
                         : null,
+                    'estimated_minutes' => $this->estimatedMinutesFromRow($task),
                     'start_planned' => $task['start_planned'],
                     'end_planned' => $task['end_planned'],
                     'start_time' => $task['start_time'] ?? null,
@@ -1277,6 +1308,7 @@ class TaskController
                 'category' => isset($task['category']) && is_string($task['category']) && trim($task['category']) !== ''
                     ? trim($task['category'])
                     : null,
+                'estimated_minutes' => $this->estimatedMinutesFromRow($task),
                 'start_planned' => $task['start_planned'],
                 'end_planned' => $task['end_planned'],
                 'start_time' => $task['start_time'] ?? null,
@@ -1514,6 +1546,11 @@ class TaskController
                     $category = $rawCategory === '' ? null : $rawCategory;
                 }
                 $params[] = $category;
+            }
+
+            if ($this->taskOptionalColumnPresent($connection, 'estimated_minutes') && array_key_exists('estimated_minutes', $data)) {
+                $insertColumns[] = 'estimated_minutes';
+                $params[] = $this->normalizeEstimatedMinutes($data['estimated_minutes']);
             }
 
             if (!empty($executorAssignment['changed'])) {
@@ -2045,6 +2082,10 @@ class TaskController
             if (array_key_exists('address', $data) || array_key_exists('wbs_path', $data)) {
                 $updateFields[] = 'address = ?';
                 $params[] = $this->normalizeTaskAddressForStorage($data);
+            }
+            if (array_key_exists('estimated_minutes', $data) && $this->taskOptionalColumnPresent($connection, 'estimated_minutes')) {
+                $updateFields[] = 'estimated_minutes = ?';
+                $params[] = $this->normalizeEstimatedMinutes($data['estimated_minutes']);
             }
             if (isset($data['name'])) {
                 $updateFields[] = "name = ?";
@@ -3471,6 +3512,7 @@ class TaskController
             'category' => isset($task['category']) && is_string($task['category']) && trim($task['category']) !== ''
                 ? trim($task['category'])
                 : null,
+            'estimated_minutes' => $this->estimatedMinutesFromRow($task),
             'start_planned' => $task['start_planned'],
             'end_planned' => $task['end_planned'],
             'start_time' => $task['start_time'] ?? null,

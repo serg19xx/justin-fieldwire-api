@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Database\Database;
 use App\Services\TaskRosterForScheduleService;
+use App\Services\WorkerDayWorkService;
 use DateTimeImmutable;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
@@ -93,7 +94,10 @@ class ScheduleWeekController
             return;
         }
 
-        $entries = $this->fetchEntryRowsForWeek($conn, (int) $week['id']);
+        $entries = (new WorkerDayWorkService())->overlayOntoScheduleRows(
+            $conn,
+            $this->fetchEntryRowsForWeek($conn, (int) $week['id'])
+        );
 
         Flight::json([
             'error_code' => 0,
@@ -1033,7 +1037,10 @@ class ScheduleWeekController
               AND s.work_date <= ?
             ORDER BY s.work_date, CASE s.day_part WHEN \'am\' THEN 1 WHEN \'pm\' THEN 2 WHEN \'full\' THEN 3 ELSE 4 END, s.id
         ';
-        $rows = $conn->executeQuery($sql, [$userId, $from, $to])->fetchAllAssociative();
+        $rows = (new WorkerDayWorkService())->overlayOntoScheduleRows(
+            $conn,
+            $conn->executeQuery($sql, [$userId, $from, $to])->fetchAllAssociative()
+        );
 
         $out = [];
         foreach ($rows as $r) {
@@ -1305,6 +1312,8 @@ class ScheduleWeekController
             'work_end_at' => (new \App\Services\WorkClockService())->toApiIso($r['work_end_at'] ?? null),
             'work_start_distance_km' => $this->haversineKm($startLat, $startLng, $siteLat, $siteLng),
             'work_end_distance_km' => $this->haversineKm($endLat, $endLng, $siteLat, $siteLng),
+            'has_work_start_photo' => !empty($r['has_work_start_photo']),
+            'has_work_end_photo' => !empty($r['has_work_end_photo']),
         ];
     }
 

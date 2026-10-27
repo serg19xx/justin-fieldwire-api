@@ -559,18 +559,12 @@ class ProjectController
             }
 
             // Фильтр по вовлеченности пользователя в проект
+            $userInvolvementSql = $this->userInvolvedInProjectSql($connection);
             if ($userId !== null && $userId !== '' && is_numeric($userId)) {
-                $sql .= " AND (
-                    p.prj_manager = ?
-                    OR EXISTS (
-                        SELECT 1
-                        FROM fw_prj_team_members tm
-                        WHERE tm.project_id = p.id
-                          AND tm.user_id = ?
-                    )
-                )";
-                $params[] = (int)$userId;
-                $params[] = (int)$userId;
+                $sql .= $userInvolvementSql['sql'];
+                for ($i = 0; $i < $userInvolvementSql['binds']; $i++) {
+                    $params[] = (int)$userId;
+                }
             }
 
             // Подсчет общего количества
@@ -600,17 +594,10 @@ class ProjectController
             }
 
             if ($userId !== null && $userId !== '' && is_numeric($userId)) {
-                $countSql .= " AND (
-                    p.prj_manager = ?
-                    OR EXISTS (
-                        SELECT 1
-                        FROM fw_prj_team_members tm
-                        WHERE tm.project_id = p.id
-                          AND tm.user_id = ?
-                    )
-                )";
-                $countParams[] = (int)$userId;
-                $countParams[] = (int)$userId;
+                $countSql .= $userInvolvementSql['sql'];
+                for ($i = 0; $i < $userInvolvementSql['binds']; $i++) {
+                    $countParams[] = (int)$userId;
+                }
             }
 
             $connection = $this->database->getConnection();
@@ -3297,6 +3284,30 @@ class ProjectController
     private function projectForemanColumnPresent(\Doctrine\DBAL\Connection $connection): bool
     {
         return $this->taskAuth->projectForemanColumnPresent($connection);
+    }
+
+    /**
+     * Project list filter for ?user_id=: project manager, project foreman, or on the project team.
+     *
+     * @return array{sql: string, binds: int}
+     */
+    private function userInvolvedInProjectSql(\Doctrine\DBAL\Connection $connection): array
+    {
+        $foreman = $this->projectForemanColumnPresent($connection);
+
+        return [
+            'sql' => ' AND (
+                p.prj_manager = ?'
+                . ($foreman ? ' OR p.project_foreman_id = ?' : '')
+                . ' OR EXISTS (
+                    SELECT 1
+                    FROM fw_prj_team_members tm
+                    WHERE tm.project_id = p.id
+                      AND tm.user_id = ?
+                )
+            )',
+            'binds' => $foreman ? 3 : 2,
+        ];
     }
 
     private function projectGeoColumnsPresent(\Doctrine\DBAL\Connection $connection): bool

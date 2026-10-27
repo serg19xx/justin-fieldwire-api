@@ -4,6 +4,7 @@ namespace App\Controllers;
 
 use App\Database\Database;
 use App\Support\FrontendUrl;
+use App\Support\JwtToken;
 use App\Support\UserRoleFields;
 use App\Services\UserAuditService;
 use App\Services\EventLoggingService;
@@ -260,7 +261,7 @@ class AuthController
                     ],
                     'requires_2fa' => false,
                     'token' => $token,
-                    'expires_at' => date('c', time() + 3600) // 1 hour from now
+                    'expires_at' => date('c', time() + JwtToken::ACCESS_TTL_SECONDS)
                 ]
             ]);
             
@@ -559,23 +560,7 @@ class AuthController
      */
     private function generateToken(array $user): string
     {
-        $header = json_encode(['typ' => 'JWT', 'alg' => 'HS256']);
-        $payload = json_encode([
-            'user_id' => $user['id'],
-            'email' => $user['email'],
-            'name' => $user['first_name'] . ' ' . $user['last_name'],
-            'iat' => time(),
-            'exp' => time() + 3600 // 1 hour
-        ]);
-
-        $base64Header = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
-        $base64Payload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($payload));
-
-        $secret = $_ENV['JWT_SECRET'] ?? 'your-secret-key-change-in-production';
-        $signature = hash_hmac('sha256', $base64Header . "." . $base64Payload, $secret, true);
-        $base64Signature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
-
-        return $base64Header . "." . $base64Payload . "." . $base64Signature;
+        return JwtToken::issueAccessToken($user);
     }
 
     /**
@@ -1617,7 +1602,7 @@ class AuthController
                 'message' => 'Token refreshed successfully',
                 'data' => [
                     'token' => $newToken,
-                    'expires_at' => date('c', time() + 3600) // 1 hour
+                    'expires_at' => date('c', time() + JwtToken::ACCESS_TTL_SECONDS)
                 ]
             ]);
 

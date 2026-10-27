@@ -5,17 +5,29 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\PublishedScheduleService;
 use App\Services\WorkClockService;
 use App\Services\WorkerDayWorkService;
+use Doctrine\DBAL\Connection;
 use Flight;
 use Monolog\Logger;
 
 /**
- * Worker monthly timesheet: paid hours from Start day / End day punches, tasks with scheduled time.
- * Not Justin's manual Schedule notebook.
+ * Worker timesheet: paid hours from Start day / End day punches (each with an on-site photo),
+ * weekly view of the published PM Schedule, and the legacy monthly view of tasks.
  */
 class WorkerTimesheetController
 {
+    private const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
+
+    private const PHOTO_EXTENSIONS = [
+        'image/jpeg' => 'jpg',
+        'image/png' => 'png',
+        'image/webp' => 'webp',
+        'image/heic' => 'heic',
+        'image/heif' => 'heif',
+    ];
+
     public function __construct(
         private readonly Logger $logger
     ) {
@@ -189,7 +201,93 @@ class WorkerTimesheetController
     }
 
     /**
-     * POST /api/v1/me/work-day/check-in  { work_date, phase: start|end, lat?, lng? }
+     * GET /api/v1/me/work-week?week_start=YYYY-MM-DD (any day of the week; defaults to this week)
+     *
+     * Published PM Schedule for Monday..Sunday with the Start day / End day punches and weekly totals:
+     * hours scheduled (expected times minus the unpaid break), hours worked, and km from the PM.
+     */
+    public function myWeeklyTimesheet(): void
+    {
+        $userId = (int) (Flight::get('current_user')['id'] ?? 0);
+        if ($userId <= 0) {
+            $this->error('Unauthorized', 401);
+            return;
+        }
+
+        $clock = new WorkClockService();
+        $raw = isset($_GET['week_start']) ? trim((string) $_GET['week_start']) : $clock->todayYmd();
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw)) {
+            $this->error('week_start must be YYYY-MM-DD', 400);
+            return;
+        }
+        $monday = new \DateTimeImmutable($raw);
+        $monday = $monday->modify('-' . ((int) $monday->format('N') - 1) . ' days');
+        $from = $monday->format('Y-m-d');
+        $to = $monday->modify('+6 days')->format('Y-m-d');
+
+        try {
+            $conn = Database::getConnection();
+            $slotsByDay = [];
+            foreach ((new PublishedScheduleService())->slotsForUser($conn, $userId, $from, $to) as $slot) {
+                $slotsByDay[$slot['work_date']][] = $slot;
+            }
+
+            $workerDay = new WorkerDayWorkService($clock);
+            $dayWorkByDate = [];
+            if ($workerDay->tableExists($conn)) {
+                foreach ($workerDay->findRange($conn, $userId, $from, $to) as $row) {
+                    $formatted = $workerDay->formatRow($row);
+                    $dayWorkByDate[(string) $formatted['work_date']] = $formatted;
+                }
+            }
+
+            $days = [];
+            $totals = ['scheduled_hours' => 0.0, 'worked_hours' => 0.0, 'km' => 0.0];
+            for ($i = 0; $i < 7; $i++) {
+                $ymd = $monday->modify("+{$i} days")->format('Y-m-d');
+                $slots = $slotsByDay[$ymd] ?? [];
+                $dayWork = $dayWorkByDate[$ymd] ?? null;
+                $scheduled = $this->expectedDayHours($slots);
+                $worked = $dayWork !== null && $dayWork['hours'] !== null ? (float) $dayWork['hours'] : 0.0;
+                $km = 0.0;
+                foreach ($slots as $slot) {
+                    $km += PublishedScheduleService::parseKm($slot['distance_km']) ?? 0.0;
+                }
+                $totals['scheduled_hours'] += $scheduled;
+                $totals['worked_hours'] += $worked;
+                $totals['km'] += $km;
+                $days[] = [
+                    'work_date' => $ymd,
+                    'slots' => $slots,
+                    'day_work' => $dayWork,
+                    'scheduled_hours' => round($scheduled, 2),
+                    'worked_hours' => round($worked, 2),
+                    'km' => round($km, 2),
+                ];
+            }
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'OK',
+                'data' => [
+                    'week_start' => $from,
+                    'week_end' => $to,
+                    'today' => $clock->todayYmd(),
+                    'break_hours' => WorkerDayWorkService::BREAK_HOURS,
+                    'days' => $days,
+                    'totals' => array_map(static fn (float $v): float => round($v, 2), $totals),
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('myWeeklyTimesheet failed', ['error' => $e->getMessage()]);
+            $this->error('Failed to load timesheet', 500);
+        }
+    }
+
+    /**
+     * POST /api/v1/me/work-day/check-in (multipart/form-data)
+     * Fields: work_date, phase (start|end), lat?, lng?, photo (required image taken on site).
      */
     public function checkInMyWorkDay(): void
     {
@@ -199,26 +297,46 @@ class WorkerTimesheetController
             return;
         }
 
-        $body = json_decode(Flight::request()->getBody(), true);
-        if (!is_array($body)) {
-            $body = [];
+        $body = $_POST;
+        if ($body === []) {
+            $decoded = json_decode(Flight::request()->getBody(), true);
+            $body = is_array($decoded) ? $decoded : [];
         }
         $clock = new WorkClockService();
         $workDate = isset($body['work_date']) ? trim((string) $body['work_date']) : $clock->todayYmd();
         $phase = isset($body['phase']) ? (string) $body['phase'] : '';
         $lat = isset($body['lat']) && is_numeric($body['lat']) ? (float) $body['lat'] : null;
         $lng = isset($body['lng']) && is_numeric($body['lng']) ? (float) $body['lng'] : null;
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $workDate) || ($phase !== 'start' && $phase !== 'end')) {
+            $this->error('work_date (YYYY-MM-DD) and phase (start|end) are required', 400);
+            return;
+        }
 
+        $photo = $_FILES['photo'] ?? null;
+        if (!is_array($photo) || (int) ($photo['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            $this->error('A photo taken on site is required to ' . ($phase === 'start' ? 'start' : 'end') . ' the day', 422);
+            return;
+        }
+
+        $storedPath = null;
         try {
             $conn = Database::getConnection();
             $service = new WorkerDayWorkService($clock);
-            if (!$service->tableExists($conn)) {
+            if (!$service->tableExists($conn) || !$service->photoColumnsPresent($conn)) {
                 $this->error('Start day / End day is not available until database migration is applied', 503);
                 return;
             }
 
-            $result = $service->checkIn($conn, $userId, $workDate, $phase, $lat, $lng);
+            $stored = $this->storeDayPhoto($photo, $userId, $workDate, $phase);
+            if (!$stored['ok']) {
+                $this->error($stored['message'], $stored['status']);
+                return;
+            }
+            $storedPath = $stored['path'];
+
+            $result = $service->checkIn($conn, $userId, $workDate, $phase, $lat, $lng, $storedPath);
             if (!$result['ok']) {
+                $this->removeStoredPhoto($storedPath);
                 $this->error($result['message'], $result['status']);
                 return;
             }
@@ -230,9 +348,145 @@ class WorkerTimesheetController
                 'data' => ['day_work' => $result['row']],
             ]);
         } catch (\Throwable $e) {
+            if ($storedPath !== null) {
+                $this->removeStoredPhoto($storedPath);
+            }
             $this->logger->error('checkInMyWorkDay failed', ['error' => $e->getMessage()]);
             $this->error('Failed to record work day', 500);
         }
+    }
+
+    /**
+     * GET /api/v1/users/{userId}/work-day/{workDate}/photo/{phase} — Start day / End day photo.
+     * The worker themself, admins and project managers may view it.
+     */
+    public function workDayPhoto(int $targetUserId, string $workDate, string $phase): void
+    {
+        $actorId = (int) (Flight::get('current_user')['id'] ?? 0);
+        if ($actorId <= 0) {
+            $this->error('Unauthorized', 401);
+            return;
+        }
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $workDate) || ($phase !== 'start' && $phase !== 'end')) {
+            $this->error('Invalid work date or phase', 400);
+            return;
+        }
+
+        try {
+            $conn = Database::getConnection();
+            if (!$this->canViewUserWorkDay($conn, $actorId, $targetUserId)) {
+                $this->error('Forbidden', 403);
+                return;
+            }
+            $path = (new WorkerDayWorkService())->photoPath($conn, $targetUserId, $workDate, $phase);
+            $full = $path !== null ? $this->publicDir() . '/' . ltrim($path, '/') : null;
+            if ($full === null || !is_file($full)) {
+                $this->error('Photo not found', 404);
+                return;
+            }
+
+            $mime = function_exists('mime_content_type') ? (mime_content_type($full) ?: 'image/jpeg') : 'image/jpeg';
+            header('Content-Type: ' . $mime);
+            header('Content-Length: ' . (string) filesize($full));
+            header('Content-Disposition: inline; filename="' . basename($full) . '"');
+            header('Cache-Control: private, max-age=3600');
+            if (ob_get_level()) {
+                ob_end_clean();
+            }
+            readfile($full);
+        } catch (\Throwable $e) {
+            $this->logger->error('workDayPhoto failed', ['error' => $e->getMessage()]);
+            $this->error('Failed to load photo', 500);
+        }
+    }
+
+    private function canViewUserWorkDay(Connection $conn, int $actorId, int $targetUserId): bool
+    {
+        if ($actorId === $targetUserId) {
+            return true;
+        }
+        $role = $conn->executeQuery(
+            'SELECT role_code FROM fw_v_users WHERE id = ? AND archived_at IS NULL',
+            [$actorId]
+        )->fetchOne();
+
+        return in_array($role, ['admin', 'project_manager'], true);
+    }
+
+    /**
+     * @param array<string, mixed> $file Entry of $_FILES
+     * @return array{ok: true, path: string}|array{ok: false, status: int, message: string}
+     */
+    private function storeDayPhoto(array $file, int $userId, string $workDate, string $phase): array
+    {
+        $error = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($error !== UPLOAD_ERR_OK) {
+            return [
+                'ok' => false,
+                'status' => in_array($error, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true) ? 413 : 422,
+                'message' => 'Photo upload failed. Try again.',
+            ];
+        }
+        $size = (int) ($file['size'] ?? 0);
+        if ($size <= 0 || $size > self::MAX_PHOTO_BYTES) {
+            return ['ok' => false, 'status' => 422, 'message' => 'Photo must be an image up to 8 MB'];
+        }
+        $tmp = (string) ($file['tmp_name'] ?? '');
+        $mime = $tmp !== '' && function_exists('mime_content_type') ? (string) mime_content_type($tmp) : '';
+        $ext = self::PHOTO_EXTENSIONS[strtolower($mime)] ?? null;
+        if ($ext === null) {
+            return ['ok' => false, 'status' => 422, 'message' => 'Only image files are allowed (JPG, PNG, WebP, HEIC)'];
+        }
+
+        $relative = sprintf(
+            'uploads/worker-day-photos/u-%d/d-%s/%s_%d_%s.%s',
+            $userId,
+            $workDate,
+            $phase,
+            time(),
+            bin2hex(random_bytes(4)),
+            $ext
+        );
+        $full = $this->publicDir() . '/' . $relative;
+        $dir = dirname($full);
+        if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) {
+            return ['ok' => false, 'status' => 500, 'message' => 'Storage error'];
+        }
+        if (!move_uploaded_file($tmp, $full)) {
+            return ['ok' => false, 'status' => 500, 'message' => 'Storage error'];
+        }
+
+        return ['ok' => true, 'path' => $relative];
+    }
+
+    private function removeStoredPhoto(string $relative): void
+    {
+        @unlink($this->publicDir() . '/' . ltrim($relative, '/'));
+    }
+
+    private function publicDir(): string
+    {
+        return __DIR__ . '/../../public';
+    }
+
+    /**
+     * Expected paid hours for a day: earliest expected start to latest expected end, minus the unpaid break.
+     *
+     * @param list<array<string, mixed>> $slots
+     */
+    private function expectedDayHours(array $slots): float
+    {
+        $starts = array_filter(array_column($slots, 'expected_start_time'));
+        $ends = array_filter(array_column($slots, 'expected_end_time'));
+        if ($starts === [] || $ends === []) {
+            return 0.0;
+        }
+        $span = $this->scheduledHours(min($starts), max($ends));
+        if ($span === null) {
+            return 0.0;
+        }
+
+        return max(0.0, $span - WorkerDayWorkService::BREAK_HOURS);
     }
 
     private function trimAddress(mixed $raw): ?string

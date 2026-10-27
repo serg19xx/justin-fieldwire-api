@@ -13,9 +13,9 @@ use Monolog\Logger;
  */
 class CalendarController
 {
-    /** Projects the user manages, is on the team of, or is scheduled on. Binds the user id three times. */
+    /** Projects the user manages, is foreman of, is on the team of, or is scheduled on. Binds the user id four times. */
     private const PARTICIPANT_PROJECTS_SQL =
-        'SELECT p2.id FROM fw_projects p2 WHERE p2.prj_manager = ?'
+        'SELECT p2.id FROM fw_projects p2 WHERE p2.prj_manager = ? OR p2.project_foreman_id = ?'
         . ' UNION SELECT tm.project_id FROM fw_prj_team_members tm WHERE tm.user_id = ?'
         . ' UNION SELECT s.project_id FROM fw_worker_task_schedules s WHERE s.user_id = ?';
 
@@ -36,7 +36,7 @@ class CalendarController
         $events = $this->fetchEvents(
             '(e.user_id = ? OR (e.project_id IS NOT NULL AND e.project_id IN (' . self::PARTICIPANT_PROJECTS_SQL . ')))'
                 . $this->dateRangeSql('e', $from, $to),
-            $this->bindWithRange([$userId, $userId, $userId, $userId], $from, $to),
+            $this->bindWithRange([$userId, $userId, $userId, $userId, $userId], $from, $to),
             'global',
             $userId,
         );

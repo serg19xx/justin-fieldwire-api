@@ -3,6 +3,7 @@
 namespace App\Middleware;
 
 use App\Database\Database;
+use App\Support\JwtToken;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
@@ -42,7 +43,6 @@ class AuthMiddleware
         $token = substr($authorization, 7);
         $this->logger->info('Token extracted', [
             'token_length' => strlen($token),
-            'token_preview' => substr($token, 0, 20) . '...' . substr($token, -20),
             'has_dots' => substr_count($token, '.')
         ]);
         
@@ -106,6 +106,7 @@ class AuthMiddleware
 
             // Set user context for the request
             Flight::set('current_user', $user);
+            $this->renewTokenIfAging($payload, $user);
             $this->logger->info('Auth successful, returning true', ['user_id' => $user['id']]);
             
             return true;
@@ -126,97 +127,39 @@ class AuthMiddleware
     }
 
     /**
-     * Decode JWT token with HMAC verification
+     * Decode JWT token; null when the signature does not match or the token has expired.
      */
     private function decodeJWT(string $token): ?array
     {
         try {
-            $this->logger->info('decodeJWT: Starting', ['token_length' => strlen($token)]);
-            
-            // Split JWT into parts
-            $parts = explode('.', $token);
-            $this->logger->info('decodeJWT: Parts count', ['count' => count($parts)]);
-            
-            if (count($parts) !== 3) {
-                $this->logger->warning('decodeJWT: Invalid parts count');
-                return null;
+            $payload = JwtToken::decode($token);
+            if ($payload === null) {
+                $this->logger->warning('JWT rejected: bad signature, malformed or expired');
             }
-            
-            [$headerEncoded, $payloadEncoded, $signature] = $parts;
-            
-            // Decode header and payload
-            $header = str_replace(['-', '_'], ['+', '/'], $headerEncoded);
-            $payload = str_replace(['-', '_'], ['+', '/'], $payloadEncoded);
-            
-            // Add padding if needed
-            $header = str_pad($header, strlen($header) % 4, '=', STR_PAD_RIGHT);
-            $payload = str_pad($payload, strlen($payload) % 4, '=', STR_PAD_RIGHT);
-            
-            $headerDecoded = base64_decode($header);
-            $payloadDecoded = base64_decode($payload);
-            
-            if ($headerDecoded === false || $payloadDecoded === false) {
-                return null;
-            }
-            
-            $headerData = json_decode($headerDecoded, true);
-            $payloadData = json_decode($payloadDecoded, true);
-            
-            if (!$headerData || !$payloadData) {
-                return null;
-            }
-            
-            // Verify signature using original encoded parts
-            $secret = $_ENV['JWT_SECRET'] ?? 'your-secret-key-change-in-production';
-            $expectedSignature = hash_hmac('sha256', $headerEncoded . "." . $payloadEncoded, $secret, true);
-            $expectedSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($expectedSignature));
-            
-            $this->logger->info('JWT signature verification', [
-                'expected' => $expectedSignature,
-                'received' => $signature,
-                'match' => hash_equals($expectedSignature, $signature)
-            ]);
-            
-            // Temporarily disabled signature check - problem with signature verification
-            // if (!hash_equals($expectedSignature, $signature)) {
-            //     $this->logger->warning('JWT signature mismatch');
-            //     return null;
-            // }
 
-            $currentTime = time();
-
-            // Contractor temporary access: fail closed on signature / expiry
-            if (($payloadData['typ'] ?? null) === 'contractor_access') {
-                if (!hash_equals($expectedSignature, $signature)) {
-                    $this->logger->warning('Contractor JWT signature mismatch');
-                    return null;
-                }
-                if (!isset($payloadData['exp']) || (int) $payloadData['exp'] < $currentTime) {
-                    $this->logger->warning('Contractor JWT expired');
-                    return null;
-                }
-            }
-            
-            // Check expiration
-            $this->logger->info('JWT expiration check', [
-                'exp' => $payloadData['exp'] ?? 'not set',
-                'current_time' => $currentTime,
-                'is_expired' => !isset($payloadData['exp']) || $payloadData['exp'] < $currentTime
-            ]);
-            
-            // Temporarily disabled expiration check - testing
-            // if (!isset($payloadData['exp']) || $payloadData['exp'] < $currentTime) {
-            //     $this->logger->warning('JWT token expired or invalid exp');
-            //     return null;
-            // }
-            
-            $this->logger->info('JWT decoded successfully', ['user_id' => $payloadData['user_id'] ?? 'unknown']);
-            return $payloadData;
-        } catch (\Exception $e) {
+            return $payload;
+        } catch (\Throwable $e) {
             $this->logger->error('JWT decode error', [
                 'error' => $e->getMessage()
             ]);
             return null;
+        }
+    }
+
+    /**
+     * Sliding session: hand an active user a fresh token so they are not logged out mid-week.
+     */
+    private function renewTokenIfAging(array $payload, array $user): void
+    {
+        $issuedAt = (int) ($payload['iat'] ?? 0);
+        if ($issuedAt > 0 && time() - $issuedAt < JwtToken::RENEW_AFTER_SECONDS) {
+            return;
+        }
+
+        try {
+            header(JwtToken::RENEWED_TOKEN_HEADER . ': ' . JwtToken::issueAccessToken($user));
+        } catch (\Throwable $e) {
+            $this->logger->warning('Failed to renew access token', ['error' => $e->getMessage()]);
         }
     }
 

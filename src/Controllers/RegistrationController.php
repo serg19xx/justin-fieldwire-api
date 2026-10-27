@@ -5,6 +5,7 @@ namespace App\Controllers;
 use App\Database\Database;
 use App\Services\EventLoggingService;
 use App\Services\UserAuditService;
+use App\Support\JwtToken;
 use Doctrine\DBAL\Exception;
 use Flight;
 use Monolog\Logger;
@@ -347,11 +348,7 @@ class RegistrationController
             );
 
             // Генерируем JWT токен
-            $jwtToken = $this->generateToken([
-                'user_id' => $user['id'],
-                'email' => $user['email'],
-                'exp' => time() + 86400 // 24 часа
-            ]);
+            $jwtToken = JwtToken::issueAccessToken($user);
 
             $this->logger->info('Registration completed', [
                 'user_id' => $user['id'],
@@ -374,7 +371,7 @@ class RegistrationController
                         'job_title' => $user['job_title']
                     ],
                     'token' => $jwtToken,
-                    'expires_at' => date('c', time() + 86400)
+                    'expires_at' => date('c', time() + JwtToken::ACCESS_TTL_SECONDS)
                 ]
             ]);
 
@@ -408,22 +405,5 @@ class RegistrationController
                 'data' => null
             ], 500);
         }
-    }
-
-    /**
-     * Генерация JWT токена
-     */
-    private function generateToken(array $payload): string
-    {
-        $header = json_encode(['typ' => 'JWT', 'alg' => 'HS256']);
-        $payload = json_encode($payload);
-        
-        $base64Header = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($header));
-        $base64Payload = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($payload));
-        
-        $signature = hash_hmac('sha256', $base64Header . "." . $base64Payload, $_ENV['JWT_SECRET'] ?? 'default-secret', true);
-        $base64Signature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($signature));
-        
-        return $base64Header . "." . $base64Payload . "." . $base64Signature;
     }
 }
