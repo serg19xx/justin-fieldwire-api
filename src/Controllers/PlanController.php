@@ -2509,7 +2509,7 @@ class PlanController
                     t.name AS task_name, t.start_planned, t.end_planned
              FROM fw_task_field_photos p
              LEFT JOIN fw_prj_tasks t ON t.id = p.task_id AND t.project_id = p.project_id
-             WHERE p.project_id = ? AND p.deleted_at IS NULL
+             WHERE p.project_id = ? AND p.deleted_at IS NULL AND p.slot <> \'reference\'
              ORDER BY t.start_planned, t.name, p.work_date, p.slot, p.uploaded_at, p.id',
             [$projectId]
         )->fetchAllAssociative();

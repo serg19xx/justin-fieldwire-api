@@ -29,6 +29,9 @@ class TaskController
     /** Upper bound for the PM's "estimated time to complete" (365 days, in minutes). */
     private const TASK_ESTIMATE_MAX_MINUTES = 365 * 24 * 60;
 
+    /** PM-set task priority, most urgent first. */
+    private const TASK_PRIORITIES = ['urgent', 'high', 'medium', 'low'];
+
     /** Base columns always present on fw_prj_tasks. */
     private const TASK_DETAIL_BASE_COLUMNS = [
         'id', 'task_order', 'project_id', 'address', 'name', 'start_planned', 'end_planned',
@@ -41,6 +44,7 @@ class TaskController
     private const TASK_DETAIL_OPTIONAL_COLUMNS = [
         'category',
         'estimated_minutes',
+        'priority',
         'executor_type',
         'contractor_id',
         'inspector_id',
@@ -138,6 +142,27 @@ class TaskController
         $raw = $task['estimated_minutes'] ?? null;
 
         return $raw === null || (int) $raw <= 0 ? null : (int) $raw;
+    }
+
+    /**
+     * Lower-cased known priority from the request body; null clears it.
+     */
+    private function normalizeTaskPriority(mixed $raw): ?string
+    {
+        if (!is_string($raw)) {
+            return null;
+        }
+        $priority = strtolower(trim($raw));
+
+        return in_array($priority, self::TASK_PRIORITIES, true) ? $priority : null;
+    }
+
+    /**
+     * @param array<string, mixed> $task
+     */
+    private function priorityFromRow(array $task): ?string
+    {
+        return $this->normalizeTaskPriority($task['priority'] ?? null);
     }
 
     private function truncateTaskAddress(string $s): string
@@ -901,6 +926,9 @@ class TaskController
             if ($this->taskOptionalColumnPresent($connection, 'estimated_minutes')) {
                 $sql .= ', estimated_minutes';
             }
+            if ($this->taskOptionalColumnPresent($connection, 'priority')) {
+                $sql .= ', priority';
+            }
             if ($this->taskOptionalColumnPresent($connection, 'executor_type')) {
                 $sql .= ', executor_type';
             }
@@ -1042,6 +1070,7 @@ class TaskController
                         ? trim($task['category'])
                         : null,
                     'estimated_minutes' => $this->estimatedMinutesFromRow($task),
+                    'priority' => $this->priorityFromRow($task),
                     'start_planned' => $task['start_planned'],
                     'end_planned' => $task['end_planned'],
                     'start_time' => $task['start_time'] ?? null,
@@ -1309,6 +1338,7 @@ class TaskController
                     ? trim($task['category'])
                     : null,
                 'estimated_minutes' => $this->estimatedMinutesFromRow($task),
+                'priority' => $this->priorityFromRow($task),
                 'start_planned' => $task['start_planned'],
                 'end_planned' => $task['end_planned'],
                 'start_time' => $task['start_time'] ?? null,
@@ -1551,6 +1581,11 @@ class TaskController
             if ($this->taskOptionalColumnPresent($connection, 'estimated_minutes') && array_key_exists('estimated_minutes', $data)) {
                 $insertColumns[] = 'estimated_minutes';
                 $params[] = $this->normalizeEstimatedMinutes($data['estimated_minutes']);
+            }
+
+            if ($this->taskOptionalColumnPresent($connection, 'priority') && array_key_exists('priority', $data)) {
+                $insertColumns[] = 'priority';
+                $params[] = $this->normalizeTaskPriority($data['priority']);
             }
 
             if (!empty($executorAssignment['changed'])) {
@@ -2086,6 +2121,10 @@ class TaskController
             if (array_key_exists('estimated_minutes', $data) && $this->taskOptionalColumnPresent($connection, 'estimated_minutes')) {
                 $updateFields[] = 'estimated_minutes = ?';
                 $params[] = $this->normalizeEstimatedMinutes($data['estimated_minutes']);
+            }
+            if (array_key_exists('priority', $data) && $this->taskOptionalColumnPresent($connection, 'priority')) {
+                $updateFields[] = 'priority = ?';
+                $params[] = $this->normalizeTaskPriority($data['priority']);
             }
             if (isset($data['name'])) {
                 $updateFields[] = "name = ?";
@@ -2658,6 +2697,10 @@ class TaskController
                             'severity' => 'important'
                         ]
                     );
+
+                    if ($task['status'] === 'delayed_due_to_issue') {
+                        $this->fieldWorkNotifications->notifyTaskDelayed($projectId, $taskId, $task, $actorId);
+                    }
                 }
 
                 $notifyUrgent = $this->isTruthyRequestFlag($data['notify_urgent'] ?? $data['urgent'] ?? null);
@@ -3513,6 +3556,7 @@ class TaskController
                 ? trim($task['category'])
                 : null,
             'estimated_minutes' => $this->estimatedMinutesFromRow($task),
+            'priority' => $this->priorityFromRow($task),
             'start_planned' => $task['start_planned'],
             'end_planned' => $task['end_planned'],
             'start_time' => $task['start_time'] ?? null,

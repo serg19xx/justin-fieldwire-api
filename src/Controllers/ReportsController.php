@@ -220,6 +220,11 @@ class ReportsController
             $sql .= ' OR project_foreman_id = ?';
             $params[] = $userId;
         }
+        if (($user['role_code'] ?? null) === 'foreman') {
+            // Field foremen get read-only access to reports of projects where they work on tasks
+            $sql .= ' OR id IN (SELECT tm.project_id FROM fw_prj_team_members tm WHERE tm.user_id = ? AND tm.task_id IS NOT NULL)';
+            $params[] = $userId;
+        }
 
         try {
             $ids = $this->connection->fetchFirstColumn($sql, $params);

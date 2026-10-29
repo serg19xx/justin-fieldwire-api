@@ -15,8 +15,11 @@ class TaskFieldPhotoController
 {
     private const SLOT_BEFORE = 'before';
     private const SLOT_AFTER = 'after';
+    /** PM pictures that explain the task; not tied to a work day. */
+    private const SLOT_REFERENCE = 'reference';
     private const MAX_FILE_SIZE_BYTES = 5242880; // 5MB
     private const MAX_PHOTOS_PER_SLOT = 15;
+    private const MAX_PROJECT_GALLERY_PHOTOS = 1000;
 
     public function __construct(
         private readonly Logger $logger
@@ -48,14 +51,15 @@ class TaskFieldPhotoController
 
         $slotFilter = $this->normalizeSlot($_GET['slot'] ?? null);
         if (($_GET['slot'] ?? null) !== null && $slotFilter === null) {
-            $this->error('Invalid slot. Allowed: before, after', 422);
+            $this->error('Invalid slot. Allowed: before, after, reference', 422);
             return;
         }
 
-        $params = [$projectId, $taskId, $workDate];
+        // Before/after photos belong to one work day; PM reference pictures are listed for every day.
+        $params = [$projectId, $taskId, $workDate, self::SLOT_REFERENCE];
         $sql = 'SELECT id, project_id, task_id, work_date, slot, file_name, original_name, mime_type, file_size, uploaded_by, uploaded_at
                 FROM fw_task_field_photos
-                WHERE project_id = ? AND task_id = ? AND work_date = ? AND deleted_at IS NULL';
+                WHERE project_id = ? AND task_id = ? AND (work_date = ? OR slot = ?) AND deleted_at IS NULL';
         if ($slotFilter !== null) {
             $sql .= ' AND slot = ?';
             $params[] = $slotFilter;
@@ -67,6 +71,7 @@ class TaskFieldPhotoController
         $out = [
             self::SLOT_BEFORE => [],
             self::SLOT_AFTER => [],
+            self::SLOT_REFERENCE => [],
         ];
         foreach ($rows as $row) {
             $slot = (string) ($row['slot'] ?? '');
@@ -81,6 +86,61 @@ class TaskFieldPhotoController
             'status' => 'success',
             'message' => 'Task field photos retrieved',
             'data' => $out,
+        ]);
+    }
+
+    /**
+     * All task photos of a project (field before/after and PM reference pictures), newest first.
+     * PM/admin and the project foreman see every task; other users see tasks they are assigned to.
+     */
+    public function projectIndex(int $projectId): void
+    {
+        $conn = Database::getConnection();
+        $projectExists = $conn->executeQuery('SELECT id FROM fw_projects WHERE id = ?', [$projectId])->fetchOne();
+        if (!$projectExists) {
+            $this->error('Project not found', 404);
+            return;
+        }
+
+        $actorId = (int) Flight::get('current_user')['id'];
+        $auth = new TaskAuthorizationService();
+        $seesAllTasks = $auth->isProjectTaskManager($conn, $actorId, $projectId)
+            || $auth->canActAsProjectForemanOnTask($conn, $projectId, $actorId);
+
+        $sql = 'SELECT ph.id, ph.project_id, ph.task_id, ph.work_date, ph.slot, ph.file_name, ph.original_name,
+                       ph.mime_type, ph.file_size, ph.uploaded_by, ph.uploaded_at,
+                       t.name AS task_name, t.category AS task_category,
+                       TRIM(CONCAT(COALESCE(u.first_name, \'\'), \' \', COALESCE(u.last_name, \'\'))) AS uploaded_by_name
+                FROM fw_task_field_photos ph
+                INNER JOIN fw_prj_tasks t ON t.id = ph.task_id AND t.project_id = ph.project_id
+                LEFT JOIN fw_users u ON u.id = ph.uploaded_by
+                WHERE ph.project_id = ? AND ph.deleted_at IS NULL';
+        $params = [$projectId];
+        $taskFilter = (int) ($_GET['task_id'] ?? 0);
+        if ($taskFilter > 0) {
+            $sql .= ' AND ph.task_id = ?';
+            $params[] = $taskFilter;
+        }
+        if (!$seesAllTasks) {
+            $sql .= ' AND ph.task_id IN (SELECT tm.task_id FROM fw_prj_team_members tm WHERE tm.user_id = ? AND tm.task_id IS NOT NULL)';
+            $params[] = $actorId;
+        }
+        $sql .= ' ORDER BY ph.uploaded_at DESC, ph.id DESC LIMIT ' . self::MAX_PROJECT_GALLERY_PHOTOS;
+
+        $rows = $conn->executeQuery($sql, $params)->fetchAllAssociative();
+        $photos = array_map(fn (array $row): array => $this->formatPhotoRow($row) + [
+            'task_name' => (string) ($row['task_name'] ?? ''),
+            'task_category' => $row['task_category'] !== null && trim((string) $row['task_category']) !== ''
+                ? trim((string) $row['task_category'])
+                : null,
+            'uploaded_by_name' => trim((string) ($row['uploaded_by_name'] ?? '')),
+        ], $rows);
+
+        Flight::json([
+            'error_code' => 0,
+            'status' => 'success',
+            'message' => 'Project photos retrieved',
+            'data' => $photos,
         ]);
     }
 
@@ -106,14 +166,18 @@ class TaskFieldPhotoController
         }
         [$project, $task] = $context;
         $actorId = (int) Flight::get('current_user')['id'];
-        if (!$this->canUploadPhotos($conn, $actorId, (int) $task['id'], (int) $project['id'])) {
-            $this->error('Forbidden', 403);
-            return;
-        }
 
         $slot = $this->normalizeSlot($_POST['slot'] ?? $_GET['slot'] ?? null);
         if ($slot === null) {
-            $this->error('Invalid slot. Allowed: before, after', 422);
+            $this->error('Invalid slot. Allowed: before, after, reference', 422);
+            return;
+        }
+
+        $canUpload = $slot === self::SLOT_REFERENCE
+            ? (new TaskAuthorizationService())->isProjectTaskManager($conn, $actorId, (int) $project['id'])
+            : $this->canUploadPhotos($conn, $actorId, (int) $task['id'], (int) $project['id']);
+        if (!$canUpload) {
+            $this->error('Forbidden', 403);
             return;
         }
 
@@ -122,15 +186,20 @@ class TaskFieldPhotoController
             $this->error('Invalid work_date. Use YYYY-MM-DD', 422);
             return;
         }
-        if ($workDate === null) {
+        if ($slot === self::SLOT_REFERENCE) {
+            $workDate = (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format('Y-m-d');
+        } elseif ($workDate === null) {
             $workDate = $this->resolveWorkDateForTask($conn, (int) $task['id'], (int) $project['id'], null);
         }
 
-        $count = (int) $conn->executeQuery(
-            'SELECT COUNT(*) FROM fw_task_field_photos
-             WHERE project_id = ? AND task_id = ? AND work_date = ? AND slot = ? AND deleted_at IS NULL',
-            [$projectId, $taskId, $workDate, $slot]
-        )->fetchOne();
+        $countSql = 'SELECT COUNT(*) FROM fw_task_field_photos
+             WHERE project_id = ? AND task_id = ? AND slot = ? AND deleted_at IS NULL';
+        $countParams = [$projectId, $taskId, $slot];
+        if ($slot !== self::SLOT_REFERENCE) {
+            $countSql .= ' AND work_date = ?';
+            $countParams[] = $workDate;
+        }
+        $count = (int) $conn->executeQuery($countSql, $countParams)->fetchOne();
         if ($count >= self::MAX_PHOTOS_PER_SLOT) {
             $this->error('Maximum ' . self::MAX_PHOTOS_PER_SLOT . ' photos per section', 422);
             return;
@@ -310,7 +379,10 @@ class TaskFieldPhotoController
             $this->error('photoId does not belong to this project/task', 422);
             return;
         }
-        if (!$this->canDeletePhoto($conn, $actorId, (int) $task['id'], (int) $project['id'], (int) $photo['uploaded_by'])) {
+        $canDelete = (string) $photo['slot'] === self::SLOT_REFERENCE
+            ? (new TaskAuthorizationService())->isProjectTaskManager($conn, $actorId, (int) $project['id'])
+            : $this->canDeletePhoto($conn, $actorId, (int) $task['id'], (int) $project['id'], (int) $photo['uploaded_by']);
+        if (!$canDelete) {
             $this->error('Forbidden', 403);
             return;
         }
@@ -461,7 +533,7 @@ class TaskFieldPhotoController
             return null;
         }
         $slot = strtolower(trim($raw));
-        if ($slot === self::SLOT_BEFORE || $slot === self::SLOT_AFTER) {
+        if (in_array($slot, [self::SLOT_BEFORE, self::SLOT_AFTER, self::SLOT_REFERENCE], true)) {
             return $slot;
         }
 

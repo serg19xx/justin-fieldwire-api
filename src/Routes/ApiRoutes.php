@@ -13,6 +13,7 @@ use App\Controllers\TaskController;
 use App\Controllers\ProjectTeamController;
 use App\Controllers\ScheduleWeekController;
 use App\Controllers\WorkerTimesheetController;
+use App\Controllers\WorkerPayrollDayController;
 use App\Controllers\ScheduleEntryMessageController;
 use App\Controllers\ScheduleEntryDocumentController;
 use App\Controllers\TaskFieldPhotoController;
@@ -261,6 +262,27 @@ class ApiRoutes
             Flight::route('GET /api/v1/users/@user_id/work-day/@work_date/photo/@phase', function($user_id, $work_date, $phase) use ($workerTimesheetController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
                     $workerTimesheetController->workDayPhoto((int) $user_id, (string) $work_date, (string) $phase);
+                }
+            });
+            $workerPayrollDayController = new WorkerPayrollDayController($this->logger);
+            Flight::route('GET /api/v1/users/@user_id/payroll-days', function($user_id) use ($workerPayrollDayController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $workerPayrollDayController->listDays((int) $user_id);
+                }
+            });
+            Flight::route('PUT /api/v1/users/@user_id/payroll-days/@work_date', function($user_id, $work_date) use ($workerPayrollDayController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $workerPayrollDayController->saveDay((int) $user_id, (string) $work_date);
+                }
+            });
+            Flight::route('POST /api/v1/users/@user_id/payroll-days/@work_date/lock', function($user_id, $work_date) use ($workerPayrollDayController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $workerPayrollDayController->setLocked((int) $user_id, (string) $work_date, true);
+                }
+            });
+            Flight::route('POST /api/v1/users/@user_id/payroll-days/@work_date/unlock', function($user_id, $work_date) use ($workerPayrollDayController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $workerPayrollDayController->setLocked((int) $user_id, (string) $work_date, false);
                 }
             });
             Flight::route('GET /api/v1/me/work-day', function() use ($workerTimesheetController, $authMiddleware) {
@@ -1338,6 +1360,11 @@ class ApiRoutes
         });
 
         $taskFieldPhotoController = new TaskFieldPhotoController($this->logger);
+        Flight::route('GET /api/v1/projects/@project_id/field-photos', function($project_id) use ($authMiddleware, $taskFieldPhotoController) {
+            if ($authMiddleware->handle()) {
+                $taskFieldPhotoController->projectIndex((int) $project_id);
+            }
+        });
         Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/field-photos', function($project_id, $task_id) use ($authMiddleware, $taskFieldPhotoController) {
             if ($authMiddleware->handle()) {
                 $taskFieldPhotoController->index((int) $project_id, (int) $task_id);
@@ -1460,6 +1487,9 @@ class ApiRoutes
         // Task team members (including invited people)
         Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/team', function($project_id, $task_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canView((int) $project_id)) {
+                    return;
+                }
                 $taskController = new \App\Controllers\TaskController($this->logger);
                 $taskController->getTaskTeam((int)$project_id, (int)$task_id);
             }
@@ -1468,6 +1498,9 @@ class ApiRoutes
         // Plans (folders/files)
         Flight::route('GET /api/v1/plan/folders/tree', function() use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canView(isset($_GET['project_id']) ? (int) $_GET['project_id'] : null)) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->getFolderTree();
             }
@@ -1475,6 +1508,9 @@ class ApiRoutes
 
         Flight::route('POST /api/v1/plan/folders', function() use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManage((int) ((json_decode((string) file_get_contents('php://input'), true)['project_id'] ?? 0)))) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->createFolder();
             }
@@ -1482,6 +1518,9 @@ class ApiRoutes
 
         Flight::route('DELETE /api/v1/plan/folders/@folderId', function($folderId) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManagePlanFolder((int) $folderId)) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->deleteFolder((int)$folderId);
             }
@@ -1489,6 +1528,9 @@ class ApiRoutes
 
         Flight::route('GET /api/v1/plan/folders/@folderId/content', function($folderId) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canViewPlanFolder((int) $folderId)) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->getFolderContent((int)$folderId);
             }
@@ -1496,6 +1538,9 @@ class ApiRoutes
 
         Flight::route('POST /api/v1/plan/files/upload', function() use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManagePlanFolder((int) ($_POST['folder_id'] ?? 0))) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->uploadFile();
             }
@@ -1503,6 +1548,9 @@ class ApiRoutes
 
         Flight::route('DELETE /api/v1/plan/files/@fileId', function($fileId) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManagePlanFile((int) $fileId)) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->deleteFile((int)$fileId);
             }
@@ -1510,6 +1558,9 @@ class ApiRoutes
 
         Flight::route('GET /api/v1/plan/files/@fileId/download', function($fileId) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canViewPlanFile((int) $fileId)) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->downloadFile((int)$fileId);
             }
@@ -1518,6 +1569,9 @@ class ApiRoutes
         // File copy/move operations
         Flight::route('PUT /api/v1/plan/files/@fileId/move', function($fileId) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManagePlanFile((int) $fileId) || !\App\Support\ProjectAccessGuard::canManageTargetPlanFolder('folder_id')) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->moveFile((int)$fileId);
             }
@@ -1525,6 +1579,9 @@ class ApiRoutes
 
         Flight::route('POST /api/v1/plan/files/@fileId/copy', function($fileId) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManagePlanFile((int) $fileId) || !\App\Support\ProjectAccessGuard::canManageTargetPlanFolder('folder_id')) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->copyFile((int)$fileId);
             }
@@ -1533,6 +1590,9 @@ class ApiRoutes
         // Folder copy/move operations
         Flight::route('PUT /api/v1/plan/folders/@folderId/move', function($folderId) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManagePlanFolder((int) $folderId) || !\App\Support\ProjectAccessGuard::canManageTargetPlanFolder('parent_id')) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->moveFolder((int)$folderId);
             }
@@ -1540,6 +1600,9 @@ class ApiRoutes
 
         Flight::route('POST /api/v1/plan/folders/@folderId/copy', function($folderId) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManagePlanFolder((int) $folderId) || !\App\Support\ProjectAccessGuard::canManageTargetPlanFolder('parent_id')) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->copyFolder((int)$folderId);
             }
@@ -1548,6 +1611,9 @@ class ApiRoutes
         // File and folder rename operations
         Flight::route('PUT /api/v1/plan/files/@fileId/rename', function($fileId) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManagePlanFile((int) $fileId)) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->renameFile((int)$fileId);
             }
@@ -1555,6 +1621,9 @@ class ApiRoutes
 
         Flight::route('PUT /api/v1/plan/folders/@folderId/rename', function($folderId) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManagePlanFolder((int) $folderId)) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->renameFolder((int)$folderId);
             }
@@ -1563,6 +1632,9 @@ class ApiRoutes
         // File description update
         Flight::route('PUT /api/v1/plan/files/@fileId/description', function($fileId) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManagePlanFile((int) $fileId)) {
+                    return;
+                }
                 $planController = new \App\Controllers\PlanController($this->logger);
                 $planController->updateFileDescription((int)$fileId);
             }
@@ -1571,6 +1643,9 @@ class ApiRoutes
         // Project team routes
         Flight::route('GET /api/v1/projects/@project_id/team', function($project_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canView((int) $project_id)) {
+                    return;
+                }
                 $teamController = new \App\Controllers\ProjectTeamController($this->logger);
                 Flight::json($teamController->getTeamMembers((int)$project_id));
             }
@@ -1578,6 +1653,9 @@ class ApiRoutes
 
         Flight::route('POST /api/v1/projects/@project_id/team', function($project_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManage((int) $project_id)) {
+                    return;
+                }
                 $teamController = new \App\Controllers\ProjectTeamController($this->logger);
                 $result = $teamController->addTeamMember((int)$project_id);
                 $isError = ($result['status'] ?? '') === 'error';
@@ -1587,6 +1665,9 @@ class ApiRoutes
 
         Flight::route('PUT /api/v1/projects/@project_id/team/@team_member_id', function($project_id, $team_member_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManage((int) $project_id)) {
+                    return;
+                }
                 $teamController = new \App\Controllers\ProjectTeamController($this->logger);
                 Flight::json($teamController->updateTeamMember((int)$project_id, (int)$team_member_id));
             }
@@ -1594,6 +1675,9 @@ class ApiRoutes
 
         Flight::route('DELETE /api/v1/projects/@project_id/team/@team_member_id', function($project_id, $team_member_id) use ($authMiddleware) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canManage((int) $project_id)) {
+                    return;
+                }
                 $teamController = new \App\Controllers\ProjectTeamController($this->logger);
                 Flight::json($teamController->removeTeamMember((int)$project_id, (int)$team_member_id));
             }

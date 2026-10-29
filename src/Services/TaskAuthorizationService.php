@@ -55,6 +55,7 @@ class TaskAuthorizationService
         'contractor_id',
         'inspector_id',
         'category',
+        'priority',
     ];
 
     private const TASK_LEAD_ALLOWED_KEYS = [
@@ -66,6 +67,9 @@ class TaskAuthorizationService
         'field_notes',
         'notify_urgent',
     ];
+
+    /** Statuses only the PM may set; the foreman hands work over via ready_for_inspection. */
+    private const PM_ONLY_STATUSES = ['completed', 'done'];
 
     /**
      * Same lead detection as TaskController when resolving task_lead_id from fw_prj_team_members.
@@ -244,6 +248,20 @@ class TaskAuthorizationService
     }
 
     /**
+     * Foreman (assigned to the task or project foreman) may move a task through field statuses.
+     */
+    public function canForemanSetTaskStatus(Connection $conn, int $projectId, int $taskId, int $userId): bool
+    {
+        return $this->canActAsFieldForeman($conn, $taskId, $userId)
+            || $this->canActAsProjectForemanOnTask($conn, $projectId, $userId);
+    }
+
+    public function isPmOnlyStatus(mixed $status): bool
+    {
+        return is_string($status) && in_array(strtolower(trim($status)), self::PM_ONLY_STATUSES, true);
+    }
+
+    /**
      * Accountable foreman for field-work events: task override when different from project foreman.
      */
     public function resolveAccountableForemanUserId(Connection $conn, int $projectId, int $taskId): ?int
@@ -311,9 +329,14 @@ class TaskAuthorizationService
             }
         }
 
+        $allowedKeys = self::TASK_LEAD_ALLOWED_KEYS;
+        if ($this->canForemanSetTaskStatus($conn, $projectId, $taskId, $userId)) {
+            $allowedKeys[] = 'status';
+        }
+
         // task_lead — ignore null values for keys they cannot set (older clients)
         foreach (array_keys($data) as $key) {
-            if (($data[$key] ?? null) === null && !in_array($key, self::TASK_LEAD_ALLOWED_KEYS, true)) {
+            if (($data[$key] ?? null) === null && !in_array($key, $allowedKeys, true)) {
                 unset($data[$key]);
             }
         }
@@ -323,7 +346,7 @@ class TaskAuthorizationService
         }
 
         // task_lead
-        $forbidden = array_diff($presentKeys, self::TASK_LEAD_ALLOWED_KEYS);
+        $forbidden = array_diff($presentKeys, $allowedKeys);
         if ($forbidden !== []) {
             return [
                 'allowed' => false,
@@ -331,8 +354,27 @@ class TaskAuthorizationService
             ];
         }
 
+        if (array_key_exists('status', $data)) {
+            if ($data['status'] === null || $this->isPmOnlyStatus($data['status'])) {
+                return [
+                    'allowed' => false,
+                    'message' => 'Only the project manager can mark a task as completed. Use Ready For Inspection instead.',
+                ];
+            }
+            $currentStatus = $conn->executeQuery(
+                'SELECT status FROM fw_prj_tasks WHERE id = ? AND project_id = ? LIMIT 1',
+                [$taskId, $projectId]
+            )->fetchOne();
+            if ($this->isPmOnlyStatus($currentStatus)) {
+                return [
+                    'allowed' => false,
+                    'message' => 'This task is completed. Only the project manager can reopen it.',
+                ];
+            }
+        }
+
         $filtered = [];
-        foreach (self::TASK_LEAD_ALLOWED_KEYS as $key) {
+        foreach ($allowedKeys as $key) {
             if (array_key_exists($key, $data)) {
                 $filtered[$key] = $data[$key];
             }

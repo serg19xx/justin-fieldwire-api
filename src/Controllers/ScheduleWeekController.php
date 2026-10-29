@@ -401,6 +401,13 @@ class ScheduleWeekController
             ];
         }
 
+        $weekMonday = (new DateTimeImmutable((string) $week['week_start']))->format('Y-m-d');
+        $lockedDays = (new WorkerDayWorkService())->lockedDayKeys(
+            $conn,
+            $weekMonday,
+            (new DateTimeImmutable($weekMonday))->modify('+6 days')->format('Y-m-d')
+        );
+
         try {
             $conn->beginTransaction();
 
@@ -425,7 +432,19 @@ class ScheduleWeekController
             }
 
             $idsStillPresent = [];
+            // Rows of PM-locked worker days are frozen: never updated, inserted or removed here.
+            foreach ($existingRows as $row) {
+                $wd = $row['work_date'] instanceof \DateTimeInterface
+                    ? $row['work_date']->format('Y-m-d')
+                    : substr((string) $row['work_date'], 0, 10);
+                if (isset($lockedDays[(int) $row['user_id'] . '|' . $wd])) {
+                    $idsStillPresent[(int) $row['id']] = true;
+                }
+            }
             foreach ($normalized as $e) {
+                if (isset($lockedDays[$e['user_id'] . '|' . $e['work_date']])) {
+                    continue;
+                }
                 $slotKey = $e['user_id'] . '|' . $e['work_date'] . '|' . $e['day_part'];
                 if (isset($bySlotKey[$slotKey])) {
                     $existingId = (int) $bySlotKey[$slotKey]['id'];
@@ -875,6 +894,10 @@ class ScheduleWeekController
         $dayCheck = $clock->assertWorkDateIsToday($workDate);
         if (!$dayCheck['ok']) {
             $this->error($dayCheck['message'], 403);
+            return;
+        }
+        if ((new WorkerDayWorkService($clock))->isLocked($conn, $userId, $workDate)) {
+            $this->error('This day was locked by your project manager', 409);
             return;
         }
 

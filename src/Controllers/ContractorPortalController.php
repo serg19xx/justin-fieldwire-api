@@ -96,9 +96,10 @@ class ContractorPortalController
             $photos = [];
             try {
                 $photos = $connection->executeQuery(
-                    'SELECT id, project_id, task_id, work_date, slot, original_name, mime_type, size_bytes, created_at
+                    'SELECT id, project_id, task_id, work_date, slot, original_name, mime_type,
+                            file_size AS size_bytes, uploaded_at AS created_at
                      FROM fw_task_field_photos
-                     WHERE project_id = ? AND task_id = ?
+                     WHERE project_id = ? AND task_id = ? AND deleted_at IS NULL
                      ORDER BY work_date DESC, id DESC',
                     [$projectId, $taskId]
                 )->fetchAllAssociative();
@@ -163,9 +164,9 @@ class ContractorPortalController
             $taskId = (int) ($session['task_id'] ?? 0);
             $connection = $this->database->getConnection();
             $row = $connection->executeQuery(
-                'SELECT id, project_id, task_id, storage_path, original_name, mime_type
+                'SELECT id, project_id, task_id, file_name, original_name, mime_type
                  FROM fw_task_field_photos
-                 WHERE id = ? AND project_id = ? AND task_id = ?
+                 WHERE id = ? AND project_id = ? AND task_id = ? AND deleted_at IS NULL
                  LIMIT 1',
                 [$photoId, $projectId, $taskId]
             )->fetchAssociative();
@@ -176,14 +177,9 @@ class ContractorPortalController
                 return;
             }
 
-            $relative = ltrim((string) ($row['storage_path'] ?? ''), '/');
+            $relative = ltrim((string) ($row['file_name'] ?? ''), '/');
             $fullPath = dirname(__DIR__, 2) . '/public/' . $relative;
-            if (!is_file($fullPath)) {
-                // fallback common layout
-                $alt = dirname(__DIR__, 2) . '/' . $relative;
-                $fullPath = is_file($alt) ? $alt : $fullPath;
-            }
-            if (!is_file($fullPath)) {
+            if ($relative === '' || !is_file($fullPath)) {
                 Flight::json(['error_code' => 404, 'status' => 'error', 'message' => 'File missing on disk', 'data' => null], 404);
 
                 return;

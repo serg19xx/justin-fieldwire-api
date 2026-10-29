@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Database\Database;
+use App\Support\FrontendUrl;
 use App\ValueObjects\NotificationRequest;
 use Doctrine\DBAL\Connection;
 use Monolog\Logger;
@@ -161,6 +162,99 @@ class FieldWorkNotificationService
                 ]);
             }
         }
+    }
+
+    /**
+     * Texts the project manager when a field user moves a task to Delayed Due To Issue,
+     * so the PM checks the task notes for the reason.
+     *
+     * @param array<string, mixed> $task
+     */
+    public function notifyTaskDelayed(int $projectId, int $taskId, array $task, int $actorId): void
+    {
+        $managerId = $this->resolveProjectManagerId($projectId);
+        if ($managerId === null) {
+            $this->logger->info('No project manager to notify about delayed task', [
+                'project_id' => $projectId,
+                'task_id' => $taskId,
+            ]);
+            return;
+        }
+
+        $projectName = $this->resolveProjectName($projectId);
+        $taskName = (string) ($task['name'] ?? ('Task #' . $taskId));
+        $actorName = $this->resolveUserDisplayName($actorId);
+        $url = "/projects/{$projectId}/detail?section=tasks&task={$taskId}";
+        $link = FrontendUrl::resolve() . $url;
+
+        $title = "Task delayed: {$taskName}";
+        $lines = [
+            "{$actorName} set task \"{$taskName}\"" . ($projectName !== '' ? " (project: {$projectName})" : '') . ' to Delayed Due To Issue.',
+            'Please check the task notes for the reason.',
+        ];
+        $fieldNotes = trim((string) ($task['field_notes'] ?? ''));
+        if ($fieldNotes !== '') {
+            $lines[] = "Foreman notes: {$fieldNotes}";
+        }
+        $lines[] = "Open the task: {$link}";
+        $message = implode("\n", $lines);
+
+        $smsBody = "Task delayed due to issue: {$taskName}"
+            . ($projectName !== '' ? " ({$projectName})" : '')
+            . ". Set by {$actorName}. Check the task notes: {$link}";
+
+        try {
+            $this->dispatcher->dispatch(new NotificationRequest(
+                recipientUserId: $managerId,
+                type: 'TASK_DELAYED_DUE_TO_ISSUE',
+                title: $title,
+                message: $message,
+                channels: ['sms', 'email'],
+                priority: 'high',
+                senderUserId: $actorId,
+                correlationId: substr(sprintf('fw:delayed:%d:%d:u%d', $taskId, time(), $managerId), 0, 64),
+                url: $url,
+                data: [
+                    'project_id' => $projectId,
+                    'task_id' => $taskId,
+                    'status' => 'delayed_due_to_issue',
+                ],
+                emailSubject: $title,
+                emailHtml: $message,
+                smsBody: $smsBody,
+            ));
+        } catch (Throwable $e) {
+            $this->logger->error('Failed to notify project manager about delayed task', [
+                'recipient_id' => $managerId,
+                'project_id' => $projectId,
+                'task_id' => $taskId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function resolveProjectManagerId(int $projectId): ?int
+    {
+        try {
+            $managerId = $this->connection->fetchOne(
+                'SELECT p.prj_manager
+                 FROM fw_projects p
+                 INNER JOIN fw_users u ON u.id = p.prj_manager
+                 WHERE p.id = ?
+                   AND u.status = 1
+                   AND u.archived_at IS NULL
+                 LIMIT 1',
+                [$projectId]
+            );
+        } catch (Throwable $e) {
+            $this->logger->warning('Failed to resolve project manager for delayed task notify', [
+                'project_id' => $projectId,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+
+        return $managerId !== false && $managerId !== null && (int) $managerId > 0 ? (int) $managerId : null;
     }
 
     /** @return list<int> */

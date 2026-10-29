@@ -15,6 +15,13 @@ use Monolog\Logger;
  */
 class ProjectTeamController
 {
+    private const PERSONAL_MEMBER_FIELDS = [
+        'dob', 'gender', 'nationality', 'country_of_origin', 'emergency', 'additional_info',
+        'status_reason', 'status_details', 'full_img_url',
+        'invitation_status', 'invitation_sent_at', 'invitation_expires_at', 'invited_by',
+        'registration_completed_at', 'invitation_attempts', 'last_reminder_sent_at',
+    ];
+
     private $database;
     private $logger;
     private EventLoggingService $eventLoggingService;
@@ -189,6 +196,10 @@ class ProjectTeamController
             $teamMembers = $result->fetchAllAssociative();
 
             $formattedMembers = array_map([$this, 'formatTeamMember'], $teamMembers);
+            $accessService = new \App\Services\ProjectAccessService($connection);
+            if (!$accessService->isOfficeUser(\Flight::get('current_user'))) {
+                $formattedMembers = array_map([$this, 'withoutPersonalDetails'], $formattedMembers);
+            }
 
             $lastPage = ceil($total / $limit);
 
@@ -917,6 +928,21 @@ class ProjectTeamController
             'role_category' => $member['role_category'],
             'role_description' => $member['role_description']
         ];
+    }
+
+    /**
+     * Field and client users only need names, roles and work contacts of their teammates.
+     *
+     * @param array<string, mixed> $member
+     * @return array<string, mixed>
+     */
+    private function withoutPersonalDetails(array $member): array
+    {
+        foreach (self::PERSONAL_MEMBER_FIELDS as $field) {
+            unset($member[$field]);
+        }
+
+        return $member;
     }
 
     private function formatAvailableUser($user): array
