@@ -1276,6 +1276,12 @@ class ScheduleWeekController
                 : null,
             'created_at' => $week['created_at'] ?? null,
             'updated_at' => $week['updated_at'] ?? null,
+            // Workers read the snapshot, so a draft week that still has one must be published again
+            // (even with no rows left) or workers keep seeing the old days.
+            'has_published_snapshot' => (bool) Database::getConnection()->executeQuery(
+                'SELECT 1 FROM fw_worker_task_schedule_snapshots WHERE schedule_week_id = ? LIMIT 1',
+                [(int) $week['id']]
+            )->fetchOne(),
         ];
     }
 
