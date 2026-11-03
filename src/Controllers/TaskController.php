@@ -3169,33 +3169,31 @@ class TaskController
             $assignedUserIds = $assignedUsersResult->fetchFirstColumn();
             $assignedUserIds = array_map('intval', $assignedUserIds);
 
-            // Получаем занятых работников в других задачах (пересечение дат)
-            // Проверяем все задачи всех проектов, где есть пересечение дат
-            // Два периода пересекаются, если: (start1 <= end2) AND (end1 >= start2)
-            $busyUsersSql = "
-                SELECT DISTINCT tm.user_id
-                FROM fw_prj_team_members tm
-                INNER JOIN fw_prj_tasks t ON tm.task_id = t.id
-                WHERE tm.task_id IS NOT NULL
-                  AND tm.task_id != ?
-                  AND t.start_planned IS NOT NULL
-                  AND t.end_planned IS NOT NULL
-                  AND t.start_planned <= ?
-                  AND t.end_planned >= ?
-            ";
-            $busyUsersResult = $connection->executeQuery(
-                $busyUsersSql,
-                [
-                    $taskId,
-                    $endDate,    // task.start <= request.end
-                    $startDate   // task.end >= request.start
-                ]
-            );
-            $busyUserIds = $busyUsersResult->fetchFirstColumn();
-            $busyUserIds = array_map('intval', $busyUserIds);
+            // Workers on other tasks with overlapping dates (any project) stay selectable
+            // (a foreman can lead several tasks a day); they are returned with busy_tasks for the UI.
+            $busyRows = $connection->executeQuery(
+                "SELECT DISTINCT tm.user_id, t.id AS task_id, t.name AS task_name, t.project_id
+                 FROM fw_prj_team_members tm
+                 INNER JOIN fw_prj_tasks t ON tm.task_id = t.id
+                 WHERE tm.task_id IS NOT NULL
+                   AND tm.task_id != ?
+                   AND t.start_planned IS NOT NULL
+                   AND t.end_planned IS NOT NULL
+                   AND t.start_planned <= ?
+                   AND t.end_planned >= ?
+                 ORDER BY t.start_planned, t.id",
+                [$taskId, $endDate, $startDate]
+            )->fetchAllAssociative();
+            $busyTasksByUser = [];
+            foreach ($busyRows as $busyRow) {
+                $busyTasksByUser[(int) $busyRow['user_id']][] = [
+                    'id' => (int) $busyRow['task_id'],
+                    'name' => (string) $busyRow['task_name'],
+                    'project_id' => (int) $busyRow['project_id'],
+                ];
+            }
 
-            // Объединяем исключенных пользователей
-            $excludedUserIds = array_unique(array_merge($assignedUserIds, $busyUserIds));
+            $excludedUserIds = array_values(array_unique($assignedUserIds));
 
             // Строим SQL запрос для получения доступных работников
             $sql = "
@@ -3216,7 +3214,7 @@ class TaskController
                 LEFT JOIN fw_glob_roles r ON u.role_id = r.id
                 WHERE u.status = 1
                   AND u.archived_at IS NULL
-                  AND (r.code IS NULL OR r.code NOT IN ('admin', 'project_manager'))
+                  AND r.code IN ('foreman', 'worker', 'architect')
             ";
 
             $params = [];
@@ -3234,7 +3232,7 @@ class TaskController
             $workers = $result->fetchAllAssociative();
 
             // Форматируем результат
-            $formattedWorkers = array_map(function($worker) {
+            $formattedWorkers = array_map(function($worker) use ($busyTasksByUser) {
                 return [
                     'id' => (int)$worker['id'],
                     'user_id' => (int)$worker['user_id'],
@@ -3245,7 +3243,8 @@ class TaskController
                     'role_name' => $worker['role_name'] ?? null,
                     'role_code' => $worker['role_code'] ?? null,
                     'avatar_url' => $worker['avatar_url'] ?? null,
-                    'status' => (int)$worker['status']
+                    'status' => (int)$worker['status'],
+                    'busy_tasks' => $busyTasksByUser[(int) $worker['id']] ?? [],
                 ];
             }, $workers);
 
