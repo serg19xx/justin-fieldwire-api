@@ -17,6 +17,7 @@ use Monolog\Logger;
 class ClientCommunicationController
 {
     private const ALLOWED_ROLES = ['admin', 'project_manager'];
+    private const DEDUPE_WINDOW_DAYS = 7;
 
     public function __construct(
         private readonly Logger $logger,
@@ -237,8 +238,8 @@ class ClientCommunicationController
 
         $conn = Database::getConnection();
         $messageHash = hash('sha256', $payload['message']);
-        $actorId = (int) ((Flight::get('current_user') ?? [])['id'] ?? 0) ?: null;
-        $isLogAvailable = $this->isSmsLogAvailable($conn);
+        $actorId = $this->currentActorId();
+        $isLogAvailable = $this->isTableAvailable($conn, 'fw_client_sms_log');
 
         $results = [];
         $sent = 0;
@@ -265,7 +266,7 @@ class ClientCommunicationController
             $destination = $redirect['destination'];
 
             if (isset($phonesInRequest[$destination])
-                || ($isLogAvailable && $this->wasSmsSentRecently($conn, $destination, $messageHash))) {
+                || ($isLogAvailable && $this->wasSentRecently($conn, 'fw_client_sms_log', 'phone', $destination, 'message_hash', $messageHash))) {
                 $skipped++;
                 $results[] = ['id' => $id, 'success' => true, 'skipped' => true, 'sent_to' => $destination];
                 continue;
@@ -307,25 +308,53 @@ class ClientCommunicationController
         ]);
     }
 
-    private function isSmsLogAvailable(Connection $conn): bool
+    private function currentActorId(): ?int
+    {
+        $id = (int) ((Flight::get('current_user') ?? [])['id'] ?? 0);
+        return $id > 0 ? $id : null;
+    }
+
+    private function isTableAvailable(Connection $conn, string $table): bool
     {
         try {
-            return (bool) $conn->fetchOne("SHOW TABLES LIKE 'fw_client_sms_log'");
+            return (bool) $conn->fetchOne('SHOW TABLES LIKE ?', [$table]);
         } catch (\Throwable $e) {
-            $this->logger->warning('fw_client_sms_log check failed', ['error' => $e->getMessage()]);
+            $this->logger->warning('Comm log table check failed', ['table' => $table, 'error' => $e->getMessage()]);
             return false;
         }
     }
 
-    /** Same text to the same phone within the window is treated as already delivered (retries, double clicks). */
-    private function wasSmsSentRecently(Connection $conn, string $phone, string $messageHash): bool
-    {
+    /**
+     * Same campaign to the same recipient within the window counts as already delivered (retries, double clicks).
+     * Table and column names are internal constants, never user input.
+     */
+    private function wasSentRecently(
+        Connection $conn,
+        string $table,
+        string $recipientColumn,
+        string $recipient,
+        string $hashColumn,
+        string $hash,
+    ): bool {
         return (bool) $conn->fetchOne(
-            'SELECT 1 FROM fw_client_sms_log
-             WHERE phone = ? AND message_hash = ? AND sent_at >= NOW(3) - INTERVAL 24 HOUR
+            "SELECT 1 FROM {$table}
+             WHERE {$recipientColumn} = ? AND {$hashColumn} = ?
+               AND sent_at >= NOW(3) - INTERVAL " . self::DEDUPE_WINDOW_DAYS . ' DAY
              LIMIT 1',
-            [$phone, $messageHash]
+            [$recipient, $hash]
         );
+    }
+
+    /** A bulk email campaign is identified by its template, or by its subject (body when there is no subject). */
+    private function emailCampaignHash(array $payload): string
+    {
+        if ($payload['template_id'] !== '') {
+            return hash('sha256', 'template:' . $payload['template_id']);
+        }
+        if ($payload['subject'] !== '') {
+            return hash('sha256', 'subject:' . mb_strtolower($payload['subject']));
+        }
+        return hash('sha256', 'body:' . $payload['message']);
     }
 
     public function sendBulkEmail(string $type): void
@@ -352,9 +381,16 @@ class ClientCommunicationController
         ignore_user_abort(true);
         set_time_limit(0);
 
+        $conn = Database::getConnection();
+        $campaignHash = $this->emailCampaignHash($payload);
+        $actorId = $this->currentActorId();
+        $isLogAvailable = $this->isTableAvailable($conn, 'fw_client_email_log');
+
         $results = [];
         $sent = 0;
         $failed = 0;
+        $skipped = 0;
+        $emailsInRequest = [];
 
         foreach ($ids as $id) {
             $row = ClientRegistryContacts::fetchRow($type, $id);
@@ -372,6 +408,16 @@ class ClientCommunicationController
             }
 
             $redirect = ClientCommsTestRedirect::email($email);
+            $recipientKey = mb_strtolower(trim($redirect['destination']));
+
+            if (isset($emailsInRequest[$recipientKey])
+                || ($isLogAvailable && $this->wasSentRecently($conn, 'fw_client_email_log', 'email', $recipientKey, 'dedupe_hash', $campaignHash))) {
+                $skipped++;
+                $results[] = ['id' => $id, 'success' => true, 'skipped' => true, 'sent_to' => $redirect['destination']];
+                continue;
+            }
+            $emailsInRequest[$recipientKey] = true;
+
             $ok = $this->dispatchClientEmail(
                 $redirect['destination'],
                 ClientRegistryContacts::displayName($type, $row),
@@ -380,6 +426,15 @@ class ClientCommunicationController
 
             if ($ok) {
                 $sent++;
+                if ($isLogAvailable) {
+                    $conn->insert('fw_client_email_log', [
+                        'client_type' => $type,
+                        'client_id' => $id,
+                        'email' => $recipientKey,
+                        'dedupe_hash' => $campaignHash,
+                        'sent_by' => $actorId,
+                    ]);
+                }
                 $results[] = [
                     'id' => $id,
                     'success' => true,
@@ -397,6 +452,7 @@ class ClientCommunicationController
             'channel' => 'email',
             'sent' => $sent,
             'failed' => $failed,
+            'skipped' => $skipped,
             'results' => $results,
             'test_mode' => ClientCommsTestRedirect::isEnabled(),
             'template_id' => $payload['template_id'] !== '' ? $payload['template_id'] : null,

@@ -9,7 +9,12 @@ $dotenv->safeLoad();
 
 $conn = App\Database\Database::getConnection();
 
-$sql = (string) file_get_contents(__DIR__ . '/create-client-sms-log-table.sql');
-$conn->executeStatement($sql);
+$tables = [
+    'fw_client_sms_log' => 'create-client-sms-log-table.sql',
+    'fw_client_email_log' => 'create-client-email-log-table.sql',
+];
 
-echo 'TABLE fw_client_sms_log: ' . ($conn->fetchOne("SHOW TABLES LIKE 'fw_client_sms_log'") ? 'ok' : 'missing') . "\n";
+foreach ($tables as $table => $file) {
+    $conn->executeStatement((string) file_get_contents(__DIR__ . '/' . $file));
+    echo "TABLE {$table}: " . ($conn->fetchOne("SHOW TABLES LIKE '{$table}'") ? 'ok' : 'missing') . "\n";
+}
