@@ -4,11 +4,13 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Database\Database;
 use App\Services\EmailService;
 use App\Services\HumbleFaxService;
 use App\Services\TwilioService;
 use App\Support\ClientCommsTestRedirect;
 use App\Support\ClientRegistryContacts;
+use Doctrine\DBAL\Connection;
 use Flight;
 use Monolog\Logger;
 
@@ -229,9 +231,20 @@ class ClientCommunicationController
             return;
         }
 
+        // LiteSpeed stops PHP when the browser disconnects; finishing the batch keeps the log consistent.
+        ignore_user_abort(true);
+        set_time_limit(0);
+
+        $conn = Database::getConnection();
+        $messageHash = hash('sha256', $payload['message']);
+        $actorId = (int) ((Flight::get('current_user') ?? [])['id'] ?? 0) ?: null;
+        $isLogAvailable = $this->isSmsLogAvailable($conn);
+
         $results = [];
         $sent = 0;
         $failed = 0;
+        $skipped = 0;
+        $phonesInRequest = [];
 
         foreach ($ids as $id) {
             $row = ClientRegistryContacts::fetchRow($type, $id);
@@ -249,13 +262,32 @@ class ClientCommunicationController
             }
 
             $redirect = ClientCommsTestRedirect::phone($phone);
-            $ok = $this->twilioService->sendSms($redirect['destination'], $payload['message']);
+            $destination = $redirect['destination'];
+
+            if (isset($phonesInRequest[$destination])
+                || ($isLogAvailable && $this->wasSmsSentRecently($conn, $destination, $messageHash))) {
+                $skipped++;
+                $results[] = ['id' => $id, 'success' => true, 'skipped' => true, 'sent_to' => $destination];
+                continue;
+            }
+            $phonesInRequest[$destination] = true;
+
+            $ok = $this->twilioService->sendSms($destination, $payload['message']);
             if ($ok) {
                 $sent++;
+                if ($isLogAvailable) {
+                    $conn->insert('fw_client_sms_log', [
+                        'client_type' => $type,
+                        'client_id' => $id,
+                        'phone' => $destination,
+                        'message_hash' => $messageHash,
+                        'sent_by' => $actorId,
+                    ]);
+                }
                 $results[] = [
                     'id' => $id,
                     'success' => true,
-                    'sent_to' => $redirect['destination'],
+                    'sent_to' => $destination,
                     'original_to' => $redirect['original'],
                     'test_mode' => $redirect['test_mode'],
                 ];
@@ -269,9 +301,31 @@ class ClientCommunicationController
             'channel' => 'sms',
             'sent' => $sent,
             'failed' => $failed,
+            'skipped' => $skipped,
             'results' => $results,
             'test_mode' => ClientCommsTestRedirect::isEnabled(),
         ]);
+    }
+
+    private function isSmsLogAvailable(Connection $conn): bool
+    {
+        try {
+            return (bool) $conn->fetchOne("SHOW TABLES LIKE 'fw_client_sms_log'");
+        } catch (\Throwable $e) {
+            $this->logger->warning('fw_client_sms_log check failed', ['error' => $e->getMessage()]);
+            return false;
+        }
+    }
+
+    /** Same text to the same phone within the window is treated as already delivered (retries, double clicks). */
+    private function wasSmsSentRecently(Connection $conn, string $phone, string $messageHash): bool
+    {
+        return (bool) $conn->fetchOne(
+            'SELECT 1 FROM fw_client_sms_log
+             WHERE phone = ? AND message_hash = ? AND sent_at >= NOW(3) - INTERVAL 24 HOUR
+             LIMIT 1',
+            [$phone, $messageHash]
+        );
     }
 
     public function sendBulkEmail(string $type): void
@@ -294,6 +348,9 @@ class ClientCommunicationController
         if ($ids === null) {
             return;
         }
+
+        ignore_user_abort(true);
+        set_time_limit(0);
 
         $results = [];
         $sent = 0;
