@@ -295,6 +295,28 @@ class ApiRoutes
                     $workerTimesheetController->checkInMyWorkDay();
                 }
             });
+            Flight::route('POST /api/v1/me/work-day/extend', function() use ($workerTimesheetController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $workerTimesheetController->extendMyWorkDay();
+                }
+            });
+            Flight::route('POST /api/v1/me/work-day/site-arrival', function() use ($workerTimesheetController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $workerTimesheetController->arriveAtSite();
+                }
+            });
+            Flight::route('GET /api/v1/attendance', function() use ($workerPayrollDayController, $authMiddleware) {
+                if ($authMiddleware->handle()) {
+                    $workerPayrollDayController->attendance();
+                }
+            });
+            // Public one-tap links from worker SMS (token in the URL, no JWT)
+            Flight::route('GET /api/v1/worker-actions/@token', function($token) {
+                (new \App\Controllers\WorkerActionController($this->logger))->show((string) $token);
+            });
+            Flight::route('POST /api/v1/worker-actions/@token', function($token) {
+                (new \App\Controllers\WorkerActionController($this->logger))->perform((string) $token);
+            });
             Flight::route('GET /api/v1/users/@user_id/schedule', function($user_id) use ($scheduleWeekController, $authMiddleware) {
                 if ($authMiddleware->handle()) {
                     $scheduleWeekController->getUserSchedule((int) $user_id);

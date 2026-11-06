@@ -10,25 +10,27 @@ use Doctrine\DBAL\Connection;
 use Monolog\Logger;
 
 /**
- * SMS reminders for the worker Timesheet punch (Start day / End day).
+ * SMS reminders for the worker Timesheet punch (Start day / End day) and site transfers.
  *
- * A worker's scheduled day comes from the published PM Schedule (earliest expected start, latest
- * expected end of their slots that day). Weekdays without a published slot fall back to the
- * earliest task start_time and latest task end_time among open tasks covering the date.
- * Reminders go out GRACE_MINUTES after the scheduled start (no Start day yet) and after the
- * scheduled end (no End day yet).
+ * The scheduled day comes from AttendanceService::shiftsOn (published PM Schedule first, then the
+ * task plan; weekends included). Up to STEPS reminders go out every STEP_MINUTES after the scheduled
+ * start while there is no Start day, and after the end of the working window (scheduled end or the
+ * worker's "Working late" time) while there is no End day. A second site of the day gets one
+ * "arrived?" reminder. After the reminders, days still open are auto-closed by AttendanceService.
  */
 class WorkerDayReminderService
 {
-    public const GRACE_MINUTES = 5;
+    public const STEP_MINUTES = 15;
+    public const STEPS = 3;
     public const KIND_CLOCK_IN = 'clock_in';
     public const KIND_CLOCK_OUT = 'clock_out';
 
     private const TABLE = 'fw_worker_day_reminders';
-    private const CLOSED_TASK_STATUSES = ['completed', 'done'];
 
     private WorkClockService $clock;
     private WorkerDayWorkService $dayWork;
+    private AttendanceService $attendance;
+    private WorkerActionTokenService $tokens;
     private ?TwilioService $twilio;
 
     public function __construct(
@@ -38,6 +40,8 @@ class WorkerDayReminderService
     ) {
         $this->clock = $clock ?? new WorkClockService();
         $this->dayWork = new WorkerDayWorkService($this->clock);
+        $this->attendance = new AttendanceService($this->clock, $this->logger);
+        $this->tokens = new WorkerActionTokenService($this->clock);
         $this->twilio = $twilio;
     }
 
@@ -49,95 +53,15 @@ class WorkerDayReminderService
     }
 
     /**
-     * Field crew (foreman / worker) with a scheduled day on $ymd: PM Schedule first, task plan on weekdays.
-     *
-     * @return list<array{user_id: int, first_name: string, phone: ?string, start_time: string, end_time: string}>
-     */
-    public function scheduledWorkers(Connection $conn, string $ymd, bool $includeTaskPlan = true): array
-    {
-        $byUser = [];
-        if ($includeTaskPlan) {
-            foreach ($this->taskPlanWorkers($conn, $ymd) as $worker) {
-                $byUser[$worker['user_id']] = $worker;
-            }
-        }
-
-        $expected = array_filter(
-            (new PublishedScheduleService())->expectedDaysOn($conn, $ymd),
-            static fn (array $d): bool => $d['start_time'] !== null && $d['end_time'] !== null
-        );
-        if ($expected !== []) {
-            $ids = array_keys($expected);
-            $users = $conn->executeQuery(
-                "SELECT u.id AS user_id, u.first_name, u.phone
-                 FROM fw_users u
-                 INNER JOIN fw_glob_roles r ON r.id = u.role_id AND r.category = 'task'
-                 WHERE u.id IN (" . implode(', ', array_fill(0, count($ids), '?')) . ')
-                   AND u.status = 1
-                   AND u.archived_at IS NULL',
-                $ids
-            )->fetchAllAssociative();
-            foreach ($users as $u) {
-                $uid = (int) $u['user_id'];
-                $byUser[$uid] = [
-                    'user_id' => $uid,
-                    'first_name' => trim((string) ($u['first_name'] ?? '')),
-                    'phone' => $u['phone'] !== null ? (string) $u['phone'] : null,
-                    'start_time' => (string) $expected[$uid]['start_time'],
-                    'end_time' => (string) $expected[$uid]['end_time'],
-                ];
-            }
-        }
-
-        ksort($byUser);
-
-        return array_values($byUser);
-    }
-
-    /**
-     * @return list<array{user_id: int, first_name: string, phone: ?string, start_time: string, end_time: string}>
-     */
-    private function taskPlanWorkers(Connection $conn, string $ymd): array
-    {
-        $placeholders = implode(', ', array_fill(0, count(self::CLOSED_TASK_STATUSES), '?'));
-        $rows = $conn->executeQuery(
-            "SELECT u.id AS user_id, u.first_name, u.phone,
-                    MIN(t.start_time) AS start_time, MAX(t.end_time) AS end_time
-             FROM fw_prj_team_members tm
-             INNER JOIN fw_prj_tasks t ON t.id = tm.task_id
-             INNER JOIN fw_users u ON u.id = tm.user_id
-             INNER JOIN fw_glob_roles r ON r.id = u.role_id AND r.category = 'task'
-             WHERE t.start_planned IS NOT NULL
-               AND DATE(t.start_planned) <= ?
-               AND DATE(COALESCE(t.end_planned, t.start_planned)) >= ?
-               AND t.start_time IS NOT NULL
-               AND t.end_time IS NOT NULL
-               AND (t.status IS NULL OR t.status NOT IN ({$placeholders}))
-               AND u.status = 1
-               AND u.archived_at IS NULL
-             GROUP BY u.id, u.first_name, u.phone
-             ORDER BY u.id",
-            array_merge([$ymd, $ymd], self::CLOSED_TASK_STATUSES)
-        )->fetchAllAssociative();
-
-        return array_map(static fn (array $r): array => [
-            'user_id' => (int) $r['user_id'],
-            'first_name' => trim((string) ($r['first_name'] ?? '')),
-            'phone' => $r['phone'] !== null ? (string) $r['phone'] : null,
-            'start_time' => substr((string) $r['start_time'], 0, 5),
-            'end_time' => substr((string) $r['end_time'], 0, 5),
-        ], $rows);
-    }
-
-    /**
-     * Evaluate reminders for today and send them (or only report with $send = false).
+     * Evaluate reminders for today and send them (or only report with $send = false), then auto-close.
      *
      * @return array{
      *   work_date: string,
      *   now: string,
      *   skipped_reason: ?string,
      *   checked: int,
-     *   actions: list<array<string, mixed>>
+     *   actions: list<array<string, mixed>>,
+     *   auto_closed: list<array<string, mixed>>
      * }
      */
     public function run(Connection $conn, bool $send, ?\DateTimeImmutable $now = null): array
@@ -150,6 +74,7 @@ class WorkerDayReminderService
             'skipped_reason' => null,
             'checked' => 0,
             'actions' => [],
+            'auto_closed' => [],
         ];
 
         if (!$this->dayWork->tableExists($conn) || !$this->tableExists($conn)) {
@@ -157,42 +82,53 @@ class WorkerDayReminderService
             return $result;
         }
 
-        $isWeekday = (int) $now->format('N') < 6;
-        foreach ($this->scheduledWorkers($conn, $ymd, $isWeekday) as $worker) {
+        $hasAttendance = $this->attendance->isAvailable($conn);
+        foreach ($this->attendance->shiftsOn($conn, $ymd) as $worker) {
             $result['checked']++;
-            $kind = $this->dueReminderKind($conn, $worker, $ymd, $now);
-            if ($kind === null || $this->alreadyRecorded($conn, $worker['user_id'], $ymd, $kind)) {
+            $row = $this->dayWork->findDayRow($conn, $worker['user_id'], $ymd);
+            if ($row !== null && !empty($row['locked_at'])) {
                 continue;
             }
 
-            $phone = PhoneNormalizer::toE164($worker['phone'], false);
-            $scheduledTime = $kind === self::KIND_CLOCK_IN ? $worker['start_time'] : $worker['end_time'];
-            $action = [
-                'user_id' => $worker['user_id'],
-                'kind' => $kind,
-                'scheduled_time' => $scheduledTime,
-                'phone' => $phone,
-                'body' => $this->messageBody($kind, $worker['first_name'], $scheduledTime),
-            ];
-
-            if (!$send) {
-                $result['actions'][] = $action + ['status' => 'dry_run'];
-                continue;
-            }
-
-            if (!$this->claim($conn, $worker['user_id'], $ymd, $kind, $scheduledTime, $phone)) {
-                continue;
-            }
-            $status = $phone === null ? 'no_phone' : ($this->twilio()->sendSms($phone, $action['body']) ? 'sent' : 'failed');
-            $this->updateStatus($conn, $worker['user_id'], $ymd, $kind, $status);
-            if ($status !== 'sent') {
-                $this->logger->warning('Work day reminder not delivered', [
+            foreach ($this->dueReminders($conn, $worker, $row, $ymd, $now, $hasAttendance) as $due) {
+                if ($this->alreadyRecorded($conn, $worker['user_id'], $ymd, $due['kind'])) {
+                    continue;
+                }
+                $phone = PhoneNormalizer::toE164($worker['phone'], false);
+                $action = [
                     'user_id' => $worker['user_id'],
-                    'kind' => $kind,
-                    'status' => $status,
-                ]);
+                    'kind' => $due['kind'],
+                    'scheduled_time' => $due['scheduled_time'],
+                    'phone' => $phone,
+                ];
+
+                if (!$send) {
+                    $result['actions'][] = $action + [
+                        'body' => $this->messageBody($conn, $worker, $ymd, $due, false),
+                        'status' => 'dry_run',
+                    ];
+                    continue;
+                }
+
+                if (!$this->claim($conn, $worker['user_id'], $ymd, $due['kind'], $due['scheduled_time'], $phone)) {
+                    continue;
+                }
+                $body = $this->messageBody($conn, $worker, $ymd, $due, $phone !== null);
+                $status = $phone === null ? 'no_phone' : ($this->twilio()->sendSms($phone, $body) ? 'sent' : 'failed');
+                $this->updateStatus($conn, $worker['user_id'], $ymd, $due['kind'], $status);
+                if ($status !== 'sent') {
+                    $this->logger->warning('Work day reminder not delivered', [
+                        'user_id' => $worker['user_id'],
+                        'kind' => $due['kind'],
+                        'status' => $status,
+                    ]);
+                }
+                $result['actions'][] = $action + ['body' => $body, 'status' => $status];
             }
-            $result['actions'][] = $action + ['status' => $status];
+        }
+
+        if ($hasAttendance) {
+            $result['auto_closed'] = $this->attendance->autoClose($conn, $now, $send);
         }
 
         return $result;
@@ -200,39 +136,151 @@ class WorkerDayReminderService
 
     /**
      * @param array{user_id: int, start_time: string, end_time: string} $worker
+     * @param array<string, mixed>|null $row
+     * @return list<array<string, mixed>>
      */
-    private function dueReminderKind(Connection $conn, array $worker, string $ymd, \DateTimeImmutable $now): ?string
-    {
+    private function dueReminders(
+        Connection $conn,
+        array $worker,
+        ?array $row,
+        string $ymd,
+        \DateTimeImmutable $now,
+        bool $hasAttendance,
+    ): array {
         $tz = $this->clock->timezone();
         $start = new \DateTimeImmutable($ymd . ' ' . $worker['start_time'], $tz);
         $end = new \DateTimeImmutable($ymd . ' ' . $worker['end_time'], $tz);
         if ($end <= $start) {
-            return null;
+            return [];
         }
 
-        $grace = new \DateInterval('PT' . self::GRACE_MINUTES . 'M');
-        $row = $this->dayWork->findDayRow($conn, $worker['user_id'], $ymd);
         $hasStart = !empty($row['work_start_at']);
         $hasEnd = !empty($row['work_end_at']);
+        $out = [];
 
-        if (!$hasStart && $now >= $start->add($grace) && $now < $end) {
-            return self::KIND_CLOCK_IN;
-        }
-        if ($hasStart && !$hasEnd && $now >= $end->add($grace)) {
-            return self::KIND_CLOCK_OUT;
+        if (!$hasStart && empty($row['adjusted_start_time']) && $now < $end) {
+            $step = $this->stepAt($start, $now);
+            if ($step > 0) {
+                $out[] = [
+                    'template' => 'clock_in',
+                    'step' => $step,
+                    'kind' => $step === 1 ? self::KIND_CLOCK_IN : self::KIND_CLOCK_IN . '_' . $step,
+                    'scheduled_time' => $worker['start_time'],
+                ];
+            }
         }
 
-        return null;
+        if (
+            $hasStart
+            && !$hasEnd
+            && empty($row['adjusted_end_time'])
+            && empty($row['extended_open'])
+            && ($row['end_source'] ?? null) !== WorkerDayWorkService::SOURCE_PM
+        ) {
+            $base = $hasAttendance ? $this->attendance->clockOutBase($ymd, $worker, $row) : $end;
+            $step = $this->stepAt($base, $now);
+            if ($step > 0) {
+                $extended = $base > $end;
+                $out[] = [
+                    'template' => 'clock_out',
+                    'step' => $step,
+                    'kind' => $extended
+                        ? 'out' . $base->format('Hi') . '_' . $step
+                        : ($step === 1 ? self::KIND_CLOCK_OUT : self::KIND_CLOCK_OUT . '_' . $step),
+                    'scheduled_time' => $base->format('H:i'),
+                    'extended' => $extended,
+                    'end_time' => $worker['end_time'],
+                    'close_at' => $base->modify('+' . AttendanceService::AUTO_CLOSE_MINUTES . ' minutes')->format('H:i'),
+                    'with_link' => $hasAttendance,
+                ];
+            }
+        }
+
+        if ($hasAttendance && $hasStart && !$hasEnd && $this->attendance->siteEventsAvailable($conn)) {
+            foreach ($this->attendance->daySites($conn, $worker['user_id'], $ymd) as $site) {
+                if ($site['is_first'] || $site['arrived_at'] !== null || $site['expected_start_time'] === null) {
+                    continue;
+                }
+                $siteStart = new \DateTimeImmutable($ymd . ' ' . $site['expected_start_time'], $tz);
+                if ($now < $siteStart->modify('+' . AttendanceService::SITE_GRACE_MINUTES . ' minutes')) {
+                    continue;
+                }
+                if ($site['expected_end_time'] !== null && $now >= new \DateTimeImmutable($ymd . ' ' . $site['expected_end_time'], $tz)) {
+                    continue;
+                }
+                $out[] = [
+                    'template' => 'site',
+                    'step' => 1,
+                    'kind' => 'site_' . $site['project_id'],
+                    'scheduled_time' => $site['expected_start_time'],
+                    'project_id' => $site['project_id'],
+                    'project_name' => $site['project_name'] ?? ('Project #' . $site['project_id']),
+                ];
+            }
+        }
+
+        return $out;
     }
 
-    private function messageBody(string $kind, string $firstName, string $scheduledTime): string
+    /** Reminder step 1..STEPS due at $now for a window that started at $base; 0 when none is due. */
+    private function stepAt(\DateTimeImmutable $base, \DateTimeImmutable $now): int
     {
-        $greeting = $firstName !== '' ? "Hi {$firstName}, " : 'Hi, ';
-        $link = FrontendUrl::resolve() . '/tasks/timesheet';
+        $minutes = intdiv($now->getTimestamp() - $base->getTimestamp(), 60);
+        if ($minutes < self::STEP_MINUTES || $minutes >= self::STEP_MINUTES * (self::STEPS + 1)) {
+            return 0;
+        }
 
-        return $kind === self::KIND_CLOCK_IN
-            ? "{$greeting}your work day was scheduled to start at {$scheduledTime}. Please clock in (Start day): {$link}"
-            : "{$greeting}your work day was scheduled to end at {$scheduledTime}. Please clock out (End day): {$link}";
+        return min(self::STEPS, intdiv($minutes, self::STEP_MINUTES));
+    }
+
+    /**
+     * @param array{user_id: int, first_name: string} $worker
+     * @param array<string, mixed> $due
+     */
+    private function messageBody(Connection $conn, array $worker, string $ymd, array $due, bool $createLinks): string
+    {
+        $name = $worker['first_name'] !== '' ? "Hi {$worker['first_name']}, " : 'Hi, ';
+        $timesheet = FrontendUrl::resolve() . '/tasks/timesheet';
+        $step = (int) $due['step'];
+        $prefix = $step >= self::STEPS ? 'Last reminder: ' : ($step > 1 ? "Reminder {$step} of " . self::STEPS . ': ' : '');
+
+        if ($due['template'] === 'clock_in') {
+            return $step === 1
+                ? "{$name}your shift started at {$due['scheduled_time']}. Please tap Start day: {$timesheet}"
+                : "{$prefix}{$name}you have not started your day (shift started at {$due['scheduled_time']}). Tap Start day: {$timesheet}";
+        }
+
+        if ($due['template'] === 'site') {
+            $link = $this->actionLink($conn, $worker['user_id'], $ymd, WorkerActionTokenService::ACTION_ARRIVE, (int) $due['project_id'], $createLinks)
+                ?? $timesheet;
+
+            return "{$name}you are scheduled at {$due['project_name']} from {$due['scheduled_time']}. "
+                . "When you get there, tap to confirm arrival: {$link}";
+        }
+
+        $what = !empty($due['extended']) ? 'your extended time' : 'your shift';
+        $text = "{$prefix}{$name}{$what} ended at {$due['scheduled_time']}. Please tap End day: {$timesheet}";
+        if (!empty($due['with_link'])) {
+            $link = $this->actionLink($conn, $worker['user_id'], $ymd, WorkerActionTokenService::ACTION_EXTEND, null, $createLinks);
+            if ($link !== null) {
+                $text .= " Still working? Tap: {$link}";
+            }
+            $text .= " If you do not clock out by {$due['close_at']}, the day will be closed at {$due['end_time']}.";
+        }
+
+        return $text;
+    }
+
+    private function actionLink(Connection $conn, int $userId, string $ymd, string $action, ?int $projectId, bool $create): ?string
+    {
+        if (!$this->tokens->tableExists($conn)) {
+            return null;
+        }
+        if (!$create) {
+            return '[one-tap link]';
+        }
+
+        return WorkerActionTokenService::url($this->tokens->create($conn, $userId, $ymd, $action, $projectId));
     }
 
     private function alreadyRecorded(Connection $conn, int $userId, string $ymd, string $kind): bool

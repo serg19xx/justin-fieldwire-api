@@ -42,6 +42,21 @@ class PublishedScheduleService
     }
 
     /**
+     * Published slots of every worker in a date range (same shape as slotsForUser).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function slotsInRange(Connection $conn, string $fromYmd, string $toYmd): array
+    {
+        $rows = $conn->executeQuery(
+            self::SLOT_SELECT . ' WHERE s.work_date >= ? AND s.work_date <= ?' . self::SLOT_ORDER,
+            [$fromYmd, $toYmd]
+        )->fetchAllAssociative();
+
+        return array_map(fn (array $r): array => $this->formatSlot($r), $rows);
+    }
+
+    /**
      * Field crew with published slots on $ymd and their expected day: earliest start, latest end.
      *
      * @return array<int, array{start_time: ?string, end_time: ?string}> keyed by user id

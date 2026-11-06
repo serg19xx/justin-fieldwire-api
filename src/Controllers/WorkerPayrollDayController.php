@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\AttendanceService;
 use App\Services\WorkClockService;
 use App\Services\WorkerDayWorkService;
 use Doctrine\DBAL\Connection;
@@ -18,6 +19,8 @@ use Monolog\Logger;
 class WorkerPayrollDayController
 {
     private const MAX_RANGE_DAYS = 62;
+
+    private const MAX_ATTENDANCE_DAYS = 31;
 
     private const NOTE_MAX_LEN = 2000;
 
@@ -98,6 +101,12 @@ class WorkerPayrollDayController
             $this->error('payroll_note must not exceed ' . self::NOTE_MAX_LEN . ' characters', 400);
             return;
         }
+        $earlyLeave = $payload['early_leave'] ?? null;
+        if ($earlyLeave !== null && !is_bool($earlyLeave)) {
+            $this->error('early_leave must be a boolean or null', 400);
+            return;
+        }
+        $reviewed = ($payload['reviewed'] ?? false) === true;
 
         try {
             $conn = Database::getConnection();
@@ -112,7 +121,9 @@ class WorkerPayrollDayController
                 $start,
                 $end,
                 $note === '' ? null : $note,
-                $actorId
+                $actorId,
+                $earlyLeave,
+                $reviewed
             );
             $this->respond($result, 'Day saved');
         } catch (\Throwable $e) {
@@ -149,9 +160,49 @@ class WorkerPayrollDayController
     }
 
     /**
-     * Office roles only; target must be an active user. Sends the error response on failure.
+     * GET /api/v1/attendance?from=YYYY-MM-DD&to=YYYY-MM-DD
+     * Every scheduled or punched worker-day with shift, punches, paid times, sites and open issues.
      */
-    private function guard(Connection $conn, int $userId): bool
+    public function attendance(): void
+    {
+        $from = Flight::request()->query['from'] ?? null;
+        $to = Flight::request()->query['to'] ?? null;
+        if (!is_string($from) || !is_string($to) || !$this->isYmd($from) || !$this->isYmd($to) || $from > $to) {
+            $this->error('from and to (YYYY-MM-DD, from <= to) are required', 400);
+            return;
+        }
+        $days = (int) (new \DateTimeImmutable($from))->diff(new \DateTimeImmutable($to))->days + 1;
+        if ($days > self::MAX_ATTENDANCE_DAYS) {
+            $this->error('Range is limited to ' . self::MAX_ATTENDANCE_DAYS . ' days', 400);
+            return;
+        }
+
+        try {
+            $conn = Database::getConnection();
+            if (!$this->isOfficeActor($conn)) {
+                $this->error('Forbidden', 403);
+                return;
+            }
+            $clock = new WorkClockService();
+            $attendance = new AttendanceService($clock, $this->logger);
+
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'OK',
+                'data' => [
+                    'today' => $clock->todayYmd(),
+                    'attendance_available' => $attendance->isAvailable($conn),
+                    'entries' => $attendance->report($conn, $from, $to),
+                ],
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('attendance report failed', ['error' => $e->getMessage()]);
+            $this->error('Failed to load attendance', 500);
+        }
+    }
+
+    private function isOfficeActor(Connection $conn): bool
     {
         $actorId = (int) (Flight::get('current_user')['id'] ?? 0);
         $role = $actorId > 0
@@ -160,7 +211,16 @@ class WorkerPayrollDayController
                 [$actorId]
             )->fetchOne()
             : null;
-        if (!in_array($role, ['admin', 'project_manager'], true)) {
+
+        return in_array($role, ['admin', 'project_manager'], true);
+    }
+
+    /**
+     * Office roles only; target must be an active user. Sends the error response on failure.
+     */
+    private function guard(Connection $conn, int $userId): bool
+    {
+        if (!$this->isOfficeActor($conn)) {
             $this->error('Forbidden', 403);
             return false;
         }

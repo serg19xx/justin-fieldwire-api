@@ -3,7 +3,8 @@
 declare(strict_types=1);
 
 /**
- * SMS reminders to clock in / clock out on the worker Timesheet.
+ * SMS reminders to clock in / clock out on the worker Timesheet, auto-close of days without
+ * End day, and the PM attendance digests (9:00 SMS, 19:00 SMS + email).
  *
  * Usage:
  *   php scripts/run-work-day-reminders.php --dry-run
@@ -21,6 +22,7 @@ $dotenv = Dotenv\Dotenv::createImmutable(dirname(__DIR__));
 $dotenv->safeLoad();
 
 use App\Database\Database;
+use App\Services\AttendanceDigestService;
 use App\Services\WorkClockService;
 use App\Services\WorkerDayReminderService;
 use Monolog\Handler\StreamHandler;
@@ -68,11 +70,19 @@ $logger = new Logger('work-day-reminders');
 $logger->pushHandler(new StreamHandler('php://stderr', Logger::WARNING));
 
 try {
+    $conn = Database::getConnection();
     $service = new WorkerDayReminderService($logger, null, $clock);
-    $result = $service->run(Database::getConnection(), $send, $now);
+    $result = $service->run($conn, $send, $now);
 } catch (Throwable $e) {
     fwrite(STDERR, 'ERROR: ' . $e->getMessage() . "\n");
     exit(1);
+}
+
+try {
+    $digests = (new AttendanceDigestService($logger, $clock))->run($conn, $send, $now);
+} catch (Throwable $e) {
+    fwrite(STDERR, 'DIGEST ERROR: ' . $e->getMessage() . "\n");
+    $digests = [];
 }
 
 $failed = 0;
@@ -103,6 +113,27 @@ foreach ($result['actions'] as $action) {
         $action['phone'] ?? '-',
         $action['status'],
         $action['body']
+    );
+}
+
+foreach ($result['auto_closed'] as $closed) {
+    echo sprintf(
+        "  auto-close user=%d date=%s end=%s status=%s\n",
+        $closed['user_id'],
+        $closed['work_date'],
+        $closed['end_time'],
+        $closed['status']
+    );
+}
+
+foreach ($digests as $digest) {
+    echo sprintf(
+        "  digest kind=%s issues=%d status=%s recipients=%s\n    %s\n",
+        $digest['kind'],
+        $digest['issues'],
+        $digest['status'],
+        $digest['recipients'] === [] ? '-' : implode(', ', $digest['recipients']),
+        $digest['sms'] ?? '(no SMS)'
     );
 }
 

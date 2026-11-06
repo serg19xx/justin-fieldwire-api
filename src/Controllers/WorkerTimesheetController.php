@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\AttendanceService;
 use App\Services\PublishedScheduleService;
 use App\Services\WorkClockService;
 use App\Services\WorkerDayWorkService;
@@ -184,6 +185,8 @@ class WorkerTimesheetController
             $conn = Database::getConnection();
             $service = new WorkerDayWorkService($clock);
             $row = $service->tableExists($conn) ? $service->findDayRow($conn, $userId, $workDate) : null;
+            $attendance = new AttendanceService($clock, $this->logger);
+            $shift = $attendance->shiftFor($conn, $userId, $workDate);
 
             Flight::json([
                 'error_code' => 0,
@@ -192,6 +195,11 @@ class WorkerTimesheetController
                 'data' => [
                     'today' => $clock->todayYmd(),
                     'day_work' => $row !== null ? $service->formatRow($row) : null,
+                    'shift' => $shift !== null
+                        ? ['start_time' => $shift['start_time'], 'end_time' => $shift['end_time']]
+                        : null,
+                    'sites' => $attendance->daySites($conn, $userId, $workDate),
+                    'attendance_available' => $attendance->isAvailable($conn),
                 ],
             ]);
         } catch (\Throwable $e) {
@@ -340,6 +348,16 @@ class WorkerTimesheetController
                 $this->error($result['message'], $result['status']);
                 return;
             }
+            try {
+                (new AttendanceService($clock, $this->logger))->applyPunchRules($conn, $userId, $workDate, $phase);
+                $result['row'] = $service->formatRow((array) $service->findDayRow($conn, $userId, $workDate));
+            } catch (\Throwable $e) {
+                $this->logger->error('Attendance rules failed after check-in', [
+                    'user_id' => $userId,
+                    'phase' => $phase,
+                    'error' => $e->getMessage(),
+                ]);
+            }
 
             Flight::json([
                 'error_code' => 0,
@@ -353,6 +371,81 @@ class WorkerTimesheetController
             }
             $this->logger->error('checkInMyWorkDay failed', ['error' => $e->getMessage()]);
             $this->error('Failed to record work day', 500);
+        }
+    }
+
+    /**
+     * POST /api/v1/me/work-day/extend — "Working late" for today.
+     * Body: { "mode": "1h" | "2h" | "open" | "cancel" }
+     */
+    public function extendMyWorkDay(): void
+    {
+        $userId = (int) (Flight::get('current_user')['id'] ?? 0);
+        if ($userId <= 0) {
+            $this->error('Unauthorized', 401);
+            return;
+        }
+        $body = json_decode(Flight::request()->getBody(), true);
+        $mode = is_array($body) && isset($body['mode']) ? (string) $body['mode'] : '';
+
+        try {
+            $clock = new WorkClockService();
+            $result = (new AttendanceService($clock, $this->logger))
+                ->extend(Database::getConnection(), $userId, $clock->todayYmd(), $mode);
+            if (!$result['ok']) {
+                $this->error($result['message'], $result['status']);
+                return;
+            }
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => $mode === 'cancel' ? 'Back to scheduled end' : 'Working late saved',
+                'data' => ['day_work' => $result['row']],
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('extendMyWorkDay failed', ['error' => $e->getMessage()]);
+            $this->error('Failed to save working late', 500);
+        }
+    }
+
+    /**
+     * POST /api/v1/me/work-day/site-arrival — arrival at another site of today's schedule.
+     * Body: { "project_id": number, "lat"?: number, "lng"?: number }
+     */
+    public function arriveAtSite(): void
+    {
+        $userId = (int) (Flight::get('current_user')['id'] ?? 0);
+        if ($userId <= 0) {
+            $this->error('Unauthorized', 401);
+            return;
+        }
+        $body = json_decode(Flight::request()->getBody(), true);
+        $body = is_array($body) ? $body : [];
+        $projectId = isset($body['project_id']) ? (int) $body['project_id'] : 0;
+        if ($projectId <= 0) {
+            $this->error('project_id is required', 400);
+            return;
+        }
+        $lat = isset($body['lat']) && is_numeric($body['lat']) ? (float) $body['lat'] : null;
+        $lng = isset($body['lng']) && is_numeric($body['lng']) ? (float) $body['lng'] : null;
+
+        try {
+            $clock = new WorkClockService();
+            $result = (new AttendanceService($clock, $this->logger))
+                ->recordSiteArrival(Database::getConnection(), $userId, $clock->todayYmd(), $projectId, $lat, $lng, 'app');
+            if (!$result['ok']) {
+                $this->error($result['message'], $result['status']);
+                return;
+            }
+            Flight::json([
+                'error_code' => 0,
+                'status' => 'success',
+                'message' => 'Arrival recorded',
+                'data' => ['sites' => $result['sites']],
+            ]);
+        } catch (\Throwable $e) {
+            $this->logger->error('arriveAtSite failed', ['error' => $e->getMessage()]);
+            $this->error('Failed to record arrival', 500);
         }
     }
 

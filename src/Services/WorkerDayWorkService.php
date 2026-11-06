@@ -24,9 +24,18 @@ class WorkerDayWorkService
     private const PAYROLL_COLUMNS = 'adjusted_start_time, adjusted_end_time, payroll_note,
         payroll_updated_by, payroll_updated_at, locked_at, locked_by';
 
+    private const ATTENDANCE_COLUMNS = 'start_source, end_source, attendance_flags,
+        scheduled_start_time, scheduled_end_time, extended_until, extended_open, auto_closed_at';
+
+    /** Who set adjusted_start_time / adjusted_end_time: attendance rules or the PM. */
+    public const SOURCE_AUTO = 'auto';
+    public const SOURCE_PM = 'pm';
+
     private static ?bool $photoColumns = null;
 
     private static ?bool $payrollColumns = null;
+
+    private static ?bool $attendanceColumns = null;
 
     private WorkClockService $clock;
 
@@ -72,11 +81,47 @@ class WorkerDayWorkService
         return self::$payrollColumns;
     }
 
-    private function selectColumns(Connection $conn): string
+    /** True once scripts/run-add-attendance-automation.php is applied. */
+    public function attendanceColumnsPresent(Connection $conn): bool
+    {
+        if (self::$attendanceColumns === null) {
+            try {
+                $cols = $conn->createSchemaManager()->listTableColumns(self::TABLE);
+                self::$attendanceColumns = isset($cols['attendance_flags'], $cols['end_source'], $cols['extended_open'])
+                    && $this->payrollColumnsPresent($conn);
+            } catch (\Throwable) {
+                self::$attendanceColumns = false;
+            }
+        }
+
+        return self::$attendanceColumns;
+    }
+
+    public function selectColumns(Connection $conn): string
     {
         return self::BASE_COLUMNS
             . ($this->photoColumnsPresent($conn) ? ', work_start_photo, work_end_photo' : '')
-            . ($this->payrollColumnsPresent($conn) ? ', ' . self::PAYROLL_COLUMNS : '');
+            . ($this->payrollColumnsPresent($conn) ? ', ' . self::PAYROLL_COLUMNS : '')
+            . ($this->attendanceColumnsPresent($conn) ? ', ' . self::ATTENDANCE_COLUMNS : '');
+    }
+
+    /** @return list<string> */
+    public static function parseFlags(mixed $raw): array
+    {
+        $s = $raw === null ? '' : trim((string) $raw);
+        if ($s === '') {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(array_map('trim', explode(',', $s)))));
+    }
+
+    /** @param list<string> $flags */
+    public static function formatFlags(array $flags): ?string
+    {
+        $flags = array_values(array_unique(array_filter($flags)));
+
+        return $flags === [] ? null : implode(',', $flags);
     }
 
     /** Locked by the PM: punches, payroll edits and the day's schedule rows are frozen. */
@@ -117,6 +162,9 @@ class WorkerDayWorkService
 
     /**
      * PM correction of a worker day. Null values clear the field (punches stay as recorded).
+     * A time the PM changes is marked as PM-owned, so attendance rules never overwrite it.
+     * $earlyLeave null keeps the "left early" flag as it is; $reviewed accepts the day as it is
+     * (both times become PM-owned and open attendance issues are cleared).
      *
      * @return array{ok: true, row: array<string, mixed>}|array{ok: false, status: int, message: string}
      */
@@ -128,6 +176,8 @@ class WorkerDayWorkService
         ?string $adjustedEnd,
         ?string $note,
         int $actorId,
+        ?bool $earlyLeave = null,
+        bool $reviewed = false,
     ): array {
         if (!$this->payrollColumnsPresent($conn)) {
             return ['ok' => false, 'status' => 503, 'message' => 'Payroll review is not available until database migration is applied'];
@@ -146,6 +196,28 @@ class WorkerDayWorkService
             'payroll_updated_by' => $actorId,
             'payroll_updated_at' => $this->clock->nowSql(),
         ];
+        if ($this->attendanceColumnsPresent($conn)) {
+            if ($this->formatTime($existing['adjusted_start_time'] ?? null) !== $this->formatTime($adjustedStart)) {
+                $values['start_source'] = self::SOURCE_PM;
+            }
+            if ($this->formatTime($existing['adjusted_end_time'] ?? null) !== $this->formatTime($adjustedEnd)) {
+                $values['end_source'] = self::SOURCE_PM;
+            }
+            $flags = self::parseFlags($existing['attendance_flags'] ?? null);
+            if ($earlyLeave !== null) {
+                $flags = array_values(array_diff($flags, [AttendanceService::FLAG_EARLY_LEAVE]));
+                if ($earlyLeave) {
+                    $flags[] = AttendanceService::FLAG_EARLY_LEAVE;
+                    $values['end_source'] = self::SOURCE_PM;
+                }
+            }
+            if ($reviewed) {
+                $values['start_source'] = self::SOURCE_PM;
+                $values['end_source'] = self::SOURCE_PM;
+                $flags[] = AttendanceService::FLAG_REVIEWED;
+            }
+            $values['attendance_flags'] = self::formatFlags($flags);
+        }
         if ($existing === null) {
             $conn->insert(self::TABLE, ['user_id' => $userId, 'work_date' => $workDateYmd] + $values);
         } else {
@@ -205,6 +277,22 @@ class WorkerDayWorkService
              WHERE user_id = ? AND work_date >= ? AND work_date <= ?
              ORDER BY work_date',
             [$userId, $fromYmd, $toYmd]
+        )->fetchAllAssociative();
+    }
+
+    /**
+     * Day rows of every worker in a date range.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function findAllInRange(Connection $conn, string $fromYmd, string $toYmd): array
+    {
+        return $conn->executeQuery(
+            'SELECT ' . $this->selectColumns($conn) . '
+             FROM fw_worker_day_work
+             WHERE work_date >= ? AND work_date <= ?
+             ORDER BY work_date, user_id',
+            [$fromYmd, $toYmd]
         )->fetchAllAssociative();
     }
 
@@ -374,7 +462,20 @@ class WorkerDayWorkService
             'has_start_photo' => !empty($r['work_start_photo']),
             'has_end_photo' => !empty($r['work_end_photo']),
             'locked' => !empty($r['locked_at']),
+            'start_source' => $this->sourceOf($r['start_source'] ?? null),
+            'end_source' => $this->sourceOf($r['end_source'] ?? null),
+            'attendance_flags' => self::parseFlags($r['attendance_flags'] ?? null),
+            'scheduled_start_time' => $this->formatTime($r['scheduled_start_time'] ?? null),
+            'scheduled_end_time' => $this->formatTime($r['scheduled_end_time'] ?? null),
+            'extended_until' => $this->formatTime($r['extended_until'] ?? null),
+            'extended_open' => !empty($r['extended_open']),
+            'auto_closed_at' => $this->clock->toApiIso($r['auto_closed_at'] ?? null),
         ];
+    }
+
+    private function sourceOf(mixed $raw): ?string
+    {
+        return $raw === self::SOURCE_AUTO || $raw === self::SOURCE_PM ? $raw : null;
     }
 
     /**
