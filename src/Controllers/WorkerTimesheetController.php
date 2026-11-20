@@ -322,12 +322,27 @@ class WorkerTimesheetController
 
         $photo = $_FILES['photo'] ?? null;
         if (!is_array($photo) || (int) ($photo['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            $this->logger->warning('checkInMyWorkDay missing photo', [
+                'user_id' => $userId,
+                'work_date' => $workDate,
+                'phase' => $phase,
+                'content_length' => $_SERVER['CONTENT_LENGTH'] ?? null,
+                'post_keys' => array_keys($_POST),
+                'files_keys' => array_keys($_FILES),
+            ]);
             $this->error('A photo taken on site is required to ' . ($phase === 'start' ? 'start' : 'end') . ' the day', 422);
             return;
         }
 
         $storedPath = null;
         try {
+            $this->logger->info('checkInMyWorkDay started', [
+                'user_id' => $userId,
+                'work_date' => $workDate,
+                'phase' => $phase,
+                'photo_size' => (int) ($photo['size'] ?? 0),
+                'photo_error' => (int) ($photo['error'] ?? -1),
+            ]);
             $conn = Database::getConnection();
             $service = new WorkerDayWorkService($clock);
             if (!$service->tableExists($conn) || !$service->photoColumnsPresent($conn)) {
