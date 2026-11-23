@@ -15,7 +15,7 @@ HOSTS=(
 )
 RENEW_DAYS=30
 ALERT_DAYS=21
-ALERT_TO="${SSL_ALERT_TO:-justin.kearney@carespace.ca,serg.kostyuk@gmail.com}"
+ALERT_TO="${SSL_ALERT_TO:-justin.kearney@carespace.ca}"
 LOG_PREFIX="[ssl-watchdog $(date -u +%Y-%m-%dT%H:%M:%SZ)]"
 
 days_left_for_host() {
