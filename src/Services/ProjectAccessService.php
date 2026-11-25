@@ -121,9 +121,10 @@ final class ProjectAccessService
     }
 
     /**
+     * Client portal user (doctor / pharmacist) linked to this project.
      * Same matching as the client portals: client record id per table, or the client email.
      */
-    private function isLinkedClient(int $userId, int $projectId): bool
+    public function isLinkedClient(int $userId, int $projectId): bool
     {
         $user = $this->conn->fetchAssociative(
             'SELECT u.email, u.physician_id, u.pharmacist_id, v.role_category

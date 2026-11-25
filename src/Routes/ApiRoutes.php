@@ -1384,11 +1384,17 @@ class ApiRoutes
         $taskFieldPhotoController = new TaskFieldPhotoController($this->logger);
         Flight::route('GET /api/v1/projects/@project_id/field-photos', function($project_id) use ($authMiddleware, $taskFieldPhotoController) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canView((int) $project_id)) {
+                    return;
+                }
                 $taskFieldPhotoController->projectIndex((int) $project_id);
             }
         });
         Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/field-photos', function($project_id, $task_id) use ($authMiddleware, $taskFieldPhotoController) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canView((int) $project_id)) {
+                    return;
+                }
                 $taskFieldPhotoController->index((int) $project_id, (int) $task_id);
             }
         });
@@ -1399,6 +1405,9 @@ class ApiRoutes
         });
         Flight::route('GET /api/v1/projects/@project_id/tasks/@task_id/field-photos/@photo_id/download', function($project_id, $task_id, $photo_id) use ($authMiddleware, $taskFieldPhotoController) {
             if ($authMiddleware->handle()) {
+                if (!\App\Support\ProjectAccessGuard::canView((int) $project_id)) {
+                    return;
+                }
                 $taskFieldPhotoController->download((int) $project_id, (int) $task_id, (int) $photo_id);
             }
         });

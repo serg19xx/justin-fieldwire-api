@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Database\Database;
+use App\Services\ProjectAccessService;
 use App\Services\TaskAuthorizationService;
 use Doctrine\DBAL\Connection;
 use Flight;
@@ -91,7 +92,7 @@ class TaskFieldPhotoController
 
     /**
      * All task photos of a project (field before/after and PM reference pictures), newest first.
-     * PM/admin and the project foreman see every task; other users see tasks they are assigned to.
+     * PM/admin, project foreman, and linked clients see every task; other users see tasks they are assigned to.
      */
     public function projectIndex(int $projectId): void
     {
@@ -104,8 +105,10 @@ class TaskFieldPhotoController
 
         $actorId = (int) Flight::get('current_user')['id'];
         $auth = new TaskAuthorizationService();
+        $access = new ProjectAccessService($conn);
         $seesAllTasks = $auth->isProjectTaskManager($conn, $actorId, $projectId)
-            || $auth->canActAsProjectForemanOnTask($conn, $projectId, $actorId);
+            || $auth->canActAsProjectForemanOnTask($conn, $projectId, $actorId)
+            || $access->isLinkedClient($actorId, $projectId);
 
         $sql = 'SELECT ph.id, ph.project_id, ph.task_id, ph.work_date, ph.slot, ph.file_name, ph.original_name,
                        ph.mime_type, ph.file_size, ph.uploaded_by, ph.uploaded_at,
@@ -453,6 +456,10 @@ class TaskFieldPhotoController
             return true;
         }
         if ($auth->canActAsProjectForemanOnTask($conn, $projectId, $userId)) {
+            return true;
+        }
+        // Doctor / pharmacist linked to the project can open gallery thumbnails and downloads.
+        if ((new ProjectAccessService($conn))->isLinkedClient($userId, $projectId)) {
             return true;
         }
 
