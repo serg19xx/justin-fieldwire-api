@@ -1450,6 +1450,11 @@ class ApiRoutes
                 (new \App\Controllers\ContractorPortalController($this->logger))->downloadFieldPhoto((int) $photo_id);
             }
         });
+        Flight::route('GET /api/v1/contractor-portal/plans/@file_id/download', function ($file_id) use ($authMiddleware) {
+            if ($authMiddleware->handle()) {
+                (new \App\Controllers\ContractorPortalController($this->logger))->downloadPlanFile((int) $file_id);
+            }
+        });
 
         // Outreach invitation campaigns (staff JWT + n8n secret)
         Flight::route('GET /api/v1/outreach/campaigns', function () use ($authMiddleware) {
