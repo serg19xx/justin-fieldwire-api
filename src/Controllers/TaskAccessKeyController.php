@@ -13,7 +13,8 @@ use Flight;
 use Monolog\Logger;
 
 /**
- * Temporary contractor access keys for a single task (shareable, non-personalized).
+ * Temporary contractor access keys — one active key per contractor per project.
+ * Issued from any assigned task UI; redeem unlocks all of that contractor's tasks + plans/calendar.
  */
 class TaskAccessKeyController
 {
@@ -47,6 +48,24 @@ class TaskAccessKeyController
     }
 
     /**
+     * Active key for this contractor on the project (shared across their tasks).
+     *
+     * @return array<string, mixed>|false
+     */
+    private function findActiveKeyForContractor(Connection $connection, int $projectId, int $contractorId)
+    {
+        return $connection->executeQuery(
+            'SELECT id, task_id, project_id, contractor_id, key_code, expires_at, revoked_at, created_by, last_used_at, created_at
+             FROM fw_task_access_keys
+             WHERE project_id = ? AND contractor_id = ? AND revoked_at IS NULL
+               AND expires_at > NOW()
+             ORDER BY id DESC
+             LIMIT 1',
+            [$projectId, $contractorId]
+        )->fetchAssociative();
+    }
+
+    /**
      * GET /api/v1/projects/{projectId}/tasks/{taskId}/access-key
      */
     public function getForTask(int $projectId, int $taskId): void
@@ -60,20 +79,25 @@ class TaskAccessKeyController
 
         try {
             $connection = $this->database->getConnection();
-            if (!$this->taskBelongsToProject($connection, $projectId, $taskId)) {
+            $task = $connection->executeQuery(
+                'SELECT id, project_id, executor_type, contractor_id
+                 FROM fw_prj_tasks WHERE id = ? AND project_id = ? LIMIT 1',
+                [$taskId, $projectId]
+            )->fetchAssociative();
+            if (!$task) {
                 Flight::json(['error_code' => 404, 'status' => 'error', 'message' => 'Task not found', 'data' => null], 404);
 
                 return;
             }
 
-            $row = $connection->executeQuery(
-                'SELECT id, task_id, project_id, contractor_id, key_code, expires_at, revoked_at, created_by, last_used_at, created_at
-                 FROM fw_task_access_keys
-                 WHERE task_id = ? AND project_id = ? AND revoked_at IS NULL
-                 ORDER BY id DESC
-                 LIMIT 1',
-                [$taskId, $projectId]
-            )->fetchAssociative();
+            $contractorId = isset($task['contractor_id']) && (int) $task['contractor_id'] > 0
+                ? (int) $task['contractor_id']
+                : null;
+            $row = null;
+            if ($contractorId !== null) {
+                $found = $this->findActiveKeyForContractor($connection, $projectId, $contractorId);
+                $row = $found ?: null;
+            }
 
             Flight::json([
                 'error_code' => 0,
@@ -92,7 +116,7 @@ class TaskAccessKeyController
     /**
      * POST /api/v1/projects/{projectId}/tasks/{taskId}/access-key
      * Body: { expires_days?: number } — default from task end_planned or 7 days
-     * Revokes any previous active key for the task (one shared key).
+     * One active key per contractor on the project (shared across their tasks).
      */
     public function createOrRotate(int $projectId, int $taskId): void
     {
@@ -144,10 +168,11 @@ class TaskAccessKeyController
 
             $connection->beginTransaction();
             try {
+                // Revoke every active key for this contractor on the project (not only this task).
                 $connection->executeStatement(
                     'UPDATE fw_task_access_keys SET revoked_at = NOW()
-                     WHERE task_id = ? AND project_id = ? AND revoked_at IS NULL',
-                    [$taskId, $projectId]
+                     WHERE project_id = ? AND contractor_id = ? AND revoked_at IS NULL',
+                    [$projectId, $contractorId]
                 );
                 $connection->executeStatement(
                     'INSERT INTO fw_task_access_keys
@@ -223,15 +248,7 @@ class TaskAccessKeyController
                 return;
             }
 
-            $keyRow = $connection->executeQuery(
-                'SELECT id, key_code, expires_at, revoked_at
-                 FROM fw_task_access_keys
-                 WHERE task_id = ? AND project_id = ? AND revoked_at IS NULL
-                 ORDER BY id DESC
-                 LIMIT 1',
-                [$taskId, $projectId]
-            )->fetchAssociative();
-
+            $keyRow = $this->findActiveKeyForContractor($connection, $projectId, $contractorId);
             if (!$keyRow || empty($keyRow['key_code'])) {
                 Flight::json([
                     'error_code' => 400,
@@ -372,11 +389,27 @@ class TaskAccessKeyController
 
         try {
             $connection = $this->database->getConnection();
-            $affected = $connection->executeStatement(
-                'UPDATE fw_task_access_keys SET revoked_at = NOW()
-                 WHERE task_id = ? AND project_id = ? AND revoked_at IS NULL',
+            $task = $connection->executeQuery(
+                'SELECT contractor_id FROM fw_prj_tasks WHERE id = ? AND project_id = ? LIMIT 1',
                 [$taskId, $projectId]
-            );
+            )->fetchAssociative();
+            if (!$task) {
+                Flight::json(['error_code' => 404, 'status' => 'error', 'message' => 'Task not found', 'data' => null], 404);
+
+                return;
+            }
+
+            $contractorId = isset($task['contractor_id']) && (int) $task['contractor_id'] > 0
+                ? (int) $task['contractor_id']
+                : null;
+            $affected = 0;
+            if ($contractorId !== null) {
+                $affected = $connection->executeStatement(
+                    'UPDATE fw_task_access_keys SET revoked_at = NOW()
+                     WHERE project_id = ? AND contractor_id = ? AND revoked_at IS NULL',
+                    [$projectId, $contractorId]
+                );
+            }
 
             Flight::json([
                 'error_code' => 0,
